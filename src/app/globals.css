@@ -42,6 +42,34 @@
   --dur-med: 0.3s;
 }
 
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Colors */
+  --bg-base: #f6f8fb;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f1f4f9;
+  --bg-surface-glass: rgba(255, 255, 255, 0.92);
+
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-medium: rgba(15, 23, 42, 0.14);
+  --border-active: rgba(101, 163, 13, 0.6);
+
+  --accent-lime: #65a30d;
+  --accent-lime-hover: #4d7c0f;
+  --accent-lime-dim: rgba(101, 163, 13, 0.14);
+  --accent-lime-glow: rgba(101, 163, 13, 0.25);
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  --status-success: #16a34a;
+  --status-warning: #d97706;
+  --status-error: #dc2626;
+}
+
 /* ==========================================================================
    BASE RESETS & DEFAULTS
    ========================================================================== */
@@ -3084,44 +3112,55 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 44px;
+  padding: 0 !important;
+  border-radius: 50% !important;
   background: var(--bg-surface-elevated);
-  border: 1px solid var(--border-medium);
+  border: 1.5px solid var(--border-medium);
   color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 13px;
+  font-weight: 800;
   letter-spacing: 0.02em;
   overflow: hidden;
   white-space: nowrap;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* Tugmalar silliq sekin yo'qolishi va tez paydo bo'lishi (asymmetric transition) */
 .btn-counter-inc.btn-visible {
   opacity: 1;
-  max-width: 56px;
+  max-width: 44px;
+  width: 44px;
+  height: 44px;
   transform: scale(1);
   pointer-events: auto;
-  transition: opacity 0.18s ease-out, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.22s cubic-bezier(0.16, 1, 0.3, 1), padding 0.22s ease, margin 0.22s ease, background 0.15s ease, border-color 0.15s ease;
+  transition: opacity 0.18s ease-out, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.22s cubic-bezier(0.16, 1, 0.3, 1), margin 0.22s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .btn-counter-inc.btn-hidden {
   opacity: 0;
   max-width: 0;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
   border-width: 0 !important;
   margin-right: -6px;
   pointer-events: none;
   transform: scale(0.82);
-  transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1), transform 0.45s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s ease, margin 0.4s ease, border-width 0.4s ease;
+  transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1), transform 0.45s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin 0.4s ease, border-width 0.4s ease;
 }
 
 /* 10-soniya harakatsizlik qoidasi: Avval tugma shunchaki yashirinadi (space ushlab turadi), 10s dan so'ng joyini bo'shatadi */
 .btn-counter-inc.btn-hidden-hold-space {
   opacity: 0 !important;
   pointer-events: none !important;
-  max-width: 56px;
+  max-width: 44px;
+  width: 44px;
+  height: 44px;
   transform: scale(0.92);
   transition: opacity 0.4s ease, transform 0.4s ease;
 }
@@ -3130,19 +3169,20 @@ select:focus-visible {
   opacity: 0 !important;
   pointer-events: none !important;
   max-width: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
   border-width: 0 !important;
   margin-right: -6px !important;
-  transform: scale(0.75);
-  transition: max-width 0.45s cubic-bezier(0.16, 1, 0.3, 1), margin 0.45s ease, padding 0.45s ease, border-width 0.45s ease, opacity 0.35s ease;
+  transform: scale(0.7);
+  transition: max-width 0.45s cubic-bezier(0.16, 1, 0.3, 1), margin 0.45s ease, border-width 0.45s ease, opacity 0.35s ease;
 }
 
 .btn-counter-inc:hover {
   border-color: var(--accent-lime);
   color: var(--accent-lime);
   background: var(--accent-lime-dim);
-  transform: scale(1.05);
+  transform: scale(1.08);
 }
 
 .btn-counter-inc.primary {
@@ -4504,4 +4544,318 @@ select:focus-visible {
   .duration-presets-grid {
     grid-template-columns: repeat(3, 1fr);
   }
+}
+
+/* ==========================================================================
+   WEEKDAYS SELECTOR (HORIZONTAL SCROLL WITH WALL SHADOW MASKS & LARGE SOFT CARDS)
+   ========================================================================== */
+.weekdays-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.weekdays-presets-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekday-preset-chip {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.weekday-preset-chip:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.weekday-preset-chip.active {
+  background: var(--accent-lime-dim);
+  border-color: var(--accent-lime);
+  color: var(--accent-lime);
+}
+
+/* Horizontal scroll wrapper with left/right smooth wall shadow overlays */
+.weekdays-scroll-wrapper {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.weekdays-scroll-wrapper::before,
+.weekdays-scroll-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.2s ease;
+}
+
+.weekdays-scroll-wrapper::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-surface) 0%, transparent 100%);
+}
+
+.weekdays-scroll-wrapper::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-surface) 0%, transparent 100%);
+}
+
+.weekdays-scroll-container {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 8px 12px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.weekdays-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Large, soft, comfortable cards for each day */
+.weekday-card {
+  flex: 0 0 auto;
+  min-width: 82px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--bg-surface-elevated);
+  border: 1.5px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.weekday-card:hover {
+  border-color: var(--border-active);
+  transform: translateY(-2px);
+  background: rgba(180, 240, 76, 0.05);
+}
+
+.weekday-card.active {
+  background: var(--accent-lime-dim);
+  border-color: var(--accent-lime);
+  box-shadow: 0 4px 16px var(--accent-lime-glow);
+  transform: translateY(-2px);
+}
+
+.weekday-card-short {
+  font-size: 17px;
+  font-weight: 850;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.weekday-card.active .weekday-card-short {
+  color: var(--accent-lime);
+}
+
+.weekday-card-full {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.weekday-card.active .weekday-card-full {
+  color: var(--text-secondary);
+}
+
+.weekday-card-status {
+  font-size: 9.5px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.weekday-card.active .weekday-card-status {
+  background: var(--accent-lime);
+  color: var(--text-inverse);
+}
+
+/* ==========================================================================
+   SETTINGS: COUNTER STEPS MANAGER (+10, +5, +1, +15...)
+   ========================================================================== */
+.counter-steps-manage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.step-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.step-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: var(--accent-lime-dim);
+  border: 1.5px solid var(--border-active);
+  color: var(--accent-lime);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all var(--dur-fast);
+}
+
+.step-pill-val {
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.btn-delete-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.btn-delete-step:hover {
+  background: #ef4444;
+  color: #ffffff;
+  transform: scale(1.15);
+}
+
+.step-add-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.step-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.step-input-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border-medium);
+  border-radius: 12px;
+  padding: 0 12px;
+  width: 140px;
+  transition: border-color var(--dur-fast);
+}
+
+.step-input-wrap:focus-within {
+  border-color: var(--accent-lime);
+}
+
+.step-input-prefix {
+  font-size: 16px;
+  font-weight: 850;
+  color: var(--accent-lime);
+  margin-right: 4px;
+}
+
+.step-number-input {
+  width: 100%;
+  height: 42px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  font-weight: 750;
+  color: var(--text-primary);
+}
+
+.btn-add-step {
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 12px;
+  background: var(--accent-lime);
+  color: var(--text-inverse);
+  font-weight: 750;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.btn-add-step:hover {
+  background: var(--accent-lime-hover);
+  transform: translateY(-1px);
+}
+
+.btn-reset-steps {
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.btn-reset-steps:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.step-validation-error {
+  font-size: 12px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  animation: fadeIn 0.2s ease;
+  line-height: 1.4;
+}
+
+.step-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }

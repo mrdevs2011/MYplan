@@ -91,6 +91,16 @@ const DURATION_PRESETS: { id: DurationPreset; label: string; days: number }[] = 
   { id: "custom", label: "Sozlash", days: 0 },
 ];
 
+const WEEKDAYS = [
+  { id: 1, short: "Du", full: "Dushanba" },
+  { id: 2, short: "Se", full: "Seshanba" },
+  { id: 3, short: "Chor", full: "Chorshanba" },
+  { id: 4, short: "Pay", full: "Payshanba" },
+  { id: 5, short: "Jum", full: "Juma" },
+  { id: 6, short: "Shan", full: "Shanba" },
+  { id: 7, short: "Yak", full: "Yakshanba" },
+];
+
 interface Activity {
   id: string;
   title: string;
@@ -100,6 +110,7 @@ interface Activity {
     duration_label?: string;
     duration_days?: number;
     duration_preset?: string;
+    weekdays?: number[];
   } | null;
   measurement_type: "check" | "count";
   target: number | null;
@@ -112,7 +123,8 @@ interface Activity {
 interface Occurrence {
   id: string;
   activity_id: string;
-  due_date: string;
+  period_start: string;
+  period_end: string;
   status: "pending" | "completed";
 }
 
@@ -120,13 +132,6 @@ const today = () => {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
-
-const dateLabel = new Intl.DateTimeFormat("uz-UZ", {
-  weekday: "long",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-});
 
 export default function Home() {
   const router = useRouter();
@@ -189,6 +194,15 @@ export default function Home() {
   const [customDurationValue, setCustomDurationValue] = useState("");
   const [customDurationUnit, setCustomDurationUnit] = useState<CustomDurationUnit>("kun");
   const [debouncedDurationError, setDebouncedDurationError] = useState("");
+
+  // Hafta kunlari sozlamasi (New modal)
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
+  const [todayDayOfWeek, setTodayDayOfWeek] = useState<number>(1);
+
+  // Sanoqli hisoblagich bosqichlari (+10, +5, +1 va sozlamalardagi custom bosqichlar)
+  const [counterSteps, setCounterSteps] = useState<number[]>([10, 5, 1]);
+  const [newStepInput, setNewStepInput] = useState("");
+  const [newStepError, setNewStepError] = useState("");
 
   // Debounce task count target in modal (2 seconds)
   useEffect(() => {
@@ -288,32 +302,42 @@ export default function Home() {
         setAccountUsername(profile.username || "");
       }
 
-      // Load today's occurrences
+      // Load today's occurrences using correct PostgreSQL schema
       const todayStr = today();
+      const todayDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
+
       const { data: occRows, error: occError } = await supabase
         .from("occurrences")
-        .select("id,activity_id,due_date,status")
+        .select("id,activity_id,period_start,period_end,status")
         .eq("user_id", id)
-        .eq("due_date", todayStr);
+        .eq("period_start", todayStr);
 
       if (occError) throw occError;
 
       const existingOccs = (occRows || []) as Occurrence[];
-      const missingActivities = acts.filter(
-        (a) => a.is_active && !existingOccs.some((o) => o.activity_id === a.id)
-      );
+
+      // Only generate occurrence for activities scheduled on today's weekday
+      const missingActivities = acts.filter((a) => {
+        if (!a.is_active) return false;
+        const weekdays = a.schedule_rule?.weekdays;
+        if (weekdays && Array.isArray(weekdays) && weekdays.length > 0 && !weekdays.includes(todayDay)) {
+          return false;
+        }
+        return !existingOccs.some((o) => o.activity_id === a.id);
+      });
 
       if (missingActivities.length > 0) {
         const inserts = missingActivities.map((a) => ({
           user_id: id,
           activity_id: a.id,
-          due_date: todayStr,
+          period_start: todayStr,
+          period_end: todayStr,
           status: "pending" as const,
         }));
         const { data: newOccs, error: insertError } = await supabase
           .from("occurrences")
           .insert(inserts)
-          .select("id,activity_id,due_date,status");
+          .select("id,activity_id,period_start,period_end,status");
         if (!insertError && newOccs) {
           setOccurrences([...existingOccs, ...(newOccs as Occurrence[])]);
         } else {
@@ -454,14 +478,42 @@ export default function Home() {
       const savedTheme = (localStorage.getItem("myplan_theme") as "dark" | "light" | "system") || "dark";
       setTimeout(() => {
         setTheme(savedTheme);
-        document.documentElement.setAttribute("data-theme", savedTheme);
+        if (savedTheme === "system") {
+          const isLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+          document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
+        } else {
+          document.documentElement.setAttribute("data-theme", savedTheme);
+        }
       }, 0);
 
       const savedLang = (localStorage.getItem("myplan_lang") as "uz" | "en" | "ru") || "uz";
       setTimeout(() => {
         setLanguage(savedLang);
-        setFormattedToday(dateLabel.format(new Date()));
+        const locale = savedLang === "en" ? "en-US" : savedLang === "ru" ? "ru-RU" : "uz-UZ";
+        const dateFmt = new Intl.DateTimeFormat(locale, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        });
+        setFormattedToday(dateFmt.format(new Date()));
+        const currentD = new Date().getDay();
+        setTodayDayOfWeek(currentD === 0 ? 7 : currentD);
       }, 0);
+
+      const savedSteps = localStorage.getItem("myplan_counter_steps");
+      if (savedSteps) {
+        try {
+          const parsed = JSON.parse(savedSteps);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const filteredSteps = parsed
+              .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
+              .sort((a, b) => b - a);
+            setTimeout(() => setCounterSteps(filteredSteps), 0);
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       // Notification History (3 days strictly, natural tone)
       const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -803,6 +855,59 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
+  // Hafta kunlarini tanlash/o'chirish
+  const toggleWeekday = (dayId: number) => {
+    setSelectedWeekdays((prev) => {
+      if (prev.includes(dayId)) {
+        if (prev.length === 1) return prev; // kamida 1 kun bo'lishi kerak
+        return prev.filter((d) => d !== dayId);
+      } else {
+        return [...prev, dayId].sort((a, b) => a - b);
+      }
+    });
+  };
+
+  // Sanoqli qadamlar (+10, +5, +1, +15...) boshqaruvi
+  const handleAddCounterStep = () => {
+    setNewStepError("");
+    const trimmed = newStepInput.trim();
+    if (!trimmed) {
+      setNewStepError("Iltimos, qadam miqdorini kiriting.");
+      return;
+    }
+    const val = parseInt(trimmed, 10);
+    if (isNaN(val) || val < 1 || val > 99) {
+      setNewStepError("Qadam miqdori 1 dan 99 gacha bo‘lishi lozim.");
+      return;
+    }
+    if (counterSteps.includes(val)) {
+      setNewStepError(`Ushbu qadam (+${val}) allaqachon mavjud! Boshqa qiymat kiriting.`);
+      return;
+    }
+    const updated = [...counterSteps, val].sort((a, b) => b - a);
+    setCounterSteps(updated);
+    localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
+    setNewStepInput("");
+  };
+
+  const handleRemoveCounterStep = (stepToRemove: number) => {
+    if (counterSteps.length <= 1) {
+      setNewStepError("Kamida bitta hisoblash qadami qolishi shart.");
+      return;
+    }
+    const updated = counterSteps.filter((s) => s !== stepToRemove);
+    setCounterSteps(updated);
+    localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
+    setNewStepError("");
+  };
+
+  const handleResetCounterSteps = () => {
+    const defaults = [10, 5, 1];
+    setCounterSteps(defaults);
+    localStorage.setItem("myplan_counter_steps", JSON.stringify(defaults));
+    setNewStepError("");
+  };
+
   // Create new activity
   async function createActivity(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -861,6 +966,7 @@ export default function Home() {
           duration_label: durationLabel,
           duration_days: durationDays,
           duration_preset: durationPreset,
+          weekdays: selectedWeekdays,
         },
         measurement_type: createTaskKind,
         target: targetValue,
@@ -874,6 +980,7 @@ export default function Home() {
       setCountTarget("");
       setDurationPreset("1_month");
       setCustomDurationValue("");
+      setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
       setDebouncedDurationError("");
       setCreateTaskKind("check");
       setShowCreateModal(false);
@@ -889,17 +996,38 @@ export default function Home() {
   const handleThemeChange = (newTheme: "dark" | "light" | "system") => {
     setTheme(newTheme);
     localStorage.setItem("myplan_theme", newTheme);
-    document.documentElement.setAttribute("data-theme", newTheme);
+    if (newTheme === "system") {
+      const isLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+      document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
+    } else {
+      document.documentElement.setAttribute("data-theme", newTheme);
+    }
   };
 
   // Language change
   const handleLanguageChange = (newLang: "uz" | "en" | "ru") => {
     setLanguage(newLang);
     localStorage.setItem("myplan_lang", newLang);
+    const locale = newLang === "en" ? "en-US" : newLang === "ru" ? "ru-RU" : "uz-UZ";
+    const dateFmt = new Intl.DateTimeFormat(locale, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    setFormattedToday(dateFmt.format(new Date()));
   };
 
-  // Calculations for Today's Execution
-  const activeActivities = useMemo(() => activities.filter((a) => a.is_active), [activities]);
+  // Calculations for Today's Execution (only tasks scheduled for today's weekday)
+  const activeActivities = useMemo(() => {
+    return activities.filter((a) => {
+      if (!a.is_active) return false;
+      const w = a.schedule_rule?.weekdays;
+      if (w && Array.isArray(w) && w.length > 0) {
+        return w.includes(todayDayOfWeek);
+      }
+      return true;
+    });
+  }, [activities, todayDayOfWeek]);
   const completedCount = useMemo(
     () => occurrences.filter((item) => item.status === "completed").length,
     [occurrences]
@@ -939,6 +1067,7 @@ export default function Home() {
   const isSaveDisabled =
     busy ||
     !newTitle.trim() ||
+    selectedWeekdays.length === 0 ||
     isTargetInvalid ||
     Boolean(debouncedCountError) ||
     isCustomDurationInvalid ||
@@ -1217,6 +1346,76 @@ export default function Home() {
                       {customDurationUnit === "yil" && "Yil cheklovi: ko‘pi bilan 3 yil."}
                     </p>
                   </div>
+                )}
+              </div>
+
+              {/* Hafta kunlari (Horizontal Scroll with soft large cards and wall shadow masks) */}
+              <div className="form-group weekdays-picker-group">
+                <div className="field-label-row">
+                  <span>Hafta kunlari *</span>
+                  <span className="field-sub-hint">Qaysi kunlarda bajarilishi</span>
+                </div>
+
+                <div className="weekdays-presets-row">
+                  <button
+                    type="button"
+                    className={`weekday-preset-chip ${selectedWeekdays.length === 7 ? "active" : ""}`}
+                    onClick={() => setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7])}
+                  >
+                    Har kuni (7/7)
+                  </button>
+                  <button
+                    type="button"
+                    className={`weekday-preset-chip ${
+                      selectedWeekdays.length === 5 && selectedWeekdays.every((d) => d <= 5) ? "active" : ""
+                    }`}
+                    onClick={() => setSelectedWeekdays([1, 2, 3, 4, 5])}
+                  >
+                    Ish kunlari (Du–Jum)
+                  </button>
+                  <button
+                    type="button"
+                    className={`weekday-preset-chip ${
+                      selectedWeekdays.length === 2 &&
+                      selectedWeekdays.includes(6) &&
+                      selectedWeekdays.includes(7)
+                        ? "active"
+                        : ""
+                    }`}
+                    onClick={() => setSelectedWeekdays([6, 7])}
+                  >
+                    Dam olish (Shan–Yak)
+                  </button>
+                </div>
+
+                <div className="weekdays-scroll-wrapper">
+                  <div className="weekdays-scroll-container" role="group" aria-label="Hafta kunlarini tanlash">
+                    {WEEKDAYS.map((day) => {
+                      const isSelected = selectedWeekdays.includes(day.id);
+                      return (
+                        <button
+                          key={day.id}
+                          type="button"
+                          className={`weekday-card ${isSelected ? "active" : ""}`}
+                          onClick={() => toggleWeekday(day.id)}
+                          aria-pressed={isSelected}
+                          title={`${day.full} ${isSelected ? "(tanlangan)" : "(tanlanmagan)"}`}
+                        >
+                          <span className="weekday-card-short">{day.short}</span>
+                          <span className="weekday-card-full">{day.full}</span>
+                          <span className="weekday-card-status">
+                            {isSelected ? "Rejada" : "Dam"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {selectedWeekdays.length === 0 && (
+                  <p className="count-validation-error" role="alert">
+                    ⚠️ Kamida bitta hafta kuni tanlangan bo‘lishi lozim.
+                  </p>
                 )}
               </div>
 
@@ -1747,53 +1946,29 @@ export default function Home() {
                                 {occ && (
                                   <div className="count-actions-row">
                                     <div className="count-buttons-cluster">
-                                      {/* +10 Button */}
-                                      <button
-                                        type="button"
-                                        className={`btn-counter-inc ${
-                                          remaining >= 10 && !isDone
-                                            ? "btn-visible"
-                                            : isSpaceCollapsed
-                                            ? "btn-hidden-collapsed"
-                                            : "btn-hidden-hold-space"
-                                        }`}
-                                        onClick={() => void incrementTaskCount(activity, occ, 10)}
-                                        title="10 ta qo‘shish"
-                                      >
-                                        +10
-                                      </button>
-
-                                      {/* +5 Button */}
-                                      <button
-                                        type="button"
-                                        className={`btn-counter-inc ${
-                                          remaining >= 5 && !isDone
-                                            ? "btn-visible"
-                                            : isSpaceCollapsed
-                                            ? "btn-hidden-collapsed"
-                                            : "btn-hidden-hold-space"
-                                        }`}
-                                        onClick={() => void incrementTaskCount(activity, occ, 5)}
-                                        title="5 ta qo‘shish"
-                                      >
-                                        +5
-                                      </button>
-
-                                      {/* +1 Button */}
-                                      <button
-                                        type="button"
-                                        className={`btn-counter-inc primary ${
-                                          remaining >= 1 && !isDone
-                                            ? "btn-visible"
-                                            : isSpaceCollapsed
-                                            ? "btn-hidden-collapsed"
-                                            : "btn-hidden-hold-space"
-                                        }`}
-                                        onClick={() => void incrementTaskCount(activity, occ, 1)}
-                                        title="1 ta qo‘shish"
-                                      >
-                                        +1
-                                      </button>
+                                      {counterSteps
+                                        .slice()
+                                        .sort((a, b) => b - a)
+                                        .map((step) => {
+                                          const isVisible = remaining >= step && !isDone;
+                                          return (
+                                            <button
+                                              key={step}
+                                              type="button"
+                                              className={`btn-counter-inc ${step === 1 ? "primary" : ""} ${
+                                                isVisible
+                                                  ? "btn-visible"
+                                                  : isSpaceCollapsed
+                                                  ? "btn-hidden-collapsed"
+                                                  : "btn-hidden-hold-space"
+                                              }`}
+                                              onClick={() => void incrementTaskCount(activity, occ, step)}
+                                              title={`${step} ta qo‘shish`}
+                                            >
+                                              +{step}
+                                            </button>
+                                          );
+                                        })}
                                     </div>
 
                                     {/* Undo Button */}
@@ -1931,6 +2106,18 @@ export default function Home() {
                             <div className="detail-row">
                               <span className="detail-label">Muddat:</span>
                               <span className="detail-value text-lime">{act.schedule_rule.duration_label}</span>
+                            </div>
+                          )}
+                          {act.schedule_rule?.weekdays && act.schedule_rule.weekdays.length > 0 && (
+                            <div className="detail-row">
+                              <span className="detail-label">Kunlar:</span>
+                              <span className="detail-value text-lime">
+                                {act.schedule_rule.weekdays.length === 7
+                                  ? "Har kuni"
+                                  : act.schedule_rule.weekdays
+                                      .map((id) => WEEKDAYS.find((w) => w.id === id)?.short || id)
+                                      .join(", ")}
+                              </span>
                             </div>
                           )}
                           <div className="detail-row">
@@ -2354,6 +2541,90 @@ export default function Home() {
                       >
                         {pushPermission === "granted" ? "Ruxsat berilgan" : "Ruxsat berish"}
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Sanoqli hisoblagich bosqichlari (+ tugmalari) */}
+                  <div className="settings-card counter-steps-manage-card">
+                    <div className="settings-card-header">
+                      <IconHash className="icon-sm text-lime" />
+                      <div>
+                        <h3>Sanoqli hisoblagich bosqichlari</h3>
+                        <p>Kunlik sanoqli vazifalardagi tezkor hisoblash tugmalari (+10, +5, +1...)</p>
+                      </div>
+                    </div>
+
+                    <div className="step-pills-row">
+                      {counterSteps
+                        .slice()
+                        .sort((a, b) => b - a)
+                        .map((step) => (
+                          <div key={step} className="step-pill">
+                            <span className="step-pill-val">+{step}</span>
+                            <button
+                              type="button"
+                              className="btn-delete-step"
+                              onClick={() => handleRemoveCounterStep(step)}
+                              title={`+${step} qadamini o‘chirish`}
+                              aria-label={`+${step} qadamini o‘chirish`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+
+                    {/* Yangi qadam qo'shish */}
+                    <div className="step-add-container">
+                      <div className="step-add-row">
+                        <div className="step-input-wrap">
+                          <span className="step-input-prefix">+</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="step-number-input"
+                            value={newStepInput}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, "").slice(0, 2);
+                              setNewStepInput(val);
+                              setNewStepError("");
+                            }}
+                            placeholder="Masalan: 15"
+                            maxLength={2}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddCounterStep();
+                              }
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-add-step"
+                          onClick={handleAddCounterStep}
+                        >
+                          <IconPlus className="icon-xs" />
+                          <span>Qo‘shish</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-reset-steps"
+                          onClick={handleResetCounterSteps}
+                          title="Standart (+10, +5, +1) qadamlarni tiklash"
+                        >
+                          Standartga qaytarish
+                        </button>
+                      </div>
+
+                      {newStepError && (
+                        <p className="step-validation-error" role="alert">
+                          ⚠️ {newStepError}
+                        </p>
+                      )}
+                      <p className="step-hint">
+                        Maksimal qadam qiymati: 99. Har bir qadam takrorlanmas va 1 dan 99 gacha bo‘lishi lozim.
+                      </p>
                     </div>
                   </div>
 
