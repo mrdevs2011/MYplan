@@ -32,6 +32,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured());
   const [accountName, setAccountName] = useState("");
   const [activities, setActivities] = useState<Activity[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
@@ -89,18 +90,15 @@ export default function Home() {
     if (!configured) return;
     let active = true;
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      if (active && data.user) {
-        setUserId(data.user.id);
-        setAccountName(String(data.user.user_metadata?.full_name || data.user.user_metadata?.username || "Do‘stim"));
-      }
-    });
+    // INITIAL_SESSION is emitted after Supabase has restored its persisted browser session.
+    // Keep the login screen hidden until that check completes to avoid a false logged-out render.
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
       const user = session?.user;
       setUserId(user?.id ?? null);
       if (user) setAccountName(String(user.user_metadata?.full_name || user.user_metadata?.username || "Do‘stim"));
       else { setActivities([]); setOccurrences([]); setAccountName(""); }
+      setAuthReady(true);
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [configured]);
@@ -171,6 +169,12 @@ export default function Home() {
 
   const completedCount = useMemo(() => occurrences.filter((item) => item.status === "completed").length, [occurrences]);
   const percent = activities.length ? Math.round((completedCount / activities.length) * 100) : 0;
+
+  if (!authReady) return (
+    <main className="site-shell" aria-busy="true" aria-label="MYPLAN yuklanmoqda">
+      <div className="empty-state">Hisobing tekshirilmoqda…</div>
+    </main>
+  );
 
   if (userId) return (
     <main className={`workspace-shell${sidebarOpen ? "" : " sidebar-collapsed"}`}>
