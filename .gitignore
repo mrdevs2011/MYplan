@@ -1,14 +1,8 @@
 node_modules/
-.pnpm-store/
 .next/
-out/
-build/
-.env
-.env.*
+.vercel/
+.env*
 !.env.example
 *.log
-npm-debug.log*
 .DS_Store
-.turbo/
-.vercel/
 demo/frames/

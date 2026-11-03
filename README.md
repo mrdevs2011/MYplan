@@ -2,6 +2,36 @@
 
 A personal activity planner built around flexible schedules, measurable progress, and meaningful streaks.
 
+## Stack
+
+- Next.js App Router + TypeScript
+- Tailwind CSS
+- Supabase PostgreSQL, Auth, and Row Level Security
+- Vercel deployment
+
+## Environment variables
+
+Set these variables in **Vercel → Project → Settings → Environment Variables** and select the environments where they should apply (Production, Preview, Development):
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Yes | Supabase publishable key (`sb_publishable_...`) |
+
+For local development, copy `.env.example` to `.env.local` and fill in the same values. Restart the dev server after changing environment variables. Redeploy after changing Vercel variables; they are injected at build/deployment time.
+
+The Supabase browser and server clients are provided in `src/lib/supabase/client.ts` and `src/lib/supabase/server.ts`. Do not put Supabase secret/service-role keys in `NEXT_PUBLIC_*` variables or commit them to Git.
+
+## Development
+
+```bash
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Open http://localhost:3000.
+
 ## Product principles
 
 - Every new account starts completely empty.
@@ -10,20 +40,4 @@ A personal activity planner built around flexible schedules, measurable progress
 - Every progress change is recorded as an event so history and analytics remain trustworthy.
 - Streaks follow the activity's schedule, not a universal daily rule.
 
-## Planned stack
-
-- Next.js + TypeScript
-- Tailwind CSS + shadcn/ui
-- Supabase: PostgreSQL, Auth, Row Level Security
-- Vercel deployment
-
-## Local development
-
-The application scaffold will be added after the Supabase project configuration is ready.
-
-1. Copy `.env.example` to `.env.local`.
-2. Add the Supabase project URL and publishable key.
-3. Install dependencies with `npm install`.
-4. Start the app with `npm run dev`.
-
-Never commit `.env.local`, Supabase secret keys, or service-role keys.
+See [`docs/PRODUCT.md`](docs/PRODUCT.md) for the product and data model foundation.
