@@ -1,0 +1,23 @@
+{
+  "name": "MyPlan — Kuningizni rejalashtiring",
+  "short_name": "MyPlan",
+  "description": "Plan your day. Own your time. Shaxsiy rejalashtirish va unumdorlik platformasi.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d12",
+  "theme_color": "#b4f04c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/myplan-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
