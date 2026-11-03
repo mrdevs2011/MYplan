@@ -280,9 +280,17 @@ export default function Home() {
     }
 
     if (mode === "signup") {
+      if (age.length > 3 || parseInt(age, 10) > 999) {
+        setMessage("Hakker aka o'xshamay qoldiku");
+        return;
+      }
       const parsedAge = parseInt(age, 10);
-      if (isNaN(parsedAge) || parsedAge < 6 || parsedAge > 120) {
-        setMessage("Iltimos, haqiqiy yoshingizni kiriting (6 dan 120 gacha).");
+      if (isNaN(parsedAge) || parsedAge < 6) {
+        setMessage("Iltimos, haqiqiy yoshingizni kiriting (kamida 6 yosh).");
+        return;
+      }
+      if (parsedAge > 122) {
+        setMessage(`Oka nima qilas bizi aldap ${age} yoshga dunyoda hech kim kirmaganku`);
         return;
       }
       if (password !== confirmPassword) {
@@ -469,6 +477,10 @@ export default function Home() {
   const isTargetEmpty = createTaskKind === "count" && (countTarget.trim() === "" || isNaN(parsedTargetNum) || parsedTargetNum < 2);
   const isSaveDisabled = busy || !newTitle.trim() || (createTaskKind === "count" && (isTargetZeroOrOne || isTargetEmpty));
 
+  // Validation for age (max 3 digits, max 122 years: world oldest person + 5)
+  const parsedAgeNum = parseInt(age, 10);
+  const isAgeTooHigh = mode === "signup" && age.trim() !== "" && !isNaN(parsedAgeNum) && parsedAgeNum > 122;
+
   if (!authReady) {
     return (
       <main className="loading-screen" aria-busy="true" aria-label="MYPLAN yuklanmoqda">
@@ -615,10 +627,9 @@ export default function Home() {
                   <select
                     id="modal-task-schedule"
                     value={newSchedule}
-                    onChange={(e) => setNewSchedule(e.target.value as "daily" | "once")}
+                    onChange={(e) => setNewSchedule(e.target.value as "daily")}
                   >
-                    <option value="daily">Har kuni (Daily habit)</option>
-                    <option value="once">Bir martalik (One-off task)</option>
+                    <option value="daily">Har kuni (Doimiy tartibda)</option>
                   </select>
                 </div>
 
@@ -1612,14 +1623,22 @@ export default function Home() {
                     <label htmlFor="auth-age">Yoshingiz *</label>
                     <input
                       id="auth-age"
-                      type="number"
-                      min={6}
-                      max={120}
+                      type="text"
+                      inputMode="numeric"
                       value={age}
-                      onChange={(e) => setAge(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, "").slice(0, 3);
+                        setAge(val);
+                      }}
                       placeholder="Masalan: 21"
+                      maxLength={3}
                       required
                     />
+                    {isAgeTooHigh && (
+                      <p className="auth-validation-error" role="alert">
+                        Oka nima qilas bizi aldap {age} yoshga dunyoda hech kim kirmaganku
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -1698,7 +1717,7 @@ export default function Home() {
                 <button
                   className="btn-auth-submit"
                   type="submit"
-                  disabled={busy || !configured}
+                  disabled={busy || !configured || (mode === "signup" && isAgeTooHigh)}
                 >
                   <span>
                     {busy

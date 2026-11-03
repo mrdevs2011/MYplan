@@ -2832,3 +2832,19 @@ select:focus-visible {
   color: var(--accent-lime);
   border: 1px solid rgba(180, 240, 76, 0.2);
 }
+
+
+/* ==========================================================================
+   AUTH VALIDATION ERROR (YOSH CHEKLOVI OGOHLANTIRISHI)
+   ========================================================================== */
+.auth-validation-error {
+  font-size: 11px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.4;
+  margin-top: 4px;
+  animation: fadeIn 0.2s ease;
+}
