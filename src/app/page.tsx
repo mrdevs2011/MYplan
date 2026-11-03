@@ -27,6 +27,7 @@ import {
   IconBarChart,
   IconCamera,
   IconHash,
+  IconUndo,
 } from "@/components/icons";
 
 type Mode = "login" | "signup";
@@ -71,6 +72,7 @@ export default function Home() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  const [taskHistory, setTaskHistory] = useState<Record<string, number[]>>({});
   const [loadingData, setLoadingData] = useState(false);
 
   // Floating modal state
@@ -434,14 +436,22 @@ export default function Home() {
     }
   }
 
-  // Increment counter for "count" activity (+1, +5, +10)
+  // Increment counter for "count" activity (+1, +5, +10) with undo tracking
   async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
     if (!userId) return;
     const current = taskCounts[occurrence.id] || 0;
     const target = activity.target || 0;
-    const next = Math.min(current + amount, target);
+    const actualAdd = Math.min(amount, target - current);
+    if (actualAdd <= 0) return;
+
+    const next = current + actualAdd;
 
     setTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
+    setTaskHistory((prev) => ({
+      ...prev,
+      [occurrence.id]: [...(prev[occurrence.id] || []), actualAdd],
+    }));
+
     if (typeof window !== "undefined") {
       localStorage.setItem(`myplan_count_${occurrence.id}`, String(next));
     }
@@ -453,6 +463,37 @@ export default function Home() {
       await createClient()
         .from("occurrences")
         .update({ status: "completed" })
+        .eq("id", occurrence.id)
+        .eq("user_id", userId);
+    }
+  }
+
+  // Undo counter action (oxirgi bosilgan amalni qaytaradi)
+  async function undoTaskCount(activity: Activity, occurrence: Occurrence) {
+    if (!userId) return;
+    const history = taskHistory[occurrence.id] || [];
+    if (history.length === 0) return;
+
+    const lastAdd = history[history.length - 1];
+    const newHistory = history.slice(0, -1);
+    const current = taskCounts[occurrence.id] || 0;
+    const next = Math.max(0, current - lastAdd);
+
+    setTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
+    setTaskHistory((prev) => ({ ...prev, [occurrence.id]: newHistory }));
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`myplan_count_${occurrence.id}`, String(next));
+    }
+
+    // Agar vazifa completed bo'lgan bo'lsa va endi next < target bo'lsa, pending ga qaytaramiz
+    if (next < (activity.target || 0) && occurrence.status === "completed") {
+      setOccurrences((curr) =>
+        curr.map((item) => (item.id === occurrence.id ? { ...item, status: "pending" } : item))
+      );
+      await createClient()
+        .from("occurrences")
+        .update({ status: "pending" })
         .eq("id", occurrence.id)
         .eq("user_id", userId);
     }
@@ -1016,37 +1057,46 @@ export default function Home() {
                                     />
                                   </div>
 
-                                  {/* +10, +5, +1 tugmalari: qolgan son yetarli bo'lganda ko'rinadi */}
-                                  {!done && remaining > 0 && occurrence && (
-                                    <div className="count-buttons-cluster">
-                                      {remaining >= 10 && (
+                                  {/* +10, +5, +1 tugmalari (silliq yo'qolish/paydo bo'lish) va Undo tugmasi */}
+                                  {occurrence && (
+                                    <div className="count-actions-row">
+                                      <div className="count-buttons-cluster">
                                         <button
                                           type="button"
-                                          className="btn-counter-inc"
+                                          className={`btn-counter-inc ${remaining >= 10 && !done ? "btn-visible" : "btn-hidden"}`}
                                           onClick={() => void incrementTaskCount(activity, occurrence, 10)}
                                           title="10 ta qo‘shish"
                                         >
                                           +10
                                         </button>
-                                      )}
-                                      {remaining >= 5 && (
                                         <button
                                           type="button"
-                                          className="btn-counter-inc"
+                                          className={`btn-counter-inc ${remaining >= 5 && !done ? "btn-visible" : "btn-hidden"}`}
                                           onClick={() => void incrementTaskCount(activity, occurrence, 5)}
                                           title="5 ta qo‘shish"
                                         >
                                           +5
                                         </button>
-                                      )}
-                                      {remaining >= 1 && (
                                         <button
                                           type="button"
-                                          className="btn-counter-inc primary"
+                                          className={`btn-counter-inc primary ${remaining >= 1 && !done ? "btn-visible" : "btn-hidden"}`}
                                           onClick={() => void incrementTaskCount(activity, occurrence, 1)}
                                           title="1 ta qo‘shish"
                                         >
                                           +1
+                                        </button>
+                                      </div>
+
+                                      {/* Undo tugmasi */}
+                                      {(taskHistory[occurrence.id]?.length || 0) > 0 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-undo"
+                                          onClick={() => void undoTaskCount(activity, occurrence)}
+                                          title={`Oxirgi qo‘shilgan (${taskHistory[occurrence.id].slice(-1)[0]} ta) amaldan qaytarish`}
+                                        >
+                                          <IconUndo className="icon-xs" />
+                                          <span>Qaytarish (-{taskHistory[occurrence.id].slice(-1)[0]})</span>
                                         </button>
                                       )}
                                     </div>
@@ -1154,6 +1204,51 @@ export default function Home() {
                                     style={{ width: `${Math.min((current / target) * 100, 100)}%` }}
                                   />
                                 </div>
+
+                                {/* +10, +5, +1 tugmalari va Undo tugmasi */}
+                                {occurrence && (
+                                  <div className="count-actions-row">
+                                    <div className="count-buttons-cluster">
+                                      <button
+                                        type="button"
+                                        className={`btn-counter-inc ${remaining >= 10 && !done ? "btn-visible" : "btn-hidden"}`}
+                                        onClick={() => void incrementTaskCount(activity, occurrence, 10)}
+                                        title="10 ta qo‘shish"
+                                      >
+                                        +10
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`btn-counter-inc ${remaining >= 5 && !done ? "btn-visible" : "btn-hidden"}`}
+                                        onClick={() => void incrementTaskCount(activity, occurrence, 5)}
+                                        title="5 ta qo‘shish"
+                                      >
+                                        +5
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`btn-counter-inc primary ${remaining >= 1 && !done ? "btn-visible" : "btn-hidden"}`}
+                                        onClick={() => void incrementTaskCount(activity, occurrence, 1)}
+                                        title="1 ta qo‘shish"
+                                      >
+                                        +1
+                                      </button>
+                                    </div>
+
+                                    {/* Undo tugmasi */}
+                                    {(taskHistory[occurrence.id]?.length || 0) > 0 && (
+                                      <button
+                                        type="button"
+                                        className="btn-counter-undo"
+                                        onClick={() => void undoTaskCount(activity, occurrence)}
+                                        title={`Oxirgi qo‘shilgan (${taskHistory[occurrence.id].slice(-1)[0]} ta) amaldan qaytarish`}
+                                      >
+                                        <IconUndo className="icon-xs" />
+                                        <span>Qaytarish (-{taskHistory[occurrence.id].slice(-1)[0]})</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
 
