@@ -37,6 +37,7 @@ export default function Home() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newSchedule, setNewSchedule] = useState<"daily" | "once">("daily");
@@ -171,9 +172,9 @@ export default function Home() {
   const percent = activities.length ? Math.round((completedCount / activities.length) * 100) : 0;
 
   if (userId) return (
-    <main className="workspace-shell">
+    <main className={`workspace-shell${sidebarOpen ? "" : " sidebar-collapsed"}`}>
       <aside className="workspace-sidebar">
-        <a className="brand" href="#workspace"><Image className="brand-logo" src="/myplan-logo.png" alt="" width={40} height={40} priority /><span>MYPLAN</span></a>
+        <div className="sidebar-brand-row"><a className="brand" href="#workspace"><Image className="brand-logo" src="/myplan-logo.png" alt="" width={40} height={40} priority /><span>MYPLAN</span></a><button className="sidebar-toggle" type="button" onClick={() => setSidebarOpen((open) => !open)} aria-label={sidebarOpen ? "Sidebarni yopish" : "Sidebarni ochish"} aria-expanded={sidebarOpen} title={sidebarOpen ? "Sidebarni yopish" : "Sidebarni ochish"}>{sidebarOpen ? "‹" : "›"}</button></div>
         <div className="side-caption">ISH MAYDONI</div>
         <a className="side-link active" href="#today"><span>◷</span> Bugungi reja</a>
         <a className="side-link" href="#activities"><span>▤</span> Faoliyatlarim</a>
