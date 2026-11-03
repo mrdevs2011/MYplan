@@ -234,7 +234,41 @@ select:focus-visible {
 .app-layout.sidebar-collapsed .app-sidebar {
   width: var(--sidebar-w-collapsed);
   padding: 24px 12px;
-  align-items: center;
+  cursor: pointer;
+  transition: width var(--dur-med) var(--ease-smooth), padding var(--dur-med) var(--ease-smooth), background-color var(--dur-fast), border-color var(--dur-fast);
+}
+
+.app-layout.sidebar-collapsed .app-sidebar:hover {
+  border-color: rgba(180, 240, 76, 0.28);
+  background: var(--bg-surface-elevated);
+}
+
+/* Sidebar ichidagi matnlar silliq ochilib-yopilishi (Fade + Width Transition) */
+.sidebar-brand .brand-title,
+.nav-caption,
+.nav-label,
+.btn-add-text,
+.user-info,
+.logout-text {
+  max-width: 170px;
+  opacity: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  transform: translateX(0);
+  transition: max-width var(--dur-med) var(--ease-smooth), opacity 0.22s ease, transform var(--dur-med) var(--ease-smooth);
+}
+
+.app-layout.sidebar-collapsed .sidebar-brand .brand-title,
+.app-layout.sidebar-collapsed .nav-caption,
+.app-layout.sidebar-collapsed .nav-label,
+.app-layout.sidebar-collapsed .btn-add-text,
+.app-layout.sidebar-collapsed .user-info,
+.app-layout.sidebar-collapsed .logout-text {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-12px);
+  pointer-events: none;
 }
 
 /* Sidebar Header */
@@ -378,7 +412,8 @@ select:focus-visible {
 }
 
 .app-layout.sidebar-collapsed .nav-caption {
-  display: none;
+  max-width: 0;
+  opacity: 0;
 }
 
 .nav-links {
@@ -398,7 +433,8 @@ select:focus-visible {
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 550;
-  transition: all var(--dur-fast);
+  overflow: hidden;
+  transition: background-color var(--dur-fast), color var(--dur-fast);
 }
 
 .nav-item:hover {
@@ -414,6 +450,7 @@ select:focus-visible {
 
 .nav-icon {
   width: 20px;
+  min-width: 20px;
   height: 20px;
   flex-shrink: 0;
 }
@@ -421,7 +458,7 @@ select:focus-visible {
 .nav-label {
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
 }
 
 .active-indicator {
@@ -432,16 +469,12 @@ select:focus-visible {
   border-radius: 50%;
   background: var(--accent-lime);
   box-shadow: 0 0 8px var(--accent-lime);
+  transition: opacity var(--dur-fast);
 }
 
-.app-layout.sidebar-collapsed .nav-item {
-  justify-content: center;
-  padding: 12px;
-}
-
-.app-layout.sidebar-collapsed .nav-label,
 .app-layout.sidebar-collapsed .active-indicator {
-  display: none;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Sidebar Footer (Profile + Logout) */
@@ -465,6 +498,7 @@ select:focus-visible {
 
 .user-avatar {
   width: 38px;
+  min-width: 38px;
   height: 38px;
   border-radius: 10px;
   background: linear-gradient(135deg, #1c2612 0%, #10190a 100%);
@@ -509,6 +543,7 @@ select:focus-visible {
   font-size: 12px;
   font-weight: 500;
   border: 1px solid transparent;
+  overflow: hidden;
   transition: all var(--dur-fast);
 }
 
@@ -516,21 +551,6 @@ select:focus-visible {
   background: rgba(239, 68, 68, 0.08);
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.2);
-}
-
-.app-layout.sidebar-collapsed .user-info,
-.app-layout.sidebar-collapsed .logout-text {
-  display: none;
-}
-
-.app-layout.sidebar-collapsed .user-profile-card {
-  justify-content: center;
-  padding: 0;
-}
-
-.app-layout.sidebar-collapsed .logout-action-btn {
-  justify-content: center;
-  padding: 10px 0;
 }
 
 /* --------------------------------------------------------------------------

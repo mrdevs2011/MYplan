@@ -667,6 +667,12 @@ export default function Home() {
         {/* Sidebar (Desktop Leftbar + Mobile Drawer) */}
         <aside
           className={`app-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}
+          onClick={() => {
+            if (!sidebarOpen && typeof window !== "undefined" && window.innerWidth > 768) {
+              setSidebarOpen(true);
+            }
+          }}
+          title={!sidebarOpen ? "Sidebarni ochish uchun bosing" : undefined}
           aria-label="Asosiy navigatsiya"
         >
           {/* Sidebar Top: Logo & Toggle */}
@@ -866,7 +872,7 @@ export default function Home() {
           </header>
 
           <main className="content-container" id="workspace">
-            {/* Header Greeting & Header Navigation Tabs */}
+            {/* Header Greeting */}
             <header className="page-header">
               <div className="header-text">
                 <span className="page-kicker">
@@ -876,42 +882,6 @@ export default function Home() {
                   Salom, <span className="highlight">{(accountName || "do‘stim").split(" ")[0]}</span>
                 </h1>
                 <p className="page-subtitle">Bugun o‘zing uchun yana bir muhim qadam tashla. · {dateLabel.format(new Date())}</p>
-              </div>
-
-              {/* Header Quick Tab Bar */}
-              <div className="header-tab-bar" role="tablist">
-                <button
-                  type="button"
-                  className={`header-tab-btn ${activeTab === "today" ? "active" : ""}`}
-                  onClick={() => setActiveTab("today")}
-                >
-                  <IconCalendar className="icon-xs" />
-                  <span>Bugun</span>
-                </button>
-                <button
-                  type="button"
-                  className={`header-tab-btn ${activeTab === "activities" ? "active" : ""}`}
-                  onClick={() => setActiveTab("activities")}
-                >
-                  <IconList className="icon-xs" />
-                  <span>Faoliyatlar</span>
-                </button>
-                <button
-                  type="button"
-                  className={`header-tab-btn ${activeTab === "analytics" ? "active" : ""}`}
-                  onClick={() => setActiveTab("analytics")}
-                >
-                  <IconBarChart className="icon-xs" />
-                  <span>Statistika</span>
-                </button>
-                <button
-                  type="button"
-                  className={`header-tab-btn ${activeTab === "profile" ? "active" : ""}`}
-                  onClick={() => setActiveTab("profile")}
-                >
-                  <IconUser className="icon-xs" />
-                  <span>Profil</span>
-                </button>
               </div>
             </header>
 
@@ -981,15 +951,6 @@ export default function Home() {
                       <span className="section-sub">BUGUNGI KUN TARTIBI</span>
                       <h2 className="section-heading">Bugungi vazifalar</h2>
                     </div>
-
-                    <button
-                      type="button"
-                      className="btn-primary-action"
-                      onClick={() => setShowCreateModal(true)}
-                    >
-                      <IconPlus className="icon-sm" />
-                      <span>+ Yangi vazifa</span>
-                    </button>
                   </div>
 
                   {loadingData ? (
@@ -1005,16 +966,8 @@ export default function Home() {
                       <h3>Hozircha hech qanday vazifa yo‘q</h3>
                       <p>
                         Katta natijalar har kuni qilinadigan kichik qadamlardan boshlanadi.
-                        Birinchi maqsadingizni belgilang!
+                        Vazifa qo‘shish uchun chap paneldagi (yoki pastdagi) <strong>+</strong> tugmasidan foydalaning.
                       </p>
-                      <button
-                        type="button"
-                        className="btn-empty-create"
-                        onClick={() => setShowCreateModal(true)}
-                      >
-                        <IconPlus className="icon-sm" />
-                        <span>Birinchi vazifangizni yarating</span>
-                      </button>
                     </div>
                   ) : (
                     <div className="task-items-list">
@@ -1146,15 +1099,6 @@ export default function Home() {
                     <span className="section-sub">BARCHA FAOLIYATLARINGIZ</span>
                     <h2 className="section-heading">Faol rejalar ro‘yxati</h2>
                   </div>
-
-                  <button
-                    type="button"
-                    className="btn-primary-action"
-                    onClick={() => setShowCreateModal(true)}
-                  >
-                    <IconPlus className="icon-sm" />
-                    <span>+ Yangi vazifa</span>
-                  </button>
                 </div>
 
                 {activities.length === 0 ? (
@@ -1163,15 +1107,7 @@ export default function Home() {
                       <IconList className="icon-lg" />
                     </div>
                     <h3>Faoliyatlar ro‘yxati bo‘sh</h3>
-                    <p>O‘zingiz uchun doimiy odatlar yoki bir martalik rejalarni kiritishni boshlang.</p>
-                    <button
-                      type="button"
-                      className="btn-empty-create"
-                      onClick={() => setShowCreateModal(true)}
-                    >
-                      <IconPlus className="icon-sm" />
-                      <span>Yangi vazifa yaratish</span>
-                    </button>
+                    <p>Vazifa qo‘shish uchun chap paneldagi (yoki pastdagi) <strong>+</strong> tugmasidan foydalaning.</p>
                   </div>
                 ) : (
                   <div className="task-items-list">
