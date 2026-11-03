@@ -26,6 +26,7 @@ import {
   IconUser,
   IconBarChart,
   IconCamera,
+  IconHash,
 } from "@/components/icons";
 
 type Mode = "login" | "signup";
@@ -36,6 +37,7 @@ type Activity = {
   title: string;
   description: string;
   schedule_type: "daily" | "once";
+  measurement_type: "check" | "count";
   target: number | null;
   unit: string;
   is_active: boolean;
@@ -68,10 +70,14 @@ export default function Home() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
   const [loadingData, setLoadingData] = useState(false);
 
   // Floating modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createTaskKind, setCreateTaskKind] = useState<"check" | "count">("check");
+  const [countTarget, setCountTarget] = useState("");
+  const [countUnit, setCountUnit] = useState("marta");
 
   // Sidebar & Navigation
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -103,7 +109,7 @@ export default function Home() {
         supabase.from("profiles").select("username, full_name").eq("id", id).maybeSingle(),
         supabase
           .from("activities")
-          .select("id,title,description,schedule_type,target,unit,is_active,starts_on")
+          .select("id,title,description,schedule_type,measurement_type,target,unit,is_active,starts_on")
           .eq("user_id", id)
           .eq("is_active", true)
           .order("created_at", { ascending: false }),
@@ -154,7 +160,27 @@ export default function Home() {
           .eq("user_id", id)
           .eq("period_start", day);
         if (occurrenceReadError) throw occurrenceReadError;
-        setOccurrences((occurrenceRows ?? []) as Occurrence[]);
+        const occList = (occurrenceRows ?? []) as Occurrence[];
+        setOccurrences(occList);
+
+        // Load cached counts for count-based activities
+        if (typeof window !== "undefined") {
+          const counts: Record<string, number> = {};
+          for (const occ of occList) {
+            const act = rows.find((a) => a.id === occ.activity_id);
+            if (act && act.measurement_type === "count") {
+              const saved = localStorage.getItem(`myplan_count_${occ.id}`);
+              if (saved !== null) {
+                counts[occ.id] = parseInt(saved, 10) || 0;
+              } else if (occ.status === "completed") {
+                counts[occ.id] = act.target || 0;
+              } else {
+                counts[occ.id] = 0;
+              }
+            }
+          }
+          setTaskCounts(counts);
+        }
       } else {
         setOccurrences([]);
       }
@@ -323,9 +349,24 @@ export default function Home() {
     }
   }
 
+  // Create Activity: supports "check" and "count" with 5-digit max & 0/1 disallowed
   async function createActivity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!userId || !newTitle.trim()) return;
+
+    let targetValue: number | null = null;
+    let unitValue = "";
+
+    if (createTaskKind === "count") {
+      const parsed = parseInt(countTarget, 10);
+      if (isNaN(parsed) || parsed === 0 || parsed === 1 || parsed > 99999) {
+        setMessage("Sanoq 2 dan 99999 gacha bo‘lishi shart.");
+        return;
+      }
+      targetValue = parsed;
+      unitValue = countUnit.trim() || "marta";
+    }
+
     setBusy(true);
     setMessage("");
     try {
@@ -337,12 +378,16 @@ export default function Home() {
           description: newDescription.trim(),
           schedule_type: newSchedule,
           schedule_rule: {},
-          measurement_type: "check",
+          measurement_type: createTaskKind,
+          target: targetValue,
+          unit: unitValue,
           starts_on: today(),
         });
       if (error) throw error;
       setNewTitle("");
       setNewDescription("");
+      setCountTarget("");
+      setCreateTaskKind("check");
       setNewSchedule("daily");
       setShowCreateModal(false);
       await loadWorkspace(userId);
@@ -361,6 +406,15 @@ export default function Home() {
     setOccurrences((current) =>
       current.map((item) => (item.id === occurrence.id ? { ...item, status: nextStatus } : item))
     );
+
+    if (activity.measurement_type === "count") {
+      const nextCount = nextStatus === "completed" ? (activity.target || 0) : 0;
+      setTaskCounts((prev) => ({ ...prev, [occurrence.id]: nextCount }));
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`myplan_count_${occurrence.id}`, String(nextCount));
+      }
+    }
+
     const { error } = await createClient()
       .from("occurrences")
       .update({ status: nextStatus })
@@ -369,6 +423,30 @@ export default function Home() {
     if (error) {
       setMessage(error.message);
       await loadWorkspace(userId);
+    }
+  }
+
+  // Increment counter for "count" activity (+1, +5, +10)
+  async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
+    if (!userId) return;
+    const current = taskCounts[occurrence.id] || 0;
+    const target = activity.target || 0;
+    const next = Math.min(current + amount, target);
+
+    setTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`myplan_count_${occurrence.id}`, String(next));
+    }
+
+    if (next >= target && occurrence.status !== "completed") {
+      setOccurrences((curr) =>
+        curr.map((item) => (item.id === occurrence.id ? { ...item, status: "completed" } : item))
+      );
+      await createClient()
+        .from("occurrences")
+        .update({ status: "completed" })
+        .eq("id", occurrence.id)
+        .eq("user_id", userId);
     }
   }
 
@@ -384,6 +462,12 @@ export default function Home() {
     [occurrences]
   );
   const percent = activities.length ? Math.round((completedCount / activities.length) * 100) : 0;
+
+  // Validation for countTarget (0 and 1 disallowed, max 99999)
+  const parsedTargetNum = parseInt(countTarget, 10);
+  const isTargetZeroOrOne = countTarget.trim() !== "" && (parsedTargetNum === 0 || parsedTargetNum === 1);
+  const isTargetEmpty = createTaskKind === "count" && (countTarget.trim() === "" || isNaN(parsedTargetNum) || parsedTargetNum < 2);
+  const isSaveDisabled = busy || !newTitle.trim() || (createTaskKind === "count" && (isTargetZeroOrOne || isTargetEmpty));
 
   if (!authReady) {
     return (
@@ -432,6 +516,30 @@ export default function Home() {
                 </button>
               </div>
 
+              {/* 2 Ta Tab: Bir martalik vs Sanoqli */}
+              <div className="modal-tab-switch" role="tablist" aria-label="Vazifa turi">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={createTaskKind === "check"}
+                  className={`modal-tab-btn ${createTaskKind === "check" ? "active" : ""}`}
+                  onClick={() => setCreateTaskKind("check")}
+                >
+                  <IconCheck className="icon-sm" />
+                  <span>Bir martalik</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={createTaskKind === "count"}
+                  className={`modal-tab-btn ${createTaskKind === "count" ? "active" : ""}`}
+                  onClick={() => setCreateTaskKind("count")}
+                >
+                  <IconHash className="icon-sm" />
+                  <span>Sanoqli</span>
+                </button>
+              </div>
+
               <form className="modal-form" onSubmit={createActivity}>
                 <div className="form-group">
                   <label htmlFor="modal-task-title">Vazifa nomi *</label>
@@ -439,12 +547,57 @@ export default function Home() {
                     id="modal-task-title"
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="Masalan: Ertalab 30 daqiqa yugurish"
+                    placeholder={
+                      createTaskKind === "check"
+                        ? "Masalan: Kitob o‘qish yoki dori ichish"
+                        : "Masalan: Otjimaniye qilish yoki qadam tashlash"
+                    }
                     maxLength={160}
                     required
                     autoFocus
                   />
                 </div>
+
+                {/* Sanoqli tab maydoni: 5 xona max, 0 va 1 taqiqlangan */}
+                {createTaskKind === "count" && (
+                  <div className="form-group count-target-group">
+                    <label htmlFor="count-target">Bajarilish sanog‘i (Nechta qilinadi?) *</label>
+                    <div className="count-input-row">
+                      <input
+                        id="count-target"
+                        type="text"
+                        inputMode="numeric"
+                        value={countTarget}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, "").slice(0, 5);
+                          setCountTarget(val);
+                        }}
+                        placeholder="Masalan: 100"
+                        maxLength={5}
+                        required
+                      />
+                      <select
+                        className="count-unit-select"
+                        value={countUnit}
+                        onChange={(e) => setCountUnit(e.target.value)}
+                        title="Birlik"
+                      >
+                        <option value="marta">marta</option>
+                        <option value="ta">ta</option>
+                        <option value="bet">bet</option>
+                        <option value="qadam">qadam</option>
+                        <option value="daqiqa">daqiqa</option>
+                      </select>
+                    </div>
+
+                    {isTargetZeroOrOne && (
+                      <p className="count-validation-error" role="alert">
+                        ⚠️ 0 yoki 1 raqami kiritish mumkin emas. Kuniga 1 marta bajariladigan ishlar uchun yuqoridagi &ldquo;Bir martalik&rdquo; tabiga o‘ting.
+                      </p>
+                    )}
+                    <p className="count-hint">Maksimal 5 xonali son (2 dan 99999 gacha qabul qilinadi).</p>
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label htmlFor="modal-task-desc">Izoh (ixtiyoriy)</label>
@@ -452,7 +605,7 @@ export default function Home() {
                     id="modal-task-desc"
                     value={newDescription}
                     onChange={(e) => setNewDescription(e.target.value)}
-                    placeholder="Qo‘shimcha motivatsiya yoki aniqroq qadamlar"
+                    placeholder="Qo‘shimcha eslatma yoki maqsad"
                     maxLength={500}
                   />
                 </div>
@@ -480,9 +633,9 @@ export default function Home() {
                   <button
                     type="submit"
                     className="btn-modal-submit"
-                    disabled={busy || !newTitle.trim()}
+                    disabled={isSaveDisabled}
                   >
-                    {busy ? "Saqlanmoqda…" : "Vazifani qo‘shish"}
+                    {busy ? "Saqlanmoqda…" : "Vazifani saqlash"}
                     <IconArrowRight className="icon-sm" />
                   </button>
                 </div>
@@ -549,7 +702,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Quick Action Button: + Vazifa / + */}
+          {/* Quick Action Button in Leftbar: Closed da +, Opened da + Vazifa */}
           <div className="sidebar-action-wrap">
             <button
               type="button"
@@ -857,6 +1010,9 @@ export default function Home() {
                       {activities.map((activity) => {
                         const occurrence = occurrences.find((item) => item.activity_id === activity.id);
                         const done = occurrence?.status === "completed";
+                        const target = activity.target || 0;
+                        const current = taskCounts[occurrence?.id || ""] ?? (done ? target : 0);
+                        const remaining = Math.max(target - current, 0);
 
                         return (
                           <article
@@ -877,10 +1033,72 @@ export default function Home() {
                               {activity.description && (
                                 <p className="task-description">{activity.description}</p>
                               )}
+
+                              {/* Sanoqli vazifa bo'lsa progress bar va hisoblagich ko'rinadi */}
+                              {activity.measurement_type === "count" && target > 0 && (
+                                <div className="task-count-progress-wrap">
+                                  <div className="task-count-info-row">
+                                    <span className="task-count-text">
+                                      <strong>{current}</strong> / {target} {activity.unit || "marta"}
+                                    </span>
+                                    <span className="task-remaining-text">
+                                      {done ? "Bajarildi" : `${remaining} ta qoldi`}
+                                    </span>
+                                  </div>
+                                  <div className="task-mini-progress-track">
+                                    <div
+                                      className="task-mini-progress-fill"
+                                      style={{ width: `${Math.min((current / target) * 100, 100)}%` }}
+                                    />
+                                  </div>
+
+                                  {/* +10, +5, +1 tugmalari: qolgan son yetarli bo'lganda ko'rinadi */}
+                                  {!done && remaining > 0 && occurrence && (
+                                    <div className="count-buttons-cluster">
+                                      {remaining >= 10 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-inc"
+                                          onClick={() => void incrementTaskCount(activity, occurrence, 10)}
+                                          title="10 ta qo‘shish"
+                                        >
+                                          +10
+                                        </button>
+                                      )}
+                                      {remaining >= 5 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-inc"
+                                          onClick={() => void incrementTaskCount(activity, occurrence, 5)}
+                                          title="5 ta qo‘shish"
+                                        >
+                                          +5
+                                        </button>
+                                      )}
+                                      {remaining >= 1 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-inc primary"
+                                          onClick={() => void incrementTaskCount(activity, occurrence, 1)}
+                                          title="1 ta qo‘shish"
+                                        >
+                                          +1
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
                               <div className="task-meta">
                                 <span className={`schedule-badge ${activity.schedule_type}`}>
                                   {activity.schedule_type === "daily" ? "HAR KUNI" : "BIR MARTALIK"}
                                 </span>
+                                {activity.measurement_type === "count" && (
+                                  <span className="task-kind-badge">
+                                    <IconHash className="icon-xs" /> Sanoqli
+                                  </span>
+                                )}
                                 {done && (
                                   <span className="status-badge done">
                                     <IconCheck className="icon-xs" /> Bajarildi
@@ -949,6 +1167,9 @@ export default function Home() {
                     {activities.map((activity) => {
                       const occurrence = occurrences.find((item) => item.activity_id === activity.id);
                       const done = occurrence?.status === "completed";
+                      const target = activity.target || 0;
+                      const current = taskCounts[occurrence?.id || ""] ?? (done ? target : 0);
+                      const remaining = Math.max(target - current, 0);
 
                       return (
                         <article
@@ -969,10 +1190,35 @@ export default function Home() {
                             {activity.description && (
                               <p className="task-description">{activity.description}</p>
                             )}
+
+                            {activity.measurement_type === "count" && target > 0 && (
+                              <div className="task-count-progress-wrap">
+                                <div className="task-count-info-row">
+                                  <span className="task-count-text">
+                                    <strong>{current}</strong> / {target} {activity.unit || "marta"}
+                                  </span>
+                                  <span className="task-remaining-text">
+                                    {done ? "Bajarildi" : `${remaining} ta qoldi`}
+                                  </span>
+                                </div>
+                                <div className="task-mini-progress-track">
+                                  <div
+                                    className="task-mini-progress-fill"
+                                    style={{ width: `${Math.min((current / target) * 100, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
                             <div className="task-meta">
                               <span className={`schedule-badge ${activity.schedule_type}`}>
                                 {activity.schedule_type === "daily" ? "HAR KUNI" : "BIR MARTALIK"}
                               </span>
+                              {activity.measurement_type === "count" && (
+                                <span className="task-kind-badge">
+                                  <IconHash className="icon-xs" /> Sanoqli
+                                </span>
+                              )}
                               <span className="meta-date">
                                 Boshlangan: {activity.starts_on}
                               </span>
