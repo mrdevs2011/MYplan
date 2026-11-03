@@ -187,3 +187,19 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 .workspace-sidebar .side-link .side-icon{flex:0 0 24px}
 @media(max-width:850px){.workspace-shell{grid-template-columns:258px minmax(0,1fr)}.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)!important}.workspace-sidebar{width:258px}.sidebar-collapsed .workspace-sidebar{width:0}.sidebar-collapsed .sidebar-brand-row{position:fixed;left:14px;top:14px}}
 @media(max-width:560px){.workspace-shell{grid-template-columns:1fr}.sidebar-collapsed{grid-template-columns:1fr!important}.workspace-sidebar,.sidebar-collapsed .workspace-sidebar{width:100%;height:auto;min-height:0;padding:12px 18px!important;position:static;overflow:visible;border:0;border-bottom:1px solid #ffffff16;background:rgba(27,21,17,.96);pointer-events:auto}.sidebar-collapsed .sidebar-brand-row{position:static;width:48px;height:48px;pointer-events:auto}.sidebar-collapsed .sidebar-brand-row .sidebar-logo-reveal{position:absolute;inset:0;width:40px;height:40px;opacity:1;pointer-events:auto}.sidebar-collapsed .workspace-sidebar>.side-caption,.sidebar-collapsed .workspace-sidebar>.side-link,.sidebar-collapsed .workspace-sidebar>.sidebar-bottom{display:none!important}}
+
+/* Flat pure-black theme: preserve the existing geometry and corner radii. */
+:root{color-scheme:dark;--bg:#000000;--panel:#080808;--panel-raised:#101010;--line:#202020;--text:#f2f2f2;--muted:#999999;--accent:#e8b985;--soft:#d8c7b5;--accent-dim:#17120e;--signal:#d98d70}
+html,body{background:#000!important;background-image:none!important}
+body{background-color:#000!important;background-image:none!important}
+.workspace-shell,.workspace-main,.site-shell{background:#000!important;background-image:none!important}
+.workspace-sidebar{background:#050505!important;backdrop-filter:none!important}
+.auth-card,.overview-card,.activity-item,.create-form,.empty-state,.feature-grid article{background:#080808!important;box-shadow:none!important}
+.progress-card{background:#101010!important}
+.auth-tabs{background:#050505!important}
+.auth-form input,.create-form input,.create-form select{background:#050505!important}
+.today-date{background:#080808!important}
+.side-link.active{background:#151515!important;box-shadow:inset 3px 0 #e8b985,inset 0 0 0 1px #242424!important}
+.side-link:hover{background:#101010!important}
+.workspace-main:before{display:none!important}
+.how-section{background:#000!important;background-image:none!important}
