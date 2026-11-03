@@ -114,7 +114,6 @@ export default function Home() {
           )}
         </section>
 
-        <aside className="ad-panel" aria-label="Reklama joyi"><span className="ad-label">ADVERTISEMENT</span><div className="ad-placeholder"><span className="ad-plus">＋</span><strong>Bu joy seniki bo‘lishi mumkin</strong><p>Hamkorlik va reklama uchun joy</p></div><span className="ad-foot">SPONSORED SPACE · 01</span></aside>
       </section>
 
       <section className="feature-section" id="features"><div className="section-kicker">01 — IMKONIYATLAR</div><div className="section-heading"><h2>Tartib — erkinlikning<br /><span>boshlanishi.</span></h2><p>MYPLAN kunlaringni murakkablashtirish uchun emas, fikringni jamlash va oldinga yurishing uchun yaratilmoqda.</p></div><div className="feature-grid"><article><span>01 / TODAY</span><h3>Bugungi reja</h3><p>Bugun bajarishing kerak bo‘lgan ishlarni bir joyda ko‘r.</p></article><article><span>02 / CALENDAR</span><h3>Vaqt nazorati</h3><p>Rejalaring va bajarilgan ishlaringni kalendarda kuzat.</p></article><article><span>03 / PROGRESS</span><h3>O‘sish statistikasi</h3><p>Natijalaringni ko‘r, odatlaringni tahlil qil va davom et.</p></article></div></section>
