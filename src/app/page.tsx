@@ -64,16 +64,49 @@ interface MyPlanNotification {
   isRead: boolean;
 }
 
+type DurationPreset =
+  | "3_days"
+  | "1_week"
+  | "2_weeks"
+  | "3_weeks"
+  | "1_month"
+  | "2_months"
+  | "3_months"
+  | "6_months"
+  | "1_year"
+  | "custom";
+
+type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
+
+const DURATION_PRESETS: { id: DurationPreset; label: string; days: number }[] = [
+  { id: "3_days", label: "3 kun", days: 3 },
+  { id: "1_week", label: "1 hafta", days: 7 },
+  { id: "2_weeks", label: "2 hafta", days: 14 },
+  { id: "3_weeks", label: "3 hafta", days: 21 },
+  { id: "1_month", label: "1 oy", days: 30 },
+  { id: "2_months", label: "2 oy", days: 60 },
+  { id: "3_months", label: "3 oy", days: 90 },
+  { id: "6_months", label: "6 oy", days: 180 },
+  { id: "1_year", label: "1 yil", days: 365 },
+  { id: "custom", label: "Sozlash", days: 0 },
+];
+
 interface Activity {
   id: string;
   title: string;
   description: string | null;
   schedule_type: "daily" | "once";
+  schedule_rule?: {
+    duration_label?: string;
+    duration_days?: number;
+    duration_preset?: string;
+  } | null;
   measurement_type: "check" | "count";
   target: number | null;
   unit: string | null;
   is_active: boolean;
   starts_on: string;
+  ends_on?: string | null;
 }
 
 interface Occurrence {
@@ -151,15 +184,11 @@ export default function Home() {
   const [countUnit, setCountUnit] = useState("marta");
   const [debouncedCountError, setDebouncedCountError] = useState("");
 
-  // Catalog Filters (Tab 2)
-  const [catalogFilter, setCatalogFilter] = useState<"all" | "active" | "archived">("all");
-  const [catalogSearch, setCatalogSearch] = useState("");
-
-  // 10-Second Inactivity Collapse Logic for Counter Buttons
-  // When a button becomes invisible (+10 or +5), it holds its space until 10 seconds of no interaction passes
-  const [collapsedCounters, setCollapsedCounters] = useState<Record<string, boolean>>({});
-  const counterTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
-  const [formattedToday, setFormattedToday] = useState("");
+  // Muddat (Davomiylik) sozlamalari
+  const [durationPreset, setDurationPreset] = useState<DurationPreset>("1_month");
+  const [customDurationValue, setCustomDurationValue] = useState("");
+  const [customDurationUnit, setCustomDurationUnit] = useState<CustomDurationUnit>("kun");
+  const [debouncedDurationError, setDebouncedDurationError] = useState("");
 
   // Debounce task count target in modal (2 seconds)
   useEffect(() => {
@@ -180,6 +209,62 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [countTarget, createTaskKind]);
 
+  // Debounce custom duration in modal (2 seconds)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (durationPreset !== "custom") {
+        setDebouncedDurationError("");
+        return;
+      }
+      if (!customDurationValue.trim()) {
+        setDebouncedDurationError("Iltimos, muddat miqdorini kiriting.");
+        return;
+      }
+      const val = parseInt(customDurationValue, 10);
+      if (isNaN(val)) {
+        setDebouncedDurationError("Iltimos, haqiqiy raqam kiriting.");
+        return;
+      }
+      if (customDurationUnit === "kun") {
+        if (val < 2) {
+          setDebouncedDurationError("Kun bo‘yicha muddat kamida 2 kun bo‘lishi lozim.");
+        } else if (val > 120) {
+          setDebouncedDurationError("Kun bo‘yicha muddat ko‘pi bilan 120 kundan oshmasligi lozim.");
+        } else {
+          setDebouncedDurationError("");
+        }
+      } else if (customDurationUnit === "hafta") {
+        if (val < 1 || val > 9) {
+          setDebouncedDurationError("Hafta bo‘yicha muddat 1 dan 9 haftagacha bo‘lishi mumkin.");
+        } else {
+          setDebouncedDurationError("");
+        }
+      } else if (customDurationUnit === "oy") {
+        if (val < 1 || val > 9) {
+          setDebouncedDurationError("Oy bo‘yicha muddat 1 dan 9 oygacha bo‘lishi mumkin.");
+        } else {
+          setDebouncedDurationError("");
+        }
+      } else if (customDurationUnit === "yil") {
+        if (val < 1 || val > 3) {
+          setDebouncedDurationError("Yil bo‘yicha muddat 1 dan 3 yilgacha bo‘lishi mumkin.");
+        } else {
+          setDebouncedDurationError("");
+        }
+      }
+    }, durationPreset !== "custom" || !customDurationValue ? 0 : 2000);
+    return () => clearTimeout(timer);
+  }, [durationPreset, customDurationValue, customDurationUnit]);
+
+  // Catalog Filters (Tab 2)
+  const [catalogFilter, setCatalogFilter] = useState<"all" | "active" | "archived">("all");
+  const [catalogSearch, setCatalogSearch] = useState("");
+
+  // 10-Second Inactivity Collapse Logic for Counter Buttons
+  const [collapsedCounters, setCollapsedCounters] = useState<Record<string, boolean>>({});
+  const counterTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const [formattedToday, setFormattedToday] = useState("");
+
   // Load Workspace Data
   const loadWorkspace = useCallback(async (id: string) => {
     setLoadingData(true);
@@ -189,7 +274,7 @@ export default function Home() {
         supabase.from("profiles").select("username, full_name").eq("id", id).maybeSingle(),
         supabase
           .from("activities")
-          .select("id,title,description,schedule_type,measurement_type,target,unit,is_active,starts_on")
+          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on")
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
       ]);
@@ -740,6 +825,29 @@ export default function Home() {
       unitValue = countUnit.trim() || "marta";
     }
 
+    let durationDays = 30;
+    let durationLabel = "1 oy";
+
+    if (durationPreset === "custom") {
+      const val = parseInt(customDurationValue, 10) || 1;
+      durationLabel = `${val} ${customDurationUnit}`;
+      if (customDurationUnit === "kun") durationDays = val;
+      else if (customDurationUnit === "hafta") durationDays = val * 7;
+      else if (customDurationUnit === "oy") durationDays = val * 30;
+      else if (customDurationUnit === "yil") durationDays = val * 365;
+    } else {
+      const matched = DURATION_PRESETS.find((p) => p.id === durationPreset);
+      if (matched) {
+        durationDays = matched.days;
+        durationLabel = matched.label;
+      }
+    }
+
+    const startDate = new Date();
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + durationDays);
+    const endsOnStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+
     setBusy(true);
     setMessage("");
     try {
@@ -749,16 +857,24 @@ export default function Home() {
         title: newTitle.trim(),
         description: newDescription.trim(),
         schedule_type: newSchedule,
-        schedule_rule: {},
+        schedule_rule: {
+          duration_label: durationLabel,
+          duration_days: durationDays,
+          duration_preset: durationPreset,
+        },
         measurement_type: createTaskKind,
         target: targetValue,
         unit: unitValue,
         starts_on: today(),
+        ends_on: endsOnStr,
       });
       if (error) throw error;
       setNewTitle("");
       setNewDescription("");
       setCountTarget("");
+      setDurationPreset("1_month");
+      setCustomDurationValue("");
+      setDebouncedDurationError("");
       setCreateTaskKind("check");
       setShowCreateModal(false);
       await loadWorkspace(userId);
@@ -805,9 +921,28 @@ export default function Home() {
     });
   }, [activities, catalogFilter, catalogSearch]);
 
+  const isCustomDurationInvalid =
+    durationPreset === "custom" &&
+    (!customDurationValue.trim() ||
+      isNaN(parseInt(customDurationValue, 10)) ||
+      (customDurationUnit === "kun" &&
+        (parseInt(customDurationValue, 10) < 2 || parseInt(customDurationValue, 10) > 120)) ||
+      (customDurationUnit === "hafta" &&
+        (parseInt(customDurationValue, 10) < 1 || parseInt(customDurationValue, 10) > 9)) ||
+      (customDurationUnit === "oy" &&
+        (parseInt(customDurationValue, 10) < 1 || parseInt(customDurationValue, 10) > 9)) ||
+      (customDurationUnit === "yil" &&
+        (parseInt(customDurationValue, 10) < 1 || parseInt(customDurationValue, 10) > 3)));
+
   const parsedTargetNum = parseInt(countTarget, 10);
   const isTargetInvalid = createTaskKind === "count" && (isNaN(parsedTargetNum) || parsedTargetNum < 2 || parsedTargetNum > 99999);
-  const isSaveDisabled = busy || !newTitle.trim() || isTargetInvalid || Boolean(debouncedCountError);
+  const isSaveDisabled =
+    busy ||
+    !newTitle.trim() ||
+    isTargetInvalid ||
+    Boolean(debouncedCountError) ||
+    isCustomDurationInvalid ||
+    Boolean(debouncedDurationError);
 
   // Splash Screen: 100% Guaranteed Preload & Display before fade-out
   if (!authReady || !splashReady) {
@@ -979,6 +1114,110 @@ export default function Home() {
                   placeholder="Qo‘shimcha eslatma yoki maqsad tafsiloti"
                   maxLength={250}
                 />
+              </div>
+
+              {/* Muddat (Davomiylik) Tanlovi */}
+              <div className="form-group duration-picker-group">
+                <label className="field-label-row">
+                  <span>Rejalashtirilgan muddat *</span>
+                  <span className="field-sub-hint">Qancha davom etishi</span>
+                </label>
+
+                <div className="duration-presets-grid" role="radiogroup" aria-label="Muddat variantlari">
+                  {DURATION_PRESETS.map((preset) => {
+                    const isSelected = durationPreset === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        className={`duration-preset-btn ${isSelected ? "active" : ""}`}
+                        onClick={() => {
+                          setDurationPreset(preset.id);
+                          if (preset.id !== "custom") {
+                            setDebouncedDurationError("");
+                          }
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Sozlash (Custom Duration) */}
+                {durationPreset === "custom" && (
+                  <div className="custom-duration-container">
+                    <label htmlFor="custom-duration-input" className="custom-duration-label">
+                      Muddat miqdori va o‘lchov birligi:
+                    </label>
+                    <div className="custom-duration-input-row">
+                      <input
+                        id="custom-duration-input"
+                        type="text"
+                        inputMode="numeric"
+                        value={customDurationValue}
+                        onChange={(e) => {
+                          let val = e.target.value.replace(/\D/g, "");
+                          if (customDurationUnit === "kun") {
+                            val = val.slice(0, 3);
+                          } else if (customDurationUnit === "hafta" || customDurationUnit === "oy") {
+                            val = val.replace(/[^1-9]/g, "").slice(0, 1);
+                          } else if (customDurationUnit === "yil") {
+                            val = val.replace(/[^1-3]/g, "").slice(0, 1);
+                          }
+                          setCustomDurationValue(val);
+                        }}
+                        placeholder={
+                          customDurationUnit === "kun"
+                            ? "Masalan: 30"
+                            : customDurationUnit === "hafta"
+                              ? "1 dan 9 gacha"
+                              : customDurationUnit === "oy"
+                                ? "1 dan 9 gacha"
+                                : "1 dan 3 gacha"
+                        }
+                        maxLength={customDurationUnit === "kun" ? 3 : 1}
+                        required
+                        autoFocus
+                      />
+
+                      <select
+                        className="custom-duration-unit-select"
+                        value={customDurationUnit}
+                        onChange={(e) => {
+                          const newUnit = e.target.value as CustomDurationUnit;
+                          setCustomDurationUnit(newUnit);
+                          if (newUnit === "hafta" || newUnit === "oy") {
+                            setCustomDurationValue((prev) => prev.replace(/[^1-9]/g, "").slice(0, 1));
+                          } else if (newUnit === "yil") {
+                            setCustomDurationValue((prev) => prev.replace(/[^1-3]/g, "").slice(0, 1));
+                          }
+                        }}
+                        title="Muddat turi"
+                      >
+                        <option value="kun">Kun</option>
+                        <option value="hafta">Hafta</option>
+                        <option value="oy">Oy</option>
+                        <option value="yil">Yil</option>
+                      </select>
+                    </div>
+
+                    {debouncedDurationError && (
+                      <p className="duration-validation-error" role="alert">
+                        ⚠️ {debouncedDurationError}
+                      </p>
+                    )}
+
+                    <p className="duration-unit-hint">
+                      {customDurationUnit === "kun" && "Kun cheklovi: kamida 2 kun va ko‘pi bilan 120 kun."}
+                      {customDurationUnit === "hafta" && "Hafta cheklovi: ko‘pi bilan 9 hafta (1 xonali son)."}
+                      {customDurationUnit === "oy" && "Oy cheklovi: ko‘pi bilan 9 oy (1 xonali son)."}
+                      {customDurationUnit === "yil" && "Yil cheklovi: ko‘pi bilan 3 yil."}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -1576,6 +1815,11 @@ export default function Home() {
 
                             <div className="task-meta">
                               <span className="schedule-badge daily">HAR KUNI</span>
+                              {activity.schedule_rule?.duration_label && (
+                                <span className="schedule-badge duration">
+                                  {activity.schedule_rule.duration_label.toUpperCase()}
+                                </span>
+                              )}
                               {activity.measurement_type === "count" && (
                                 <span className="task-kind-badge">
                                   <IconHash className="icon-xs" /> Sanoqli
@@ -1683,6 +1927,12 @@ export default function Home() {
                                 : "Oddiy belgilash"}
                             </span>
                           </div>
+                          {act.schedule_rule?.duration_label && (
+                            <div className="detail-row">
+                              <span className="detail-label">Muddat:</span>
+                              <span className="detail-value text-lime">{act.schedule_rule.duration_label}</span>
+                            </div>
+                          )}
                           <div className="detail-row">
                             <span className="detail-label">Boshlangan:</span>
                             <span className="detail-value">{act.starts_on}</span>
