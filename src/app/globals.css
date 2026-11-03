@@ -77,3 +77,42 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(max-width:850px){.workspace-sidebar{background:rgba(9,10,17,.96)}.workspace-sidebar .side-link.active{background:#292d51}.workspace-main{padding-top:38px}}
 @media(max-width:650px){.site-shell{padding-inline:6%}.topbar{height:74px}.auth-hero{min-height:0;padding:68px 0 82px;gap:38px}.auth-hero:before{width:90vw;left:4%;top:2%}.auth-hero:after{bottom:24px}.hero-copy h1{font-size:clamp(62px,14vw,88px)}.hero-points{display:grid;grid-template-columns:1fr;gap:8px;margin-top:27px}.hero-points span{width:max-content;max-width:100%}.auth-card{padding:23px;box-shadow:8px 8px 0 #a5a9ff12,0 25px 60px #0008}.feature-section,.how-section{padding:72px 0}.feature-grid article{min-height:175px}.workspace-shell,.sidebar-collapsed{background:#090a11}.workspace-sidebar,.sidebar-collapsed .workspace-sidebar{background:rgba(9,10,17,.96)}.workspace-main{padding:32px 17px 24px}.workspace-main:before{width:170px;height:170px;right:-35px;top:55px}.workspace-top h1{font-size:43px}.today-date{font-size:9px}.overview-grid{gap:9px}.overview-card{min-height:130px;padding:15px}.progress-card{min-height:145px}.progress-card:before{width:48px;height:48px;right:15px;top:20px}.progress-number,.metric-number{font-size:43px}.activities-section{margin-top:47px}.section-title-row h2{font-size:23px}.add-button{padding:11px 12px;font-size:9px}.create-form{padding:15px}.activity-item{padding:14px 12px}.workspace-footer{margin-top:48px}}
 @media(prefers-reduced-motion:reduce){.feature-grid article:hover,.activity-item:hover,.add-button:hover{transform:none}}
+
+/* Sidebar: preserve the icon rail; only labels gently fade and contract. */
+.workspace-shell{grid-template-columns:258px minmax(0,1fr);transition:grid-template-columns .48s cubic-bezier(.22,.75,.22,1)}
+.workspace-sidebar{overflow:hidden;min-width:0;transition:padding .48s cubic-bezier(.22,.75,.22,1),background .25s ease}
+.sidebar-brand-row{justify-content:flex-start;position:relative;min-width:0;overflow:hidden}
+.sidebar-brand-row .brand{flex:none;min-width:0;overflow:hidden}
+.sidebar-brand-row .brand span,.side-caption span,.side-label,.profile-details,.logout-button span{display:block;white-space:nowrap;overflow:hidden;max-width:180px;opacity:1;transform:translateX(0);transition:max-width .42s cubic-bezier(.22,.75,.22,1),opacity .24s ease,transform .42s cubic-bezier(.22,.75,.22,1)}
+.side-caption{overflow:hidden;white-space:nowrap}
+.side-link{justify-content:flex-start;overflow:hidden;min-width:0;gap:12px;padding-left:13px;transition:background .2s ease,color .2s ease}
+.side-link .side-icon{display:grid;place-items:center;flex:none;width:22px;min-width:22px}
+.side-label{max-width:170px}
+.profile-chip{justify-content:flex-start;gap:11px;overflow:hidden;min-width:0}
+.profile-chip .avatar{flex:none}
+.profile-details{min-width:0;max-width:150px}
+.logout-button{display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
+.sidebar-collapsed{grid-template-columns:78px minmax(0,1fr)}
+.sidebar-collapsed .workspace-sidebar{padding-left:12px;padding-right:12px;align-items:stretch}
+.sidebar-collapsed .sidebar-brand-row{flex-direction:row;justify-content:flex-start;gap:0;min-height:42px}
+.sidebar-collapsed .sidebar-brand-row .brand{width:40px;min-width:40px;justify-content:flex-start}
+.sidebar-collapsed .sidebar-brand-row .brand span,.sidebar-collapsed .side-caption span,.sidebar-collapsed .side-label,.sidebar-collapsed .profile-details,.sidebar-collapsed .logout-button span{max-width:0;opacity:0;transform:translateX(-7px);pointer-events:none}
+.sidebar-collapsed .side-caption{margin-left:13px}
+.sidebar-collapsed .side-link,.sidebar-collapsed .side-link.active{width:100%;justify-content:flex-start;gap:12px;padding-left:13px;margin-left:0;margin-right:0;font-size:12px}
+.sidebar-collapsed .side-link .side-icon{width:22px;min-width:22px}
+.sidebar-collapsed .side-link.active:before{left:-12px}
+.sidebar-collapsed .sidebar-bottom{width:100%;overflow:hidden}
+.sidebar-collapsed .profile-chip{justify-content:flex-start;padding-left:0}
+.sidebar-collapsed .logout-button{justify-content:flex-start;width:100%;padding-left:12px;font-size:11px}
+.sidebar-collapsed .sidebar-logo-reveal{left:0;right:auto;margin-left:0}
+.workspace-sidebar{cursor:default}
+.sidebar-collapsed .workspace-sidebar{cursor:pointer}
+.sidebar-collapsed .workspace-sidebar button,.sidebar-collapsed .workspace-sidebar a{cursor:pointer}
+@media(max-width:850px){.workspace-shell,.sidebar-collapsed{grid-template-columns:78px minmax(0,1fr)}.sidebar-collapsed .workspace-sidebar{padding-left:12px;padding-right:12px}.sidebar-collapsed .side-link,.sidebar-collapsed .side-link.active{width:100%;padding-left:13px}.sidebar-collapsed .sidebar-brand-row{flex-direction:row}.sidebar-collapsed .sidebar-brand-row .brand{width:40px;min-width:40px}.sidebar-collapsed .sidebar-logo-reveal{left:0;right:auto;margin-left:0}}
+@media(max-width:560px){.workspace-shell,.sidebar-collapsed{grid-template-columns:1fr}.workspace-sidebar,.sidebar-collapsed .workspace-sidebar{cursor:default}.sidebar-collapsed .workspace-sidebar .side-label,.sidebar-collapsed .workspace-sidebar .side-caption span,.sidebar-collapsed .workspace-sidebar .profile-details,.sidebar-collapsed .workspace-sidebar .logout-button span{max-width:0;opacity:0}.sidebar-collapsed .workspace-sidebar .side-link{width:36px;justify-content:center;padding:8px!important}.sidebar-collapsed .workspace-sidebar .side-icon{width:20px;min-width:20px}.sidebar-collapsed .sidebar-brand-row{flex-direction:row}.sidebar-collapsed .sidebar-brand-row .brand{width:38px;min-width:38px}.sidebar-collapsed .workspace-sidebar .brand span{max-width:100px;opacity:1;transform:none}.sidebar-collapsed .workspace-sidebar .side-link .side-label{display:none}}
+/* Override legacy display:none rules so collapse never snaps labels out of layout. */
+.sidebar-collapsed .workspace-sidebar .brand span{display:block}
+.sidebar-collapsed .workspace-sidebar .side-caption{display:block}
+.sidebar-collapsed .workspace-sidebar .side-link:not(.active){display:flex}
+@media(max-width:850px){.sidebar-collapsed .workspace-sidebar .brand span{display:block}.sidebar-collapsed .workspace-sidebar .side-caption{display:block}.sidebar-collapsed .workspace-sidebar .side-link:not(.active){display:flex}}
+@media(max-width:560px){.sidebar-collapsed .workspace-sidebar .brand span{display:inline}.sidebar-collapsed .workspace-sidebar .side-caption{display:none}.sidebar-collapsed .workspace-sidebar .side-link:not(.active){display:flex}}

@@ -174,12 +174,12 @@ export default function Home() {
 
   if (userId) return (
     <main className={`workspace-shell${sidebarOpen ? "" : " sidebar-collapsed"}`}>
-      <aside className="workspace-sidebar">
+      <aside className="workspace-sidebar" onClick={() => { if (!sidebarOpen) setSidebarOpen(true); }} aria-label="Asosiy navigatsiya">
         <div className={`sidebar-brand-row${sidebarOpen ? "" : " sidebar-brand-collapsed"}`}><a className="brand" href="#workspace" aria-label="MYPLAN"><Image className="brand-logo" src="/myplan-logo.png" alt="" width={40} height={40} priority /><span>MYPLAN</span></a>{sidebarOpen && <button className="sidebar-toggle" type="button" onClick={() => setSidebarOpen(false)} aria-label="Sidebarni yopish" aria-expanded="true" title="Sidebarni yopish">‹</button>}{!sidebarOpen && <button className="sidebar-logo-reveal" type="button" onClick={() => setSidebarOpen(true)} aria-label="Sidebarni ochish" aria-expanded="false" title="Sidebarni ochish"><span>›</span></button>}</div>
-        <div className="side-caption">ISH MAYDONI</div>
-        <button type="button" className={`side-link${activeTab === "today" ? " active" : ""}`} onClick={() => setActiveTab("today")} aria-current={activeTab === "today" ? "page" : undefined}><span>◷</span> Bugungi reja</button>
-        <button type="button" className={`side-link${activeTab === "activities" ? " active" : ""}`} onClick={() => setActiveTab("activities")} aria-current={activeTab === "activities" ? "page" : undefined}><span>▤</span> Faoliyatlarim</button>
-        <div className="sidebar-bottom"><div className="profile-chip"><div className="avatar">{(accountName || "M").slice(0, 1).toUpperCase()}</div><div><strong>{accountName || "MYPLAN user"}</strong><small>Shaxsiy hisob</small></div></div><button className="logout-button" onClick={signOut}>Chiqish ↗</button></div>
+        <div className="side-caption"><span>ISH MAYDONI</span></div>
+        <button type="button" className={`side-link${activeTab === "today" ? " active" : ""}`} onClick={() => setActiveTab("today")} aria-current={activeTab === "today" ? "page" : undefined}><span className="side-icon">◷</span><span className="side-label">Bugungi reja</span></button>
+        <button type="button" className={`side-link${activeTab === "activities" ? " active" : ""}`} onClick={() => setActiveTab("activities")} aria-current={activeTab === "activities" ? "page" : undefined}><span className="side-icon">▤</span><span className="side-label">Faoliyatlarim</span></button>
+        <div className="sidebar-bottom"><div className="profile-chip"><div className="avatar">{(accountName || "M").slice(0, 1).toUpperCase()}</div><div className="profile-details"><strong>{accountName || "MYPLAN user"}</strong><small>Shaxsiy hisob</small></div></div><button className="logout-button" onClick={signOut}><span>Chiqish ↗</span></button></div>
       </aside>
       <section className="workspace-main" id="workspace">
         <header className="workspace-top"><div><span className="section-kicker">SHAXSIY MAYDONING</span><h1>Salom, <span>{(accountName || "do‘stim").split(" ")[0]}.</span></h1><p>Bugun o‘zing uchun nimadir qil.</p></div><div className="today-date">{dateLabel.format(new Date())}</div></header>
