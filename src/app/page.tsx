@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -66,7 +67,7 @@ export default function Home() {
   return (
     <main className="site-shell">
       <header className="topbar">
-        <a className="brand" href="#top"><span className="brand-mark">M</span> MYPLAN</a>
+        <a className="brand" href="#top" aria-label="MYPLAN bosh sahifa"><Image className="brand-logo" src="/myplan-logo.png" alt="" width={44} height={44} priority /><span>MYPLAN</span></a>
         <nav className="top-links"><a href="#features">IMKONIYATLAR</a><a href="#how">QANDAY ISHLAYDI</a><a href="#auth">BOSHLASH ↗</a></nav>
       </header>
 
@@ -104,7 +105,7 @@ export default function Home() {
 
       <section className="feature-section" id="features"><div className="section-kicker">01 — IMKONIYATLAR</div><div className="section-heading"><h2>Tartib — erkinlikning<br /><span>boshlanishi.</span></h2><p>MYPLAN kunlaringni murakkablashtirish uchun emas, fikringni jamlash va oldinga yurishing uchun yaratilmoqda.</p></div><div className="feature-grid"><article><span>01 / TODAY</span><h3>Bugungi reja</h3><p>Bugun bajarishing kerak bo‘lgan ishlarni bir joyda ko‘r.</p></article><article><span>02 / CALENDAR</span><h3>Vaqt nazorati</h3><p>Rejalaring va bajarilgan ishlaringni kalendarda kuzat.</p></article><article><span>03 / PROGRESS</span><h3>O‘sish statistikasi</h3><p>Natijalaringni ko‘r, odatlaringni tahlil qil va davom et.</p></article></div></section>
       <section className="how-section" id="how"><div className="section-kicker">02 — QANDAY ISHLAYDI</div><h2>Kichik qadamlar.<br /><span>Katta o‘zgarishlar.</span></h2><div className="steps"><p><b>01</b> Hisob yarat</p><p><b>02</b> Maqsad va faoliyatlaringni belgilab ol</p><p><b>03</b> Har kuni oz-ozdan oldinga yur</p></div></section>
-      <footer className="footer"><a className="brand" href="#top"><span className="brand-mark">M</span> MYPLAN</a><span>YOUR PLAN. YOUR PACE.</span><a href="#auth">BOSHLASH ↑</a></footer>
+      <footer className="footer"><a className="brand" href="#top" aria-label="MYPLAN bosh sahifa"><Image className="brand-logo" src="/myplan-logo.png" alt="" width={44} height={44} priority /><span>MYPLAN</span></a><span>YOUR PLAN. YOUR PACE.</span><a href="#auth">BOSHLASH ↑</a></footer>
     </main>
   );
 }
