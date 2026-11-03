@@ -203,3 +203,9 @@ body{background-color:#000!important;background-image:none!important}
 .side-link:hover{background:#101010!important}
 .workspace-main:before{display:none!important}
 .how-section{background:#000!important;background-image:none!important}
+
+/* Remove ornamental circles only; keep functional circular controls and avatar. */
+.auth-hero:before,.auth-card:before,.overview-card:after,.progress-card:before,.workspace-main:before{display:none!important;content:none!important}
+.hero-points b,.feature-grid article:before,.steps b,.empty-symbol{border-radius:6px!important;box-shadow:none!important}
+.feature-grid article:before{border-radius:4px!important}
+.how-section{background-image:none!important}
