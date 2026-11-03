@@ -9,12 +9,12 @@ type Mode = "login" | "signup";
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("login");
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [signedInUsername, setSignedInUsername] = useState<string | null>(null);
   const [configured] = useState(isSupabaseConfigured());
 
   useEffect(() => {
@@ -22,33 +22,41 @@ export default function Home() {
     let active = true;
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => {
-      if (active && data.user) setUserEmail(data.user.email ?? "");
+      if (active && data.user) setSignedInUsername(String(data.user.user_metadata?.username ?? "MYPLAN foydalanuvchisi"));
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setUserEmail(session?.user.email ?? null);
+      if (active) setSignedInUsername(session?.user ? String(session.user.user_metadata?.username ?? "MYPLAN foydalanuvchisi") : null);
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [configured]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
     setMessage("");
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
+      setMessage("Username 3–24 ta belgidan iborat bo‘lsin: faqat lotin harflari, raqam va _.");
+      return;
+    }
+    setBusy(true);
     try {
       const supabase = createClient();
+      // Supabase password auth requires an email/phone. MYPLAN maps usernames to
+      // a reserved, non-deliverable internal address; users never see or enter it.
+      const authEmail = `${normalizedUsername}@users.myplan.invalid`;
       if (mode === "signup") {
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: authEmail,
           password,
-          options: { data: { full_name: name.trim() } },
+          options: { data: { username: normalizedUsername, full_name: name.trim() } },
         });
         if (error) throw error;
-        if (data.session) setUserEmail(data.user?.email ?? email);
-        else setMessage("Tasdiqlash havolasi emailingga yuborildi. Pochtangni tekshir.");
+        if (data.session && data.user) setSignedInUsername(normalizedUsername);
+        else setMessage("Ro‘yxatdan o‘tish so‘rovi qabul qilindi, ammo sessiya yaratilmadi. Supabase’da Email confirmation o‘chirilganini tekshir.");
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password });
         if (error) throw error;
-        setUserEmail(data.user.email ?? email);
+        setSignedInUsername(String(data.user.user_metadata?.username ?? normalizedUsername));
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Noma’lum xatolik yuz berdi.");
@@ -58,10 +66,15 @@ export default function Home() {
   }
 
   async function signOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    setUserEmail(null);
-    setMessage("Hisobdan chiqding.");
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      setSignedInUsername(null);
+      setMessage("Hisobdan chiqding.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Hisobdan chiqishda xatolik yuz berdi.");
+    }
   }
 
   return (
@@ -81,18 +94,19 @@ export default function Home() {
 
         <section className="auth-card" id="auth" aria-label="Hisobga kirish">
           <div className="auth-card-top"><span className="tiny-label">MYPLAN ACCOUNT</span><span className="secure-mark">● PRIVATE SPACE</span></div>
-          {userEmail ? (
-            <div className="signed-in"><div className="success-icon">✓</div><h2>Xush kelibsan!</h2><p className="auth-sub">{userEmail}</p><p className="auth-message">Hisobingga muvaffaqiyatli kirding. MYPLAN ish maydoni keyingi bosqichda shu yerga ulanadi.</p><button className="primary-button" onClick={signOut}>Hisobdan chiqish <span>↗</span></button></div>
+          {signedInUsername ? (
+            <div className="signed-in"><div className="success-icon">✓</div><h2>Xush kelibsan!</h2><p className="auth-sub">@{signedInUsername}</p><p className="auth-message">Hisobingga muvaffaqiyatli kirding.</p><button className="primary-button" onClick={signOut}>Hisobdan chiqish <span>↗</span></button></div>
           ) : (
             <>
               <div className="auth-heading"><h2>{mode === "login" ? "Yana ko‘rishganimizdan xursandmiz." : "O‘z yo‘lingni boshlagin."}</h2><p className="auth-sub">{mode === "login" ? "Davom etish uchun hisobingga kir." : "Bir necha soniyada bepul hisob yarat."}</p></div>
               <div className="auth-tabs" role="tablist" aria-label="Kirish yoki ro‘yxatdan o‘tish"><button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setMessage(""); }}>Login</button><button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setMessage(""); }}>Sign up</button></div>
               <form className="auth-form" onSubmit={submit}>
-                {mode === "signup" && <label>Isming<input autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Isming va familiyang" required /></label>}
-                <label>Email manziling<input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" required /></label>
-                <label>Parol<input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="Kamida 6 ta belgi" minLength={6} required /></label>
+                {mode === "signup" && <label>Isming<input autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Isming va familiyang" maxLength={80} required /></label>}
+                <label>Username<input type="text" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} placeholder="masalan: mrdevs" minLength={3} maxLength={24} pattern="[A-Za-z0-9_]{3,24}" spellCheck={false} autoCapitalize="none" required /></label>
+                <label>Parol<input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={e => setPassword(e.target.value)} placeholder="Kamida 8 ta belgi" minLength={8} required /></label>
                 {message && <p className="auth-message" role="status">{message}</p>}
                 {!configured && <p className="auth-message">Supabase sozlanmagan. Environment qiymatlarini tekshir.</p>}
+                {mode === "signup" && <p className="auth-hint">Username keyinchalik o‘zgarmas login nomi sifatida ishlatiladi. Email talab qilinmaydi.</p>}
                 <button className="primary-button" type="submit" disabled={busy || !configured}>{busy ? "KUTILMOQDA…" : mode === "login" ? "Hisobga kirish" : "Bepul hisob yaratish"}<span>↗</span></button>
               </form>
               <p className="auth-terms">Davom etish orqali foydalanish shartlariga rozilik bildirasan.</p>

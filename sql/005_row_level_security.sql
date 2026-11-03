@@ -42,8 +42,14 @@ create policy "occurrences_insert_own" on public.occurrences
   );
 drop policy if exists "occurrences_update_own" on public.occurrences;
 create policy "occurrences_update_own" on public.occurrences
-  for update to authenticated using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
+  for update to authenticated
+  using ((select auth.uid()) = user_id)
+  with check (
+    (select auth.uid()) = user_id and exists (
+      select 1 from public.activities a
+      where a.id = activity_id and a.user_id = (select auth.uid())
+    )
+  );
 drop policy if exists "occurrences_delete_own" on public.occurrences;
 create policy "occurrences_delete_own" on public.occurrences
   for delete to authenticated using ((select auth.uid()) = user_id);
