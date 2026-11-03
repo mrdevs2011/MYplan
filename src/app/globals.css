@@ -159,3 +159,31 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(max-width:850px){.workspace-sidebar{background:rgba(27,21,17,.96)}.workspace-shell,.sidebar-collapsed{grid-template-columns:78px minmax(0,1fr)}.sidebar-collapsed .workspace-sidebar{padding-left:12px;padding-right:12px}.sidebar-collapsed .side-link,.sidebar-collapsed .side-link.active{width:100%;padding-left:13px}.sidebar-collapsed .side-link:not(.active){display:flex}.sidebar-collapsed .sidebar-brand-row{flex-direction:row}.sidebar-collapsed .sidebar-brand-row .brand{width:40px;min-width:40px}}
 @media(max-width:560px){.workspace-shell,.sidebar-collapsed{grid-template-columns:1fr}.workspace-sidebar,.sidebar-collapsed .workspace-sidebar{background:rgba(27,21,17,.96);cursor:default}.sidebar-collapsed .workspace-sidebar .side-link{width:36px;justify-content:center;padding:8px!important}.sidebar-collapsed .workspace-sidebar .side-icon{width:20px;min-width:20px}.sidebar-collapsed .workspace-sidebar .side-label{display:none}.sidebar-collapsed .sidebar-brand-row{flex-direction:row}.sidebar-collapsed .sidebar-brand-row .brand{width:38px;min-width:38px}.sidebar-collapsed .workspace-sidebar .brand span{max-width:100px;opacity:1;transform:none}.sidebar-collapsed .workspace-sidebar .side-link:not(.active){display:flex}.sidebar-collapsed .workspace-sidebar .side-caption{display:none}}
 @media(prefers-reduced-motion:reduce){button,a,input,select,.workspace-shell,.workspace-sidebar,.side-label,.feature-grid article,.overview-card,.activity-item{transition:none!important}}
+
+/* Sidebar final layout: fully retract the rail; keep only a floating logo opener. */
+.workspace-shell{grid-template-columns:258px minmax(0,1fr);transition:grid-template-columns .82s cubic-bezier(.16,1,.3,1)}
+.workspace-sidebar{width:258px;min-width:0;transition:width .82s cubic-bezier(.16,1,.3,1),padding .82s cubic-bezier(.16,1,.3,1),border-color .5s ease;overflow:hidden}
+.sidebar-brand-row{width:100%;display:flex;align-items:center;justify-content:space-between!important;gap:12px;overflow:visible;padding-right:2px}
+.sidebar-brand-row .brand{flex:0 1 auto;min-width:0}
+.sidebar-toggle{margin-left:auto;flex:0 0 34px;width:34px;height:34px;border-radius:50%;font-size:22px;display:grid;place-items:center}
+.side-link{width:100%;min-height:46px;overflow:visible;gap:13px;padding:12px 15px!important}
+.side-link .side-icon{flex:0 0 24px;width:24px;min-width:24px}
+.side-link .side-label{display:block;flex:1 1 auto;min-width:0;max-width:none;overflow:visible;white-space:nowrap;text-overflow:clip;opacity:1;transform:none}
+.sidebar-collapsed{grid-template-columns:0px minmax(0,1fr)!important}
+.sidebar-collapsed .workspace-sidebar{position:sticky;left:0;width:0;min-width:0;height:100vh;padding:0!important;margin:0;border:0;overflow:visible;background:transparent;backdrop-filter:none;pointer-events:none}
+.sidebar-collapsed .sidebar-brand-row{position:fixed;z-index:100;left:18px;top:18px;width:48px;height:48px;min-height:48px;padding:0;display:block;overflow:visible;pointer-events:none}
+.sidebar-collapsed .sidebar-brand-row .brand{display:none}
+.sidebar-collapsed .sidebar-brand-row .sidebar-logo-reveal{position:absolute;inset:0;width:48px;height:48px;margin:0;display:grid;place-items:center;opacity:1;transform:none;pointer-events:auto;border:1px solid #d99a7370;border-radius:50%;background:rgba(55,39,28,.92);color:#f0c49d;font-size:25px;box-shadow:0 8px 28px #0005;backdrop-filter:blur(16px)}
+.sidebar-collapsed .sidebar-brand-row .sidebar-logo-reveal:hover{transform:scale(1.07);background:#493528;border-color:#edbd94}
+.sidebar-collapsed .workspace-sidebar>.side-caption,.sidebar-collapsed .workspace-sidebar>.side-link,.sidebar-collapsed .workspace-sidebar>.sidebar-bottom{display:none!important}
+.sidebar-collapsed .workspace-sidebar *{pointer-events:none}
+.sidebar-collapsed .sidebar-brand-row,.sidebar-collapsed .sidebar-brand-row *{pointer-events:auto}
+/* Expanded header: close control stays at the far right, not beside the wordmark. */
+.workspace-sidebar:not(.sidebar-collapsed) .sidebar-brand-row{justify-content:space-between!important}
+.workspace-sidebar:not(.sidebar-collapsed) .sidebar-brand-row .sidebar-toggle{margin-left:auto}
+/* Give navigation labels their own full line and prevent flex shrink/clipping. */
+.workspace-sidebar .side-link{display:flex!important;align-items:center;box-sizing:border-box}
+.workspace-sidebar .side-link .side-label{flex:1 1 auto;min-width:0;max-width:none;overflow:visible;white-space:nowrap;text-overflow:clip}
+.workspace-sidebar .side-link .side-icon{flex:0 0 24px}
+@media(max-width:850px){.workspace-shell{grid-template-columns:258px minmax(0,1fr)}.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)!important}.workspace-sidebar{width:258px}.sidebar-collapsed .workspace-sidebar{width:0}.sidebar-collapsed .sidebar-brand-row{position:fixed;left:14px;top:14px}}
+@media(max-width:560px){.workspace-shell{grid-template-columns:1fr}.sidebar-collapsed{grid-template-columns:1fr!important}.workspace-sidebar,.sidebar-collapsed .workspace-sidebar{width:100%;height:auto;min-height:0;padding:12px 18px!important;position:static;overflow:visible;border:0;border-bottom:1px solid #ffffff16;background:rgba(27,21,17,.96);pointer-events:auto}.sidebar-collapsed .sidebar-brand-row{position:static;width:48px;height:48px;pointer-events:auto}.sidebar-collapsed .sidebar-brand-row .sidebar-logo-reveal{position:absolute;inset:0;width:40px;height:40px;opacity:1;pointer-events:auto}.sidebar-collapsed .workspace-sidebar>.side-caption,.sidebar-collapsed .workspace-sidebar>.side-link,.sidebar-collapsed .workspace-sidebar>.sidebar-bottom{display:none!important}}
