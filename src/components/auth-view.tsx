@@ -44,13 +44,17 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
   // Debounced validations (2 seconds debounce)
   const [debouncedAgeError, setDebouncedAgeError] = useState("");
   const [debouncedPasswordError, setDebouncedPasswordError] = useState("");
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
 
   useEffect(() => {
+    const addingIntent = typeof window !== "undefined" && localStorage.getItem("myplan_add_account_intent") === "true";
+    setTimeout(() => setIsAddingAccount(addingIntent), 0);
+
     // Check if session already exists
     if (!configured) return;
     const supabase = createClient();
     void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+      if (session?.user && !addingIntent) {
         router.replace("/");
       }
     });
@@ -198,18 +202,61 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           },
         });
         if (error) throw error;
-        if (data.session && data.user) {
+        const newUser = data.user;
+        if (data.session && newUser) {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("myplan_add_account_intent");
+            try {
+              const rawVault = localStorage.getItem("myplan_accounts_vault");
+              const vault = rawVault ? JSON.parse(rawVault) : [];
+              const accountItem = {
+                id: newUser.id,
+                username: normalizedUsername,
+                fullName: name.trim() || normalizedUsername,
+                age: parseInt(age, 10) || null,
+                addedAt: Date.now(),
+              };
+              const filtered = vault.filter((acc: { id: string }) => acc.id !== newUser.id);
+              if (filtered.length >= 5) filtered.shift();
+              filtered.push(accountItem);
+              localStorage.setItem("myplan_accounts_vault", JSON.stringify(filtered));
+              localStorage.setItem("myplan_active_account_id", newUser.id);
+            } catch (err) {
+              console.error(err);
+            }
+          }
           router.replace("/");
         } else {
           setMessage("Hisob yaratildi. Tizimga kirishingiz mumkin.");
           switchMode("login");
         }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({
           email: authEmail,
           password,
         });
         if (error) throw error;
+        if (typeof window !== "undefined" && signInData.user) {
+          localStorage.removeItem("myplan_add_account_intent");
+          try {
+            const rawVault = localStorage.getItem("myplan_accounts_vault");
+            const vault = rawVault ? JSON.parse(rawVault) : [];
+            const accountItem = {
+              id: signInData.user.id,
+              username: normalizedUsername,
+              fullName: String(signInData.user.user_metadata?.full_name || normalizedUsername),
+              age: signInData.user.user_metadata?.age || null,
+              addedAt: Date.now(),
+            };
+            const filtered = vault.filter((acc: { id: string }) => acc.id !== signInData.user.id);
+            if (filtered.length >= 5) filtered.shift();
+            filtered.push(accountItem);
+            localStorage.setItem("myplan_accounts_vault", JSON.stringify(filtered));
+            localStorage.setItem("myplan_active_account_id", signInData.user.id);
+          } catch (err) {
+            console.error(err);
+          }
+        }
         router.replace("/");
       }
     } catch (error) {
@@ -301,6 +348,27 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                   <IconShield className="icon-xs" /> XAVFSIZ VA MAXFIY
                 </span>
               </div>
+
+              {isAddingAccount && (
+                <div className="add-account-intent-banner">
+                  <div className="banner-text">
+                    <strong>Yangi hisob qo‘shish rejimi (Maksimal 5 ta)</strong>
+                    <p>Mavjud hisoblaringizga yangi profil ulanadi.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-cancel-add-account"
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        localStorage.removeItem("myplan_add_account_intent");
+                      }
+                      router.replace("/");
+                    }}
+                  >
+                    Bekor qilish
+                  </button>
+                </div>
+              )}
 
               <div className="auth-title-block">
                 <h2>{mode === "login" ? "Tizimga kirish" : "Yangi hisob yaratish"}</h2>

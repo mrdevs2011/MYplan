@@ -34,6 +34,7 @@ export default function RootLayout({
     <html lang="uz">
       <head>
         <link rel="manifest" href="/manifest.json" />
+        <link rel="preload" as="image" href="/myplan-logo.png" type="image/png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>

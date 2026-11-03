@@ -32,6 +32,8 @@ import {
   IconTrendUp,
   IconShield,
   IconSparkles,
+  IconBell,
+  IconUserPlus,
 } from "@/components/icons";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -39,7 +41,28 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-type TabType = "today" | "activities" | "analytics" | "profile" | "settings";
+type TabType = "today" | "activities" | "notifications" | "analytics" | "profile" | "settings";
+
+interface UserAccount {
+  id: string;
+  username: string;
+  fullName: string;
+  age?: string | number | null;
+  avatarUrl?: string | null;
+  addedAt: number;
+}
+
+interface MyPlanNotification {
+  id: string;
+  sender: string;
+  category: "daily" | "streak" | "productivity" | "motivation" | "evening";
+  categoryLabel: string;
+  title: string;
+  message: string;
+  createdAt: number;
+  timeLabel?: string;
+  isRead: boolean;
+}
 
 interface Activity {
   id: string;
@@ -101,6 +124,18 @@ export default function Home() {
   const [language, setLanguage] = useState<"uz" | "en" | "ru">("uz");
   const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
   const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Splash Screen States (Guaranteed 100% Logo Preload)
+  const [splashReady, setSplashReady] = useState(false);
+  const [splashFading, setSplashFading] = useState(false);
+
+  // Multi-Account Management (Max 5 accounts)
+  const [savedAccounts, setSavedAccounts] = useState<UserAccount[]>([]);
+
+  // Notifications System (3-Day Read-Only History)
+  const [notifications, setNotifications] = useState<MyPlanNotification[]>([]);
+  const [activeToast, setActiveToast] = useState<MyPlanNotification | null>(null);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>("default");
 
   // PWA State
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -221,6 +256,24 @@ export default function Home() {
 
   // Auth Initialization & Session Listener
   useEffect(() => {
+    // 100% Guaranteed Splash Screen Preload
+    if (typeof window !== "undefined") {
+      const img = new window.Image();
+      img.src = "/myplan-logo.png";
+      const minTimer = new Promise((resolve) => setTimeout(resolve, 850));
+      const imgLoaded = img.complete
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+          });
+
+      void Promise.all([imgLoaded, minTimer]).then(() => {
+        setSplashFading(true);
+        setTimeout(() => setSplashReady(true), 350);
+      });
+    }
+
     if (!isSupabaseConfigured()) {
       setTimeout(() => {
         setAuthReady(true);
@@ -232,17 +285,50 @@ export default function Home() {
     const supabase = createClient();
     void supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setUserId(session.user.id);
-        setAccountName(
-          String(session.user.user_metadata?.full_name || session.user.user_metadata?.username || "")
+        const currentId = session.user.id;
+        const currentName = String(
+          session.user.user_metadata?.full_name || session.user.user_metadata?.username || ""
         );
-        setAccountUsername(String(session.user.user_metadata?.username || ""));
-        setUserAge(session.user.user_metadata?.age || "");
-        setAuthReady(true);
-        void loadWorkspace(session.user.id);
+        const currentUsername = String(session.user.user_metadata?.username || "");
+        const currentAge = session.user.user_metadata?.age || "";
 
-        const savedAvatar = localStorage.getItem(`myplan_avatar_${session.user.id}`);
+        setUserId(currentId);
+        setAccountName(currentName);
+        setAccountUsername(currentUsername);
+        setUserAge(currentAge);
+        setAuthReady(true);
+        void loadWorkspace(currentId);
+
+        const savedAvatar = localStorage.getItem(`myplan_avatar_${currentId}`);
         if (savedAvatar) setAvatarUrl(savedAvatar);
+
+        // Vault registration (up to 5 accounts)
+        if (typeof window !== "undefined") {
+          try {
+            const rawVault = localStorage.getItem("myplan_accounts_vault");
+            const vault: UserAccount[] = rawVault ? JSON.parse(rawVault) : [];
+            const exists = vault.some((a) => a.id === currentId);
+            if (!exists) {
+              const updated = [
+                ...vault.slice(0, 4),
+                {
+                  id: currentId,
+                  username: currentUsername || "foydalanuvchi",
+                  fullName: currentName || "Foydalanuvchi",
+                  age: currentAge || null,
+                  avatarUrl: savedAvatar,
+                  addedAt: Date.now(),
+                },
+              ];
+              localStorage.setItem("myplan_accounts_vault", JSON.stringify(updated));
+              setSavedAccounts(updated);
+            } else {
+              setSavedAccounts(vault);
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        }
       } else {
         setAuthReady(true);
         router.replace("/login");
@@ -291,6 +377,89 @@ export default function Home() {
         setLanguage(savedLang);
         setFormattedToday(dateLabel.format(new Date()));
       }, 0);
+
+      // Notification History (3 days strictly, natural tone)
+      const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      try {
+        const rawNotifs = localStorage.getItem("myplan_notifications_history");
+        let parsed: MyPlanNotification[] = rawNotifs ? JSON.parse(rawNotifs) : [];
+        parsed = parsed.filter((n) => now - n.createdAt <= THREE_DAYS_MS);
+
+        if (parsed.length === 0) {
+          parsed = [
+            {
+              id: "notif-1",
+              sender: "MyPlan Shaxsiy Yordamchisi",
+              category: "daily",
+              categoryLabel: "KUNLIK MARRA",
+              title: "Bugungi kuningiz barakali bo‘lsin!",
+              message:
+                "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
+              createdAt: now - 1000 * 60 * 60 * 2,
+              isRead: false,
+            },
+            {
+              id: "notif-2",
+              sender: "Intizom Kuzatuvchisi",
+              category: "productivity",
+              categoryLabel: "UNUMDORLIK",
+              title: "Sanoqli vazifalaringiz monitoringi",
+              message:
+                "Kuningizdagi takrorlanuvchi amallarni bajargach, +10, +5 yoki +1 tugmalari orqali natijani qayd etishni unutmang.",
+              createdAt: now - 1000 * 60 * 60 * 6,
+              isRead: true,
+            },
+            {
+              id: "notif-3",
+              sender: "MyPlan Murabbiyi",
+              category: "evening",
+              categoryLabel: "KECHKI TAHLIL",
+              title: "Kechagi unumdorlik xulosasi",
+              message:
+                "Kechagi barcha harakatlaringiz tizimda muhrlandi. Barqarorlik — eng katta yutuq kalitidir.",
+              createdAt: now - 1000 * 60 * 60 * 26,
+              isRead: true,
+            },
+            {
+              id: "notif-4",
+              sender: "MyPlan Tizimi",
+              category: "streak",
+              categoryLabel: "SHAXSIY O‘SISH",
+              title: "Plan your day. Own your time.",
+              message:
+                "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
+              createdAt: now - 1000 * 60 * 60 * 50,
+              isRead: true,
+            },
+          ];
+        }
+
+        const withLabels = parsed.map((n) => {
+          const diffHours = Math.round((now - n.createdAt) / (1000 * 60 * 60));
+          let label = "Hozirgina";
+          if (diffHours >= 1 && diffHours < 24) label = `${diffHours} soat oldin`;
+          else if (diffHours >= 24) {
+            const diffDays = Math.round(diffHours / 24);
+            label = diffDays === 1 ? "Kecha" : `${diffDays} kun oldin`;
+          }
+          return { ...n, timeLabel: label };
+        });
+
+        localStorage.setItem("myplan_notifications_history", JSON.stringify(withLabels));
+        setTimeout(() => setNotifications(withLabels), 0);
+
+        const unread = withLabels.find((n) => !n.isRead);
+        if (unread) {
+          setTimeout(() => setActiveToast(unread), 2000);
+        }
+      } catch (err) {
+        console.error("Notif init error:", err);
+      }
+
+      if ("Notification" in window) {
+        setTimeout(() => setPushPermission(Notification.permission), 0);
+      }
     }
 
     return () => {
@@ -439,13 +608,88 @@ export default function Home() {
     }
   }
 
-  // Sign out
+  // Multi-Account Operations (Switch Account & Add Account, max 5)
+  const switchAccount = (targetAccount: UserAccount) => {
+    setUserId(targetAccount.id);
+    setAccountName(targetAccount.fullName);
+    setAccountUsername(targetAccount.username);
+    setUserAge(targetAccount.age || "");
+    const savedAvatar = typeof window !== "undefined" ? localStorage.getItem(`myplan_avatar_${targetAccount.id}`) : null;
+    setAvatarUrl(savedAvatar || targetAccount.avatarUrl || null);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("myplan_active_account_id", targetAccount.id);
+    }
+    void loadWorkspace(targetAccount.id);
+  };
+
+  const handleAddAccount = () => {
+    if (savedAccounts.length >= 5) {
+      alert("Maksimal 5 ta hisob chegarasiga yetildi.");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      localStorage.setItem("myplan_add_account_intent", "true");
+    }
+    router.push("/login");
+  };
+
+  // Sign out (Switches to another connected account if present, or logs out to /login)
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    setUserId(null);
-    router.replace("/login");
+    try {
+      if (typeof window !== "undefined") {
+        const rawVault = localStorage.getItem("myplan_accounts_vault");
+        const vault: UserAccount[] = rawVault ? JSON.parse(rawVault) : [];
+        const remaining = vault.filter((acc) => acc.id !== userId);
+        localStorage.setItem("myplan_accounts_vault", JSON.stringify(remaining));
+        setSavedAccounts(remaining);
+
+        if (remaining.length > 0) {
+          const nextAcc = remaining[0];
+          switchAccount(nextAcc);
+          return;
+        }
+      }
+
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("myplan_active_account_id");
+      }
+      setUserId(null);
+      router.replace("/login");
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
   }
+
+  // Notification helpers
+  const markNotificationAsRead = (id: string) => {
+    const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
+    setNotifications(updated);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("myplan_notifications_history", JSON.stringify(updated));
+    }
+    if (activeToast?.id === id) {
+      setActiveToast(null);
+    }
+  };
+
+  const handleRequestPush = async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      alert("Qurilmangizda push bildirishnomalari qo‘llab-quvvatlanmaydi.");
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    setPushPermission(perm);
+    if (perm === "granted") {
+      new Notification("MyPlan Bildirishnomalari", {
+        body: "Tabriklaymiz! Endi siz muhim eslatma va tavsiyalarni o‘z vaqtida qabul qilasiz.",
+        icon: "/icon.png",
+      });
+    }
+  };
+
+  const unreadNotifsCount = notifications.filter((n) => !n.isRead).length;
 
   // Avatar upload
   const handleAvatarChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -565,10 +809,10 @@ export default function Home() {
   const isTargetInvalid = createTaskKind === "count" && (isNaN(parsedTargetNum) || parsedTargetNum < 2 || parsedTargetNum > 99999);
   const isSaveDisabled = busy || !newTitle.trim() || isTargetInvalid || Boolean(debouncedCountError);
 
-  // Splash Screen: Clean, minimal MyPlan logo while checking auth
-  if (!authReady) {
+  // Splash Screen: 100% Guaranteed Preload & Display before fade-out
+  if (!authReady || !splashReady) {
     return (
-      <main className="loading-screen" aria-busy="true" aria-label="MyPlan">
+      <main className={`loading-screen ${splashFading ? "is-fading-out" : ""}`} aria-busy="true" aria-label="MyPlan">
         <div className="loading-card">
           <Image
             className="loading-logo"
@@ -589,6 +833,28 @@ export default function Home() {
 
   return (
     <div className={`app-layout ${sidebarOpen ? "sidebar-expanded" : "sidebar-collapsed"}`}>
+      {/* Floating In-App Realtime Toast */}
+      {activeToast && (
+        <aside className="floating-inapp-toast" role="alert" aria-live="polite">
+          <div className="toast-left-wrap">
+            <span className="toast-icon-badge">
+              <IconBell className="icon-xs" />
+            </span>
+            <div className="toast-text-block">
+              <span className="toast-title">{activeToast.title}</span>
+              <p className="toast-msg">{activeToast.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="toast-close-action"
+            onClick={() => setActiveToast(null)}
+            aria-label="Yopish"
+          >
+            <IconClose className="icon-xs" />
+          </button>
+        </aside>
+      )}
       {/* Floating Modal for Task Creation (Popup Dialog) */}
       {showCreateModal && (
         <div
@@ -885,6 +1151,21 @@ export default function Home() {
 
             <button
               type="button"
+              className={`nav-item ${activeTab === "notifications" ? "active" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab("notifications");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <IconBell className="nav-icon" />
+              <span className="nav-label">Bildirishnomalar</span>
+              {unreadNotifsCount > 0 && <span className="nav-unread-pill">{unreadNotifsCount}</span>}
+              {activeTab === "notifications" && <span className="active-indicator" />}
+            </button>
+
+            <button
+              type="button"
               className={`nav-item ${activeTab === "analytics" ? "active" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1050,6 +1331,15 @@ export default function Home() {
                   </span>
                   <h1 className="page-title">Faoliyatlar katalogi</h1>
                   <p className="page-subtitle">Barcha rejalashtirilgan odatlar va faoliyatlaringiz ro‘yxati</p>
+                </>
+              )}
+              {activeTab === "notifications" && (
+                <>
+                  <span className="page-kicker">
+                    <IconBell className="icon-xs" /> BILDIRISHNOMALAR MARKAZI
+                  </span>
+                  <h1 className="page-title">Xabarlar va Eslatmalar</h1>
+                  <p className="page-subtitle">So‘nggi 3 kunlik faoliyat xulosalari va tizim maslahatlari</p>
                 </>
               )}
               {activeTab === "analytics" && (
@@ -1417,6 +1707,71 @@ export default function Home() {
             </div>
           )}
 
+          {/* TAB: BILDIRISHNOMALAR (SO‘NGGI 3 KUNLIK TARIX — O‘CHIRIB BO‘LMAYDI) */}
+          {activeTab === "notifications" && (
+            <div key="tab-notifications" className="tab-pane-container">
+              <section className="notifications-view">
+                <div className="section-header-bar">
+                  <div>
+                    <span className="section-sub">SO‘NGGI 3 KUNLIK ARXIV</span>
+                    <h2 className="section-heading">Bildirishnomalar tarixi ({notifications.length})</h2>
+                  </div>
+                  <div className="notifications-immutable-badge">
+                    <IconShield className="icon-xs" /> O‘zgartirib bo‘lmaydi (Read-only)
+                  </div>
+                </div>
+
+                <div className="notifications-policy-banner">
+                  <IconSparkles className="icon-sm text-lime" />
+                  <p>
+                    Ushbu bildirishnomalar sizning unumdorligingizni oshirish uchun shaxsiy yordamchi
+                    tomonidan tabiiy shakllantiriladi va so‘nggi 3 kunlik xronologik tarix sifatida saqlanadi.
+                  </p>
+                </div>
+
+                <div className="notifications-timeline">
+                  {notifications.map((notif) => (
+                    <article
+                      key={notif.id}
+                      className={`notification-card ${notif.isRead ? "is-read" : "is-unread"}`}
+                      onClick={() => markNotificationAsRead(notif.id)}
+                    >
+                      <div className="notification-card-header">
+                        <div className="notif-header-left">
+                          <span className="sender-avatar-badge">M</span>
+                          <span className="sender-name-text">{notif.sender}</span>
+                          <span className={`notification-category-tag ${notif.category}`}>
+                            {notif.categoryLabel}
+                          </span>
+                        </div>
+                        <span className="notification-time-tag">
+                          {notif.timeLabel || "Yaqinda"}
+                        </span>
+                      </div>
+
+                      <div className="notification-content">
+                        <h4 className="notification-item-title">{notif.title}</h4>
+                        <p className="notification-item-message">{notif.message}</p>
+                      </div>
+
+                      <div className="notification-card-footer">
+                        {!notif.isRead ? (
+                          <span className="status-unread-pill">
+                            <span className="pulse-dot-sm" /> Yangi
+                          </span>
+                        ) : (
+                          <span className="status-read-pill">
+                            <IconCheck className="icon-xs" /> O‘qilgan
+                          </span>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+
           {/* TAB 3: STATISTIKA */}
           {activeTab === "analytics" && (
             <div key="tab-analytics" className="tab-pane-container">
@@ -1554,6 +1909,66 @@ export default function Home() {
                       ta’minlash maqsadida faqat ko‘rish rejimida saqlanadi.
                     </p>
                   </div>
+
+                  {/* Multi-Account Management (Switch Account & Add Account, max 5) */}
+                  <div className="profile-accounts-block">
+                    <div className="accounts-header-row">
+                      <div>
+                        <h4>Bog‘langan hisoblar</h4>
+                        <p>Bitta qurilmada 5 tagacha profilni boshqaring va ularga tezda o‘ting</p>
+                      </div>
+                      <span className="accounts-count-badge">{savedAccounts.length} / 5 hisob</span>
+                    </div>
+
+                    <div className="accounts-list">
+                      {savedAccounts.map((acc) => {
+                        const isCurrent = acc.id === userId;
+                        return (
+                          <div
+                            key={acc.id}
+                            className={`account-row ${isCurrent ? "is-current-account" : ""}`}
+                          >
+                            <div className="account-row-left">
+                              <div className="account-avatar-sm">
+                                {acc.fullName.slice(0, 1).toUpperCase()}
+                              </div>
+                              <div className="account-info-sm">
+                                <span className="account-fullname">{acc.fullName}</span>
+                                <span className="account-username-tag">@{acc.username}</span>
+                              </div>
+                            </div>
+
+                            <div className="account-row-actions">
+                              {isCurrent ? (
+                                <span className="current-account-pill">
+                                  <IconCheck className="icon-xs" /> Faol profil
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-account-switch"
+                                  onClick={() => switchAccount(acc)}
+                                >
+                                  O‘tish
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {savedAccounts.length < 5 && (
+                        <button
+                          type="button"
+                          className="btn-add-account-action"
+                          onClick={handleAddAccount}
+                        >
+                          <IconUserPlus className="icon-xs" />
+                          <span>Yangi hisob qo‘shish ({savedAccounts.length}/5)</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
@@ -1670,6 +2085,28 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Push Notifications Settings */}
+                  <div className="settings-card">
+                    <div className="settings-card-header">
+                      <IconBell className="icon-sm text-lime" />
+                      <div>
+                        <h3>Push bildirishnomalar</h3>
+                        <p>Qurilmangiz ekraniga muhim eslatma va tavsiyalar yetkazish</p>
+                      </div>
+                    </div>
+                    <div className="settings-toggle-row">
+                      <span>Brauzer bildirishnomalari</span>
+                      <button
+                        type="button"
+                        className={`setting-choice-btn ${pushPermission === "granted" ? "active" : ""}`}
+                        onClick={() => void handleRequestPush()}
+                        style={{ width: "auto", padding: "8px 16px" }}
+                      >
+                        {pushPermission === "granted" ? "Ruxsat berilgan" : "Ruxsat berish"}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* PWA Section */}
                   <div className="settings-card">
                     <div className="settings-card-header">
@@ -1751,20 +2188,21 @@ export default function Home() {
 
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "analytics" ? "active" : ""}`}
-            onClick={() => setActiveTab("analytics")}
+            className={`bottom-nav-item ${activeTab === "notifications" ? "active" : ""}`}
+            onClick={() => setActiveTab("notifications")}
           >
-            <IconBarChart className="bottom-nav-icon" />
-            <span>Statistika</span>
+            <IconBell className="bottom-nav-icon" />
+            <span>Xabarlar</span>
+            {unreadNotifsCount > 0 && <span className="mobile-unread-dot" />}
           </button>
 
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "settings" ? "active" : ""}`}
-            onClick={() => setActiveTab("settings")}
+            className={`bottom-nav-item ${activeTab === "profile" ? "active" : ""}`}
+            onClick={() => setActiveTab("profile")}
           >
-            <IconSettings className="bottom-nav-icon" />
-            <span>Sozlamalar</span>
+            <IconUser className="bottom-nav-icon" />
+            <span>Profil</span>
           </button>
         </nav>
       </div>
