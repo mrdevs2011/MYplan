@@ -247,6 +247,12 @@ select:focus-visible {
   min-height: 40px;
 }
 
+.brand-logo {
+  border-radius: 50%;
+  object-fit: contain;
+  background: transparent !important;
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;
@@ -256,6 +262,7 @@ select:focus-visible {
 
 .sidebar-brand .brand-logo {
   flex-shrink: 0;
+  border-radius: 50%;
   filter: drop-shadow(0 0 10px rgba(180, 240, 76, 0.25));
 }
 
@@ -285,24 +292,70 @@ select:focus-visible {
   border-color: var(--border-active);
 }
 
-.mobile-close-btn {
-  display: none;
-}
-
-/* Collapsed Header state */
+/* Collapsed Header State: Alohida open tugmasi yo'q, faqat logo, hoverda open paydo bo'ladi */
 .app-layout.sidebar-collapsed .sidebar-header {
   justify-content: center;
-  flex-direction: column;
-  gap: 14px;
+  margin-bottom: 32px;
 }
 
-.app-layout.sidebar-collapsed .sidebar-brand .brand-title {
-  display: none;
+.sidebar-collapsed-logo-trigger {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+.sidebar-collapsed-logo-trigger .brand-logo {
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  transition: transform var(--dur-fast), opacity var(--dur-fast);
+  filter: drop-shadow(0 0 8px rgba(180, 240, 76, 0.25));
+}
+
+.collapsed-open-hint {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(14, 17, 23, 0.9);
+  border: 1.5px solid var(--accent-lime);
+  color: var(--accent-lime);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
+  box-shadow: 0 0 14px rgba(180, 240, 76, 0.35);
+  pointer-events: none;
+}
+
+.sidebar-collapsed-logo-trigger:hover .brand-logo,
+.sidebar-collapsed-logo-trigger:focus-visible .brand-logo {
+  transform: scale(0.9);
+  opacity: 0.15;
+}
+
+.sidebar-collapsed-logo-trigger:hover .collapsed-open-hint,
+.sidebar-collapsed-logo-trigger:focus-visible .collapsed-open-hint {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
 }
 
 .app-layout.sidebar-collapsed .sidebar-collapse-btn {
-  width: 36px;
-  height: 36px;
+  display: none !important;
+}
+
+.mobile-close-btn {
+  display: none;
 }
 
 /* Sidebar Nav Groups */

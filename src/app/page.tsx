@@ -315,20 +315,37 @@ export default function Home() {
         >
           {/* Sidebar Top: Logo & Toggle */}
           <div className="sidebar-header">
-            <a href="#workspace" className="sidebar-brand" onClick={() => setMobileMenuOpen(false)}>
-              <Image className="brand-logo" src="/myplan-logo.png" alt="MYPLAN" width={36} height={36} priority />
-              <span className="brand-title">MYPLAN</span>
-            </a>
-            {/* Desktop collapse toggle */}
-            <button
-              type="button"
-              className="sidebar-collapse-btn"
-              onClick={() => setSidebarOpen((prev) => !prev)}
-              aria-label={sidebarOpen ? "Sidebarni ixchamlash" : "Sidebarni kengaytirish"}
-              title={sidebarOpen ? "Sidebarni ixchamlash" : "Sidebarni kengaytirish"}
-            >
-              {sidebarOpen ? <IconChevronLeft className="icon-sm" /> : <IconChevronRight className="icon-sm" />}
-            </button>
+            {sidebarOpen ? (
+              <>
+                <a href="#workspace" className="sidebar-brand" onClick={() => setMobileMenuOpen(false)}>
+                  <Image className="brand-logo" src="/myplan-logo.png" alt="MYPLAN" width={36} height={36} priority />
+                  <span className="brand-title">MYPLAN</span>
+                </a>
+                <button
+                  type="button"
+                  className="sidebar-collapse-btn"
+                  onClick={() => setSidebarOpen(false)}
+                  aria-label="Sidebarni ixchamlash"
+                  title="Sidebarni ixchamlash"
+                >
+                  <IconChevronLeft className="icon-sm" />
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="sidebar-collapsed-logo-trigger"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Sidebarni ochish"
+                title="Sidebarni ochish"
+              >
+                <Image className="brand-logo" src="/myplan-logo.png" alt="MYPLAN" width={36} height={36} priority />
+                <span className="collapsed-open-hint" aria-hidden="true">
+                  <IconChevronRight className="icon-sm" />
+                </span>
+              </button>
+            )}
+
             {/* Mobile close button */}
             <button
               type="button"
@@ -405,7 +422,10 @@ export default function Home() {
             <button
               type="button"
               className="mobile-menu-trigger"
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => {
+                setMobileMenuOpen(true);
+                setSidebarOpen(true);
+              }}
               aria-label="Menyuni ochish"
             >
               <IconMenu className="icon-md" />
