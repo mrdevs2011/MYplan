@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -21,9 +21,16 @@ import {
   IconTrendUp,
   IconClock,
   IconShield,
+  IconEye,
+  IconEyeOff,
+  IconUser,
+  IconBarChart,
+  IconCamera,
 } from "@/components/icons";
 
 type Mode = "login" | "signup";
+type TabType = "today" | "activities" | "analytics" | "profile";
+
 type Activity = {
   id: string;
   title: string;
@@ -46,23 +53,47 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
+  const [age, setAge] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured());
   const [accountName, setAccountName] = useState("");
+  const [accountUsername, setAccountUsername] = useState("");
+  const [userAge, setUserAge] = useState<string | number>("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [loadingData, setLoadingData] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+
+  // Floating modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Sidebar & Navigation
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"today" | "activities">("today");
+  const [activeTab, setActiveTab] = useState<TabType>("today");
+
+  // New task fields
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newSchedule, setNewSchedule] = useState<"daily" | "once">("daily");
   const [configured] = useState(isSupabaseConfigured());
+
+  // Close modal on Escape
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && showCreateModal) {
+        setShowCreateModal(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showCreateModal]);
 
   const loadWorkspace = useCallback(async (id: string) => {
     setLoadingData(true);
@@ -78,7 +109,15 @@ export default function Home() {
           .order("created_at", { ascending: false }),
       ]);
       if (activityError) throw activityError;
+
+      const storedAvatar = typeof window !== "undefined" ? localStorage.getItem(`myplan_avatar_${id}`) : null;
+      if (storedAvatar) {
+        setAvatarUrl(storedAvatar);
+      }
+
       setAccountName(String(profile?.full_name || profile?.username || "MYPLAN user"));
+      setAccountUsername(String(profile?.username || ""));
+
       const rows = (activityRows ?? []) as Activity[];
       setActivities(rows);
       if (rows.length) {
@@ -134,19 +173,28 @@ export default function Home() {
       if (!active) return;
       const user = session?.user;
       setUserId(user?.id ?? null);
-      if (user) setAccountName(String(user.user_metadata?.full_name || user.user_metadata?.username || "Do‘stim"));
-      else {
+      if (user) {
+        setAccountName(String(user.user_metadata?.full_name || user.user_metadata?.username || "Do‘stim"));
+        setAccountUsername(String(user.user_metadata?.username || ""));
+        setUserAge(user.user_metadata?.age || "");
+        if (user.user_metadata?.avatar_url) {
+          setAvatarUrl(user.user_metadata.avatar_url);
+        }
+      } else {
         setActivities([]);
         setOccurrences([]);
         setAccountName("");
+        setAccountUsername("");
+        setUserAge("");
+        setAvatarUrl(null);
       }
-      // This is the routing decision point: authenticated -> workspace, otherwise -> login.
       setAuthReady(true);
     };
+
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       applySession(session);
     });
-    // Read the persisted session explicitly as well; don't depend only on the initial event.
+
     void supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
       if (error) setMessage("Sessiyani tekshirishda xatolik: " + error.message);
@@ -156,6 +204,7 @@ export default function Home() {
       setMessage(error instanceof Error ? error.message : "Sessiyani tekshirishda xatolik.");
       applySession(null);
     });
+
     return () => {
       active = false;
       listener.subscription.unsubscribe();
@@ -168,6 +217,33 @@ export default function Home() {
     void Promise.resolve().then(() => loadWorkspace(id));
   }, [userId, loadWorkspace]);
 
+  // Profile avatar upload handler
+  const handleAvatarChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setMessage("Rasm hajmi 2MB dan kichik bo‘lishi kerak.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const dataUrl = uploadEvent.target?.result as string;
+      if (dataUrl) {
+        setAvatarUrl(dataUrl);
+        if (userId) {
+          localStorage.setItem(`myplan_avatar_${userId}`, dataUrl);
+          const supabase = createClient();
+          void supabase.auth.updateUser({
+            data: { avatar_url: dataUrl },
+          });
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
@@ -176,10 +252,24 @@ export default function Home() {
       setMessage("Username 3–24 ta belgidan iborat bo‘lsin: lotin harflari, raqam va _.");
       return;
     }
+
+    if (mode === "signup") {
+      const parsedAge = parseInt(age, 10);
+      if (isNaN(parsedAge) || parsedAge < 6 || parsedAge > 120) {
+        setMessage("Iltimos, haqiqiy yoshingizni kiriting (6 dan 120 gacha).");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setMessage("Kiritilgan parollar bir-biriga mos kelmadi. Iltimos, qayta tekshiring.");
+        return;
+      }
+    }
+
     if (password.length < 8) {
       setMessage("Parol kamida 8 ta belgidan iborat bo‘lishi kerak.");
       return;
     }
+
     setBusy(true);
     try {
       const supabase = createClient();
@@ -188,12 +278,20 @@ export default function Home() {
         const { data, error } = await supabase.auth.signUp({
           email: authEmail,
           password,
-          options: { data: { username: normalizedUsername, full_name: name.trim() } },
+          options: {
+            data: {
+              username: normalizedUsername,
+              full_name: name.trim(),
+              age: parseInt(age, 10) || null,
+            },
+          },
         });
         if (error) throw error;
         if (data.session && data.user) {
           setUserId(data.user.id);
           setAccountName(name.trim() || normalizedUsername);
+          setAccountUsername(normalizedUsername);
+          setUserAge(age);
         } else {
           setMessage("Hisob yaratish yakunlanmadi: Supabase Email confirmation sozlamasini tekshir.");
         }
@@ -202,6 +300,8 @@ export default function Home() {
         if (error) throw error;
         setUserId(data.user.id);
         setAccountName(String(data.user.user_metadata?.full_name || data.user.user_metadata?.username || normalizedUsername));
+        setAccountUsername(String(data.user.user_metadata?.username || normalizedUsername));
+        setUserAge(data.user.user_metadata?.age || "");
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Noma’lum xatolik yuz berdi.");
@@ -219,6 +319,7 @@ export default function Home() {
       setOccurrences([]);
       setMessage("");
       setMobileMenuOpen(false);
+      setAvatarUrl(null);
     }
   }
 
@@ -243,7 +344,7 @@ export default function Home() {
       setNewTitle("");
       setNewDescription("");
       setNewSchedule("daily");
-      setShowCreate(false);
+      setShowCreateModal(false);
       await loadWorkspace(userId);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Faoliyat yaratilmadi.");
@@ -299,7 +400,98 @@ export default function Home() {
   if (userId) {
     return (
       <div className={`app-layout ${sidebarOpen ? "sidebar-expanded" : "sidebar-collapsed"}`}>
-        {/* Mobile Backdrop Overlay */}
+        {/* Floating Modal for Task Creation (Popup Dialog) */}
+        {showCreateModal && (
+          <div
+            className="floating-modal-backdrop"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowCreateModal(false);
+              }
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+          >
+            <div className="floating-modal-box">
+              <div className="modal-header">
+                <div>
+                  <span className="modal-badge">
+                    <IconPlus className="icon-xs" /> YANGI REJA
+                  </span>
+                  <h3 id="modal-title">Yangi vazifa qo‘shish</h3>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close-btn"
+                  onClick={() => setShowCreateModal(false)}
+                  aria-label="Yopish"
+                  title="Yopish (Esc)"
+                >
+                  <IconClose className="icon-sm" />
+                </button>
+              </div>
+
+              <form className="modal-form" onSubmit={createActivity}>
+                <div className="form-group">
+                  <label htmlFor="modal-task-title">Vazifa nomi *</label>
+                  <input
+                    id="modal-task-title"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="Masalan: Ertalab 30 daqiqa yugurish"
+                    maxLength={160}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="modal-task-desc">Izoh (ixtiyoriy)</label>
+                  <input
+                    id="modal-task-desc"
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    placeholder="Qo‘shimcha motivatsiya yoki aniqroq qadamlar"
+                    maxLength={500}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="modal-task-schedule">Takrorlanish tartibi</label>
+                  <select
+                    id="modal-task-schedule"
+                    value={newSchedule}
+                    onChange={(e) => setNewSchedule(e.target.value as "daily" | "once")}
+                  >
+                    <option value="daily">Har kuni (Daily habit)</option>
+                    <option value="once">Bir martalik (One-off task)</option>
+                  </select>
+                </div>
+
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="btn-modal-cancel"
+                    onClick={() => setShowCreateModal(false)}
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-modal-submit"
+                    disabled={busy || !newTitle.trim()}
+                  >
+                    {busy ? "Saqlanmoqda…" : "Vazifani qo‘shish"}
+                    <IconArrowRight className="icon-sm" />
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Backdrop Overlay for Drawer */}
         {mobileMenuOpen && (
           <div
             className="mobile-backdrop"
@@ -308,7 +500,7 @@ export default function Home() {
           />
         )}
 
-        {/* Sidebar (Desktop + Mobile Drawer) */}
+        {/* Sidebar (Desktop Leftbar + Mobile Drawer) */}
         <aside
           className={`app-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}
           aria-label="Asosiy navigatsiya"
@@ -357,7 +549,24 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Navigation Links */}
+          {/* Quick Action Button: + Vazifa / + */}
+          <div className="sidebar-action-wrap">
+            <button
+              type="button"
+              className="sidebar-add-task-btn"
+              onClick={() => {
+                setShowCreateModal(true);
+                setMobileMenuOpen(false);
+              }}
+              aria-label="Yangi vazifa qo‘shish"
+              title="Yangi vazifa qo‘shish"
+            >
+              <IconPlus className="icon-sm" />
+              <span className="btn-add-text">Vazifa</span>
+            </button>
+          </div>
+
+          {/* Navigation Tabs in Sidebar */}
           <div className="sidebar-nav-group">
             <span className="nav-caption">ISH MAYDONI</span>
             <nav className="nav-links">
@@ -386,14 +595,53 @@ export default function Home() {
                 <span className="nav-label">Faoliyatlarim</span>
                 {activeTab === "activities" && <span className="active-indicator" />}
               </button>
+
+              <button
+                type="button"
+                className={`nav-item ${activeTab === "analytics" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab("analytics");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <IconBarChart className="nav-icon" />
+                <span className="nav-label">Statistika</span>
+                {activeTab === "analytics" && <span className="active-indicator" />}
+              </button>
+
+              <button
+                type="button"
+                className={`nav-item ${activeTab === "profile" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab("profile");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <IconUser className="nav-icon" />
+                <span className="nav-label">Profilim</span>
+                {activeTab === "profile" && <span className="active-indicator" />}
+              </button>
             </nav>
           </div>
 
-          {/* Sidebar User Profile & Logout */}
+          {/* Sidebar Footer (Profile + Logout) */}
           <div className="sidebar-footer">
-            <div className="user-profile-card">
+            <button
+              type="button"
+              className="user-profile-card-btn"
+              onClick={() => {
+                setActiveTab("profile");
+                setMobileMenuOpen(false);
+              }}
+              title="Profilni ko‘rish"
+            >
               <div className="user-avatar">
-                {(accountName || "M").slice(0, 1).toUpperCase()}
+                {avatarUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={avatarUrl} alt="Avatar" className="avatar-img" />
+                ) : (
+                  (accountName || "M").slice(0, 1).toUpperCase()
+                )}
               </div>
               <div className="user-info">
                 <span className="user-name" title={accountName || "MYPLAN user"}>
@@ -401,7 +649,7 @@ export default function Home() {
                 </span>
                 <span className="user-tag">Shaxsiy hisob</span>
               </div>
-            </div>
+            </button>
 
             <button
               type="button"
@@ -436,13 +684,25 @@ export default function Home() {
               <span>MYPLAN</span>
             </div>
 
-            <div className="mobile-user-avatar" title={accountName || "Foydalanuvchi"}>
-              {(accountName || "M").slice(0, 1).toUpperCase()}
-            </div>
+            <button
+              type="button"
+              className="mobile-avatar-btn"
+              onClick={() => setActiveTab("profile")}
+              title="Profil"
+            >
+              <div className="mobile-user-avatar">
+                {avatarUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={avatarUrl} alt="Avatar" className="avatar-img" />
+                ) : (
+                  (accountName || "M").slice(0, 1).toUpperCase()
+                )}
+              </div>
+            </button>
           </header>
 
           <main className="content-container" id="workspace">
-            {/* Header Greeting & Date */}
+            {/* Header Greeting & Header Navigation Tabs */}
             <header className="page-header">
               <div className="header-text">
                 <span className="page-kicker">
@@ -451,12 +711,43 @@ export default function Home() {
                 <h1 className="page-title">
                   Salom, <span className="highlight">{(accountName || "do‘stim").split(" ")[0]}</span>
                 </h1>
-                <p className="page-subtitle">Bugun o‘zing uchun yana bir muhim qadam tashla.</p>
+                <p className="page-subtitle">Bugun o‘zing uchun yana bir muhim qadam tashla. · {dateLabel.format(new Date())}</p>
               </div>
 
-              <div className="date-pill">
-                <IconClock className="icon-xs" />
-                <span>{dateLabel.format(new Date())}</span>
+              {/* Header Quick Tab Bar */}
+              <div className="header-tab-bar" role="tablist">
+                <button
+                  type="button"
+                  className={`header-tab-btn ${activeTab === "today" ? "active" : ""}`}
+                  onClick={() => setActiveTab("today")}
+                >
+                  <IconCalendar className="icon-xs" />
+                  <span>Bugun</span>
+                </button>
+                <button
+                  type="button"
+                  className={`header-tab-btn ${activeTab === "activities" ? "active" : ""}`}
+                  onClick={() => setActiveTab("activities")}
+                >
+                  <IconList className="icon-xs" />
+                  <span>Faoliyatlar</span>
+                </button>
+                <button
+                  type="button"
+                  className={`header-tab-btn ${activeTab === "analytics" ? "active" : ""}`}
+                  onClick={() => setActiveTab("analytics")}
+                >
+                  <IconBarChart className="icon-xs" />
+                  <span>Statistika</span>
+                </button>
+                <button
+                  type="button"
+                  className={`header-tab-btn ${activeTab === "profile" ? "active" : ""}`}
+                  onClick={() => setActiveTab("profile")}
+                >
+                  <IconUser className="icon-xs" />
+                  <span>Profil</span>
+                </button>
               </div>
             </header>
 
@@ -475,230 +766,391 @@ export default function Home() {
               </div>
             )}
 
-            {/* Overview / Stats Grid */}
+            {/* TAB 1: BUGUNGI REJA */}
             {activeTab === "today" && (
-              <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
-                {/* Main Progress Card */}
-                <article className="stat-card progress-card">
-                  <div className="stat-header">
-                    <span className="stat-tag">BUGUNGI NATIJA</span>
-                    <IconTarget className="stat-icon" />
-                  </div>
-                  <div className="stat-value-row">
-                    <span className="stat-value">{percent}</span>
-                    <span className="stat-unit">%</span>
-                  </div>
-                  <div className="progress-bar-track">
-                    <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
-                  </div>
-                  <p className="stat-footer">
-                    <strong className="text-lime">{completedCount}</strong> ta bajarildi ·{" "}
-                    <strong>{Math.max(activities.length - completedCount, 0)}</strong> ta qoldi
-                  </p>
-                </article>
+              <>
+                <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
+                  <article className="stat-card progress-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">BUGUNGI NATIJA</span>
+                      <IconTarget className="stat-icon" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">{percent}</span>
+                      <span className="stat-unit">%</span>
+                    </div>
+                    <div className="progress-bar-track">
+                      <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
+                    </div>
+                    <p className="stat-footer">
+                      <strong className="text-lime">{completedCount}</strong> ta bajarildi ·{" "}
+                      <strong>{Math.max(activities.length - completedCount, 0)}</strong> ta qoldi
+                    </p>
+                  </article>
 
-                {/* Total Activities */}
-                <article className="stat-card">
-                  <div className="stat-header">
-                    <span className="stat-tag">FAOLIYATLAR</span>
-                    <IconList className="stat-icon" />
-                  </div>
-                  <div className="stat-value-row">
-                    <span className="stat-value">{activities.length.toString().padStart(2, "0")}</span>
-                  </div>
-                  <p className="stat-footer">Faol belgilangan rejalaring</p>
-                </article>
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">FAOLIYATLAR</span>
+                      <IconList className="stat-icon" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">{activities.length.toString().padStart(2, "0")}</span>
+                    </div>
+                    <p className="stat-footer">Faol belgilangan rejalaring</p>
+                  </article>
 
-                {/* Today Completed */}
-                <article className="stat-card">
-                  <div className="stat-header">
-                    <span className="stat-tag">BUGUN BAJARILDI</span>
-                    <IconTrendUp className="stat-icon text-lime" />
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">BUGUN BAJARILDI</span>
+                      <IconTrendUp className="stat-icon text-lime" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value text-lime">{completedCount.toString().padStart(2, "0")}</span>
+                    </div>
+                    <p className="stat-footer">Muvaffaqiyatli yakunlangan ishlar</p>
+                  </article>
+                </section>
+
+                <section className="activities-container">
+                  <div className="section-header-bar">
+                    <div>
+                      <span className="section-sub">BUGUNGI KUN TARTIBI</span>
+                      <h2 className="section-heading">Bugungi vazifalar</h2>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn-primary-action"
+                      onClick={() => setShowCreateModal(true)}
+                    >
+                      <IconPlus className="icon-sm" />
+                      <span>+ Yangi vazifa</span>
+                    </button>
                   </div>
-                  <div className="stat-value-row">
-                    <span className="stat-value text-lime">{completedCount.toString().padStart(2, "0")}</span>
+
+                  {loadingData ? (
+                    <div className="loading-state-card">
+                      <div className="loading-spinner" />
+                      <p>Rejalaringiz yuklanmoqda…</p>
+                    </div>
+                  ) : activities.length === 0 ? (
+                    <div className="empty-state-box">
+                      <div className="empty-icon-wrap">
+                        <IconTarget className="icon-lg" />
+                      </div>
+                      <h3>Hozircha hech qanday vazifa yo‘q</h3>
+                      <p>
+                        Katta natijalar har kuni qilinadigan kichik qadamlardan boshlanadi.
+                        Birinchi maqsadingizni belgilang!
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-empty-create"
+                        onClick={() => setShowCreateModal(true)}
+                      >
+                        <IconPlus className="icon-sm" />
+                        <span>Birinchi vazifangizni yarating</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="task-items-list">
+                      {activities.map((activity) => {
+                        const occurrence = occurrences.find((item) => item.activity_id === activity.id);
+                        const done = occurrence?.status === "completed";
+
+                        return (
+                          <article
+                            className={`task-card ${done ? "is-completed" : ""}`}
+                            key={activity.id}
+                          >
+                            <button
+                              type="button"
+                              className="checkbox-btn"
+                              aria-label={done ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
+                              onClick={() => void toggleComplete(activity)}
+                            >
+                              {done && <IconCheck className="checkbox-icon" />}
+                            </button>
+
+                            <div className="task-content">
+                              <h4 className="task-title">{activity.title}</h4>
+                              {activity.description && (
+                                <p className="task-description">{activity.description}</p>
+                              )}
+                              <div className="task-meta">
+                                <span className={`schedule-badge ${activity.schedule_type}`}>
+                                  {activity.schedule_type === "daily" ? "HAR KUNI" : "BIR MARTALIK"}
+                                </span>
+                                {done && (
+                                  <span className="status-badge done">
+                                    <IconCheck className="icon-xs" /> Bajarildi
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="task-actions">
+                              <button
+                                type="button"
+                                className="btn-archive"
+                                onClick={() => void archiveActivity(activity.id)}
+                                title="Faoliyatni arxivlash"
+                                aria-label="Faoliyatni arxivlash"
+                              >
+                                <IconArchive className="icon-sm" />
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {/* TAB 2: BARCHA FAOLIYATLAR */}
+            {activeTab === "activities" && (
+              <section className="activities-container">
+                <div className="section-header-bar">
+                  <div>
+                    <span className="section-sub">BARCHA FAOLIYATLARINGIZ</span>
+                    <h2 className="section-heading">Faol rejalar ro‘yxati</h2>
                   </div>
-                  <p className="stat-footer">Muvaffaqiyatli yakunlangan ishlar</p>
-                </article>
+
+                  <button
+                    type="button"
+                    className="btn-primary-action"
+                    onClick={() => setShowCreateModal(true)}
+                  >
+                    <IconPlus className="icon-sm" />
+                    <span>+ Yangi vazifa</span>
+                  </button>
+                </div>
+
+                {activities.length === 0 ? (
+                  <div className="empty-state-box">
+                    <div className="empty-icon-wrap">
+                      <IconList className="icon-lg" />
+                    </div>
+                    <h3>Faoliyatlar ro‘yxati bo‘sh</h3>
+                    <p>O‘zingiz uchun doimiy odatlar yoki bir martalik rejalarni kiritishni boshlang.</p>
+                    <button
+                      type="button"
+                      className="btn-empty-create"
+                      onClick={() => setShowCreateModal(true)}
+                    >
+                      <IconPlus className="icon-sm" />
+                      <span>Yangi vazifa yaratish</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="task-items-list">
+                    {activities.map((activity) => {
+                      const occurrence = occurrences.find((item) => item.activity_id === activity.id);
+                      const done = occurrence?.status === "completed";
+
+                      return (
+                        <article
+                          className={`task-card ${done ? "is-completed" : ""}`}
+                          key={activity.id}
+                        >
+                          <button
+                            type="button"
+                            className="checkbox-btn"
+                            aria-label={done ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
+                            onClick={() => void toggleComplete(activity)}
+                          >
+                            {done && <IconCheck className="checkbox-icon" />}
+                          </button>
+
+                          <div className="task-content">
+                            <h4 className="task-title">{activity.title}</h4>
+                            {activity.description && (
+                              <p className="task-description">{activity.description}</p>
+                            )}
+                            <div className="task-meta">
+                              <span className={`schedule-badge ${activity.schedule_type}`}>
+                                {activity.schedule_type === "daily" ? "HAR KUNI" : "BIR MARTALIK"}
+                              </span>
+                              <span className="meta-date">
+                                Boshlangan: {activity.starts_on}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="task-actions">
+                            <button
+                              type="button"
+                              className="btn-archive"
+                              onClick={() => void archiveActivity(activity.id)}
+                              title="Faoliyatni arxivlash"
+                              aria-label="Faoliyatni arxivlash"
+                            >
+                              <IconArchive className="icon-sm" />
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
             )}
 
-            {/* Activities Section */}
-            <section className="activities-container">
-              <div className="section-header-bar">
-                <div>
-                  <span className="section-sub">
-                    {activeTab === "today" ? "BUGUNGI KUN TARTIBI" : "BARCHA FAOLIYATLARING"}
-                  </span>
-                  <h2 className="section-heading">
-                    {activeTab === "today" ? "Bugungi vazifalar" : "Barcha faoliyatlarim"}
-                  </h2>
+            {/* TAB 3: STATISTIKA & TAHLIL */}
+            {activeTab === "analytics" && (
+              <section className="analytics-view">
+                <div className="section-header-bar">
+                  <div>
+                    <span className="section-sub">TARAQQIYOTINGIZ KO‘ZGUSI</span>
+                    <h2 className="section-heading">Samaradorlik statistikasi</h2>
+                  </div>
                 </div>
 
-                <button
-                  type="button"
-                  className={`btn-primary-action ${showCreate ? "active" : ""}`}
-                  onClick={() => setShowCreate((v) => !v)}
-                >
-                  {showCreate ? (
-                    <>
-                      <IconClose className="icon-sm" />
-                      <span>Bekor qilish</span>
-                    </>
-                  ) : (
-                    <>
-                      <IconPlus className="icon-sm" />
-                      <span>Yangi vazifa</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* Create Activity Form */}
-              {showCreate && (
-                <form className="create-activity-box" onSubmit={createActivity}>
-                  <div className="create-box-header">
-                    <h3>Yangi vazifa qo‘shish</h3>
-                    <p>O‘z maqsadingni nomla va takrorlanish tartibini belgilang.</p>
-                  </div>
-
-                  <div className="create-inputs-grid">
-                    <div className="form-group field-title">
-                      <label htmlFor="task-title">Vazifa nomi *</label>
-                      <input
-                        id="task-title"
-                        value={newTitle}
-                        onChange={(e) => setNewTitle(e.target.value)}
-                        placeholder="Masalan: 20 bet kitob o‘qish"
-                        maxLength={160}
-                        required
-                        autoFocus
-                      />
+                <div className="stats-grid">
+                  <article className="stat-card progress-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">BUGUNGI SAMARADORLIK</span>
+                      <IconTarget className="stat-icon" />
                     </div>
-
-                    <div className="form-group field-desc">
-                      <label htmlFor="task-desc">Izoh (ixtiyoriy)</label>
-                      <input
-                        id="task-desc"
-                        value={newDescription}
-                        onChange={(e) => setNewDescription(e.target.value)}
-                        placeholder="Qo‘shimcha eslatma yoki maqsad"
-                        maxLength={500}
-                      />
+                    <div className="stat-value-row">
+                      <span className="stat-value">{percent}</span>
+                      <span className="stat-unit">%</span>
                     </div>
-
-                    <div className="form-group field-schedule">
-                      <label htmlFor="task-schedule">Takrorlanish</label>
-                      <select
-                        id="task-schedule"
-                        value={newSchedule}
-                        onChange={(e) => setNewSchedule(e.target.value as "daily" | "once")}
-                      >
-                        <option value="daily">Har kuni</option>
-                        <option value="once">Bir martalik</option>
-                      </select>
+                    <div className="progress-bar-track">
+                      <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
                     </div>
-                  </div>
+                    <p className="stat-footer">{completedCount} ta vazifa muvaffaqiyatli yakunlandi</p>
+                  </article>
 
-                  <div className="create-box-actions">
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => setShowCreate(false)}
-                    >
-                      Yopish
-                    </button>
-                    <button
-                      type="submit"
-                      className="btn-submit-task"
-                      disabled={busy || !newTitle.trim()}
-                    >
-                      {busy ? "Saqlanmoqda…" : "Vazifani saqlash"}
-                      <IconArrowRight className="icon-sm" />
-                    </button>
-                  </div>
-                </form>
-              )}
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">DOIMIY ODATHON</span>
+                      <IconClock className="stat-icon text-lime" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">
+                        {activities.filter((a) => a.schedule_type === "daily").length.toString().padStart(2, "0")}
+                      </span>
+                    </div>
+                    <p className="stat-footer">Har kungi takrorlanuvchi rejalaringiz</p>
+                  </article>
 
-              {/* Activities Content */}
-              {loadingData ? (
-                <div className="loading-state-card">
-                  <div className="loading-spinner" />
-                  <p>Rejalaringiz yuklanmoqda…</p>
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">BIR MARTALIK MAQSADLAR</span>
+                      <IconSparkles className="stat-icon text-lime" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">
+                        {activities.filter((a) => a.schedule_type === "once").length.toString().padStart(2, "0")}
+                      </span>
+                    </div>
+                    <p className="stat-footer">Maxsus vazifalar soni</p>
+                  </article>
                 </div>
-              ) : activities.length === 0 ? (
-                <div className="empty-state-box">
-                  <div className="empty-icon-wrap">
-                    <IconTarget className="icon-lg" />
+
+                <div className="analytics-tips-card">
+                  <div className="tip-badge">
+                    <IconSparkles className="icon-xs" /> TAVSIYA
                   </div>
-                  <h3>Hozircha hech qanday vazifa yo‘q</h3>
+                  <h3>Barqarorlik — muvaffaqiyat kaliti</h3>
                   <p>
-                    Katta natijalar har kuni qilinadigan kichik qadamlardan boshlanadi.
-                    Birinchi maqsadingizni belgilang!
+                    Rejalaringizni har kuni bir xil vaqtda bajarishga odatlaning. Hatto kichik 1% lik
+                    yutuq ham bir yil ichida 37 barobar kattaroq natijaga aylanadi.
                   </p>
-                  <button
-                    type="button"
-                    className="btn-empty-create"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <IconPlus className="icon-sm" />
-                    <span>Birinchi vazifangizni yarating</span>
-                  </button>
                 </div>
-              ) : (
-                <div className="task-items-list">
-                  {activities.map((activity) => {
-                    const occurrence = occurrences.find((item) => item.activity_id === activity.id);
-                    const done = occurrence?.status === "completed";
+              </section>
+            )}
 
-                    return (
-                      <article
-                        className={`task-card ${done ? "is-completed" : ""}`}
-                        key={activity.id}
-                      >
-                        <button
-                          type="button"
-                          className="checkbox-btn"
-                          aria-label={done ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
-                          onClick={() => void toggleComplete(activity)}
-                        >
-                          {done && <IconCheck className="checkbox-icon" />}
-                        </button>
-
-                        <div className="task-content">
-                          <h4 className="task-title">{activity.title}</h4>
-                          {activity.description && (
-                            <p className="task-description">{activity.description}</p>
-                          )}
-                          <div className="task-meta">
-                            <span className={`schedule-badge ${activity.schedule_type}`}>
-                              {activity.schedule_type === "daily" ? "HAR KUNI" : "BIR MARTALIK"}
-                            </span>
-                            {done && (
-                              <span className="status-badge done">
-                                <IconCheck className="icon-xs" /> Bajarildi
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="task-actions">
-                          <button
-                            type="button"
-                            className="btn-archive"
-                            onClick={() => void archiveActivity(activity.id)}
-                            title="Faoliyatni arxivlash"
-                            aria-label="Faoliyatni arxivlash"
-                          >
-                            <IconArchive className="icon-sm" />
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
+            {/* TAB 4: MENING PROFILIM (READ-ONLY + PROFILE PIC) */}
+            {activeTab === "profile" && (
+              <section className="profile-view">
+                <div className="section-header-bar">
+                  <div>
+                    <span className="section-sub">SHAXSIY HISOBINGIZ</span>
+                    <h2 className="section-heading">Foydalanuvchi profili</h2>
+                  </div>
                 </div>
-              )}
-            </section>
+
+                <div className="profile-card-container">
+                  {/* Avatar Upload Block */}
+                  <div className="profile-avatar-block">
+                    <div className="profile-large-avatar-wrap">
+                      {avatarUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={avatarUrl} alt="Profil rasmi" className="profile-large-avatar" />
+                      ) : (
+                        <div className="profile-avatar-placeholder">
+                          {(accountName || "M").slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <label htmlFor="avatar-file-input" className="avatar-upload-overlay" title="Rasm yuklash / almashtirish">
+                        <IconCamera className="icon-sm" />
+                        <span>Rasm</span>
+                        <input
+                          id="avatar-file-input"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarChange}
+                          style={{ display: "none" }}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="profile-header-meta">
+                      <h3>{accountName || "Foydalanuvchi"}</h3>
+                      <p className="profile-username">@{accountUsername || "username"}</p>
+                      <span className="profile-status-pill">
+                        <IconShield className="icon-xs" /> Shaxsiy hisob faol
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Read-Only Information Fields */}
+                  <div className="profile-details-grid">
+                    <div className="profile-info-item">
+                      <span className="info-label">Ism va familiya</span>
+                      <p className="info-value">{accountName || "Kiritilmagan"}</p>
+                    </div>
+
+                    <div className="profile-info-item">
+                      <span className="info-label">Foydalanuvchi nomi (Username)</span>
+                      <p className="info-value font-mono">@{accountUsername || "username"}</p>
+                    </div>
+
+                    <div className="profile-info-item">
+                      <span className="info-label">Yoshi</span>
+                      <p className="info-value">{userAge ? `${userAge} yosh` : "Belgilanmagan"}</p>
+                    </div>
+
+                    <div className="profile-info-item">
+                      <span className="info-label">Hisob darajasi</span>
+                      <p className="info-value text-lime">MYPLAN Standart (Himoyalangan)</p>
+                    </div>
+
+                    <div className="profile-info-item">
+                      <span className="info-label">Faol rejalaringiz</span>
+                      <p className="info-value">{activities.length} ta vazifa</p>
+                    </div>
+
+                    <div className="profile-info-item">
+                      <span className="info-label">Bugungi natija</span>
+                      <p className="info-value text-lime">{percent}% bajarildi</p>
+                    </div>
+                  </div>
+
+                  <div className="profile-notice-box">
+                    <IconShield className="icon-sm text-lime" />
+                    <p>
+                      <strong>Xavfsizlik eslatmasi:</strong> Shaxsiy hisob ma’lumotlaringiz (ism, username va yosh)
+                      xavfsizlikni ta’minlash maqsadida faqat ko‘rish rejimida saqlanadi.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* Workspace Footer */}
             <footer className="app-footer">
@@ -713,7 +1165,7 @@ export default function Home() {
             </footer>
           </main>
 
-          {/* Mobile Bottom Navigation Bar */}
+          {/* Mobile & Tablet Bottom Navigation Bar */}
           <nav className="mobile-bottom-nav" aria-label="Mobil navigatsiya">
             <button
               type="button"
@@ -726,20 +1178,39 @@ export default function Home() {
 
             <button
               type="button"
+              className={`bottom-nav-item ${activeTab === "activities" ? "active" : ""}`}
+              onClick={() => setActiveTab("activities")}
+            >
+              <IconList className="bottom-nav-icon" />
+              <span>Faoliyatlar</span>
+            </button>
+
+            <button
+              type="button"
               className="bottom-nav-create"
-              onClick={() => setShowCreate((v) => !v)}
+              onClick={() => setShowCreateModal(true)}
               aria-label="Vazifa qo‘shish"
+              title="Vazifa qo‘shish"
             >
               <IconPlus className="icon-md" />
             </button>
 
             <button
               type="button"
-              className={`bottom-nav-item ${activeTab === "activities" ? "active" : ""}`}
-              onClick={() => setActiveTab("activities")}
+              className={`bottom-nav-item ${activeTab === "analytics" ? "active" : ""}`}
+              onClick={() => setActiveTab("analytics")}
             >
-              <IconList className="bottom-nav-icon" />
-              <span>Faoliyatlar</span>
+              <IconBarChart className="bottom-nav-icon" />
+              <span>Statistika</span>
+            </button>
+
+            <button
+              type="button"
+              className={`bottom-nav-item ${activeTab === "profile" ? "active" : ""}`}
+              onClick={() => setActiveTab("profile")}
+            >
+              <IconUser className="bottom-nav-icon" />
+              <span>Profil</span>
             </button>
           </nav>
         </div>
@@ -747,7 +1218,7 @@ export default function Home() {
     );
   }
 
-  // Landing / Authentication View
+  // Landing & Authentication View
   return (
     <div className="landing-layout">
       {/* Top Navigation */}
@@ -859,7 +1330,7 @@ export default function Home() {
               <form className="auth-form-body" onSubmit={submit}>
                 {mode === "signup" && (
                   <div className="input-group">
-                    <label htmlFor="auth-name">Ismingiz</label>
+                    <label htmlFor="auth-name">Ismingiz *</label>
                     <input
                       id="auth-name"
                       autoComplete="name"
@@ -873,7 +1344,7 @@ export default function Home() {
                 )}
 
                 <div className="input-group">
-                  <label htmlFor="auth-username">Username</label>
+                  <label htmlFor="auth-username">Username *</label>
                   <input
                     id="auth-username"
                     type="text"
@@ -890,19 +1361,75 @@ export default function Home() {
                   />
                 </div>
 
+                {mode === "signup" && (
+                  <div className="input-group">
+                    <label htmlFor="auth-age">Yoshingiz *</label>
+                    <input
+                      id="auth-age"
+                      type="number"
+                      min={6}
+                      max={120}
+                      value={age}
+                      onChange={(e) => setAge(e.target.value)}
+                      placeholder="Masalan: 21"
+                      required
+                    />
+                  </div>
+                )}
+
+                {/* Password input with eye toggle */}
                 <div className="input-group">
-                  <label htmlFor="auth-password">Parol</label>
-                  <input
-                    id="auth-password"
-                    type="password"
-                    autoComplete={mode === "login" ? "current-password" : "new-password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Kamida 8 ta belgi"
-                    minLength={8}
-                    required
-                  />
+                  <label htmlFor="auth-password">Parol *</label>
+                  <div className="password-input-wrap">
+                    <input
+                      id="auth-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete={mode === "login" ? "current-password" : "new-password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Kamida 8 ta belgi"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="eye-toggle-btn"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Parolni yashirish" : "Parolni ko‘rsatish"}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Confirm Password input with eye toggle (signup only) */}
+                {mode === "signup" && (
+                  <div className="input-group">
+                    <label htmlFor="auth-confirm-password">Parolni tasdiqlash *</label>
+                    <div className="password-input-wrap">
+                      <input
+                        id="auth-confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Parolni qayta kiriting"
+                        minLength={8}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="eye-toggle-btn"
+                        onClick={() => setShowConfirmPassword((prev) => !prev)}
+                        aria-label={showConfirmPassword ? "Parolni yashirish" : "Parolni ko‘rsatish"}
+                        tabIndex={-1}
+                      >
+                        {showConfirmPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {message && (
                   <div className="auth-alert-message" role="status">
@@ -1021,7 +1548,7 @@ export default function Home() {
                 <div className="step-badge">01</div>
                 <div className="step-info">
                   <h4>Hisob yarating</h4>
-                  <p>Faqat username va parol bilan bir zumda o‘z shaxsiy xonangizga ega bo‘ling.</p>
+                  <p>Faqat username, ism, yosh va parol bilan bir zumda o‘z shaxsiy xonangizga ega bo‘ling.</p>
                 </div>
               </div>
 
@@ -1029,7 +1556,7 @@ export default function Home() {
                 <div className="step-badge">02</div>
                 <div className="step-info">
                   <h4>Faoliyatlaringizni kiriting</h4>
-                  <p>Har kungi muhim vazifa va odatlaringizni ro‘yxatga qo‘shing.</p>
+                  <p>Har kungi muhim vazifa va odatlaringizni modal orqali osongina ro‘yxatga qo‘shing.</p>
                 </div>
               </div>
 
@@ -1037,7 +1564,7 @@ export default function Home() {
                 <div className="step-badge">03</div>
                 <div className="step-info">
                   <h4>Har kuni oz-ozdan oldinga yuring</h4>
-                  <p>Vazifalarni bajargan sari belgilanib boradigan natija bilan o‘zingizni rag‘batlantiring.</p>
+                  <p>Vazifalarni bajargan sari ko‘tariladigan statistika bilan o‘zingizni ilhomlantiring.</p>
                 </div>
               </div>
             </div>
