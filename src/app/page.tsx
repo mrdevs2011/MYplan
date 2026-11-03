@@ -81,6 +81,66 @@ export default function Home() {
   const [countTarget, setCountTarget] = useState("");
   const [countUnit, setCountUnit] = useState("marta");
 
+  // Debounced inline errors (foydalanuvchi yozib to'xtagach 2 soniya / 2000ms dan so'ng chiqadi)
+  const [debouncedAgeError, setDebouncedAgeError] = useState("");
+  const [debouncedPasswordError, setDebouncedPasswordError] = useState("");
+  const [debouncedCountError, setDebouncedCountError] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (mode !== "signup" || !age) {
+        setDebouncedAgeError("");
+        return;
+      }
+      const parsed = parseInt(age, 10);
+      if (age.length > 3 || parsed > 999) {
+        setDebouncedAgeError("Hakker aka o'xshamay qoldiku! Dunyoda buncha yashaydigan odam yo'q!");
+      } else if (parsed > 122) {
+        setDebouncedAgeError(`Oka nima qilas bizi aldap ${age} yoshga dunyoda hech kim kirmaganku! Pasportni olib keling bir ko‘raylik 😄`);
+      } else if (parsed < 6 && age !== "") {
+        setDebouncedAgeError("Hali tug‘ilmasdan turib reja qilyapsizmi bratishka? 6 yoshdan oshganda keling!");
+      } else {
+        setDebouncedAgeError("");
+      }
+    }, mode !== "signup" || !age ? 0 : 2000);
+    return () => clearTimeout(timer);
+  }, [age, mode]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!password) {
+        setDebouncedPasswordError("");
+        return;
+      }
+      if (password.length > 0 && password.length < 8) {
+        setDebouncedPasswordError("8 xonaga yetkazmasang kirgizmaymiz bro! Kamida 8 ta belgi bo‘lsin.");
+      } else if (mode === "signup" && confirmPassword && password !== confirmPassword) {
+        setDebouncedPasswordError("Ikki parol mos emas bratishka, o‘zingni aldayapsanmi?!");
+      } else {
+        setDebouncedPasswordError("");
+      }
+    }, !password ? 0 : 2000);
+    return () => clearTimeout(timer);
+  }, [password, confirmPassword, mode]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (createTaskKind !== "count" || !countTarget) {
+        setDebouncedCountError("");
+        return;
+      }
+      const val = parseInt(countTarget, 10);
+      if (val === 0 || val === 1) {
+        setDebouncedCountError("0 yoki 1 ta ish uchun sanoqli tabga nima bor bro? Bir martalik tabga o‘tib qo‘ya qoling!");
+      } else if (val > 99999 || countTarget.length > 5) {
+        setDebouncedCountError("99999 dan oshirib qayerga ketyapsiz bro? Robot emassizku!");
+      } else {
+        setDebouncedCountError("");
+      }
+    }, createTaskKind !== "count" || !countTarget ? 0 : 2000);
+    return () => clearTimeout(timer);
+  }, [countTarget, createTaskKind]);
+
   // Sidebar & Navigation
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -277,32 +337,32 @@ export default function Home() {
     setMessage("");
     const normalizedUsername = username.trim().toLowerCase();
     if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
-      setMessage("Username 3–24 ta belgidan iborat bo‘lsin: lotin harflari, raqam va _.");
+      setMessage("Username qani bro, nomingiz sirmi?! 3–24 ta harf, raqam yoki _ kiriting.");
       return;
     }
 
     if (mode === "signup") {
       if (age.length > 3 || parseInt(age, 10) > 999) {
-        setMessage("Hakker aka o'xshamay qoldiku");
+        setMessage("Hakker aka o'xshamay qoldiku! Dunyoda buncha yashaydigan odam yo'q!");
         return;
       }
       const parsedAge = parseInt(age, 10);
       if (isNaN(parsedAge) || parsedAge < 6) {
-        setMessage("Iltimos, haqiqiy yoshingizni kiriting (kamida 6 yosh).");
+        setMessage("Hali tug‘ilmasdan turib reja qilyapsizmi bratishka? 6 yoshdan oshganda keling!");
         return;
       }
       if (parsedAge > 122) {
-        setMessage(`Oka nima qilas bizi aldap ${age} yoshga dunyoda hech kim kirmaganku`);
+        setMessage(`Oka nima qilas bizi aldap ${age} yoshga dunyoda hech kim kirmaganku! Pasportni olib keling bir ko‘raylik 😄`);
         return;
       }
       if (password !== confirmPassword) {
-        setMessage("Kiritilgan parollar bir-biriga mos kelmadi. Iltimos, qayta tekshiring.");
+        setMessage("Ikki parol mos emas bratishka, o‘zingni aldayapsanmi?!");
         return;
       }
     }
 
     if (password.length < 8) {
-      setMessage("Parol kamida 8 ta belgidan iborat bo‘lishi kerak.");
+      setMessage("8 xonaga yetkazmasang kirgizmaymiz bro! Kamida 8 ta belgi bo‘lsin.");
       return;
     }
 
@@ -340,7 +400,22 @@ export default function Home() {
         setUserAge(data.user.user_metadata?.age || "");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Noma’lum xatolik yuz berdi.");
+      const rawMsg = error instanceof Error ? error.message : "";
+      if (
+        mode === "login" &&
+        (rawMsg.toLowerCase().includes("invalid") ||
+          rawMsg.toLowerCase().includes("credentials") ||
+          rawMsg.toLowerCase().includes("not found"))
+      ) {
+        setMessage("Bratishka, esingdan chiqib qoldimi yoki klaviatura harfiga adashdingmi? Qaytadan urinib ko‘r!");
+      } else if (
+        rawMsg.toLowerCase().includes("already registered") ||
+        rawMsg.toLowerCase().includes("exists")
+      ) {
+        setMessage("Bu username allaqachon band qilingan bratishka! Boshqa nom tanlang.");
+      } else {
+        setMessage("Bratishka, esingdan chiqib qoldimi yoki klaviatura harfiga adashdingmi? Qaytadan urinib ko‘r!");
+      }
     } finally {
       setBusy(false);
     }
@@ -369,8 +444,12 @@ export default function Home() {
 
     if (createTaskKind === "count") {
       const parsed = parseInt(countTarget, 10);
-      if (isNaN(parsed) || parsed === 0 || parsed === 1 || parsed > 99999) {
-        setMessage("Sanoq 2 dan 99999 gacha bo‘lishi shart.");
+      if (isNaN(parsed) || parsed === 0 || parsed === 1) {
+        setMessage("0 yoki 1 ta ish uchun sanoqli tabga nima bor bro? Bir martalik tabga o‘tib qo‘ya qoling!");
+        return;
+      }
+      if (parsed > 99999) {
+        setMessage("99999 dan oshirib qayerga ketyapsiz bro? Robot emassizku!");
         return;
       }
       targetValue = parsed;
@@ -524,11 +603,16 @@ export default function Home() {
 
   if (!authReady) {
     return (
-      <main className="loading-screen" aria-busy="true" aria-label="MYPLAN yuklanmoqda">
+      <main className="loading-screen" aria-busy="true" aria-label="MYPLAN">
         <div className="loading-card">
-          <Image className="loading-logo" src="/myplan-logo.png" alt="MYPLAN" width={52} height={52} priority />
-          <div className="loading-spinner" />
-          <p>Hisobing tekshirilmoqda…</p>
+          <Image
+            className="loading-logo"
+            src="/myplan-logo.png"
+            alt="MYPLAN"
+            width={96}
+            height={96}
+            priority
+          />
         </div>
       </main>
     );
@@ -643,9 +727,9 @@ export default function Home() {
                       </select>
                     </div>
 
-                    {isTargetZeroOrOne && (
+                    {debouncedCountError && (
                       <p className="count-validation-error" role="alert">
-                        ⚠️ 0 yoki 1 raqami kiritish mumkin emas. Kuniga 1 marta bajariladigan ishlar uchun yuqoridagi &ldquo;Bir martalik&rdquo; tabiga o‘ting.
+                        ⚠️ {debouncedCountError}
                       </p>
                     )}
                     <p className="count-hint">Maksimal 5 xonali son (2 dan 99999 gacha qabul qilinadi).</p>
@@ -708,7 +792,11 @@ export default function Home() {
         {/* Sidebar (Desktop Leftbar + Mobile Drawer) */}
         <aside
           className={`app-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}
-          onClick={() => {
+          onClick={(e) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest("button, a, input, [role='button']")) {
+              return;
+            }
             if (!sidebarOpen && typeof window !== "undefined" && window.innerWidth > 768) {
               setSidebarOpen(true);
             }
@@ -720,14 +808,24 @@ export default function Home() {
           <div className="sidebar-header">
             {sidebarOpen ? (
               <>
-                <a href="#workspace" className="sidebar-brand" onClick={() => setMobileMenuOpen(false)}>
+                <a
+                  href="#workspace"
+                  className="sidebar-brand"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMobileMenuOpen(false);
+                  }}
+                >
                   <Image className="brand-logo" src="/myplan-logo.png" alt="MYPLAN" width={36} height={36} priority />
                   <span className="brand-title">MYPLAN</span>
                 </a>
                 <button
                   type="button"
                   className="sidebar-collapse-btn"
-                  onClick={() => setSidebarOpen(false)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSidebarOpen(false);
+                  }}
                   aria-label="Sidebarni ixchamlash"
                   title="Sidebarni ixchamlash"
                 >
@@ -738,7 +836,10 @@ export default function Home() {
               <button
                 type="button"
                 className="sidebar-collapsed-logo-trigger"
-                onClick={() => setSidebarOpen(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSidebarOpen(true);
+                }}
                 aria-label="Sidebarni ochish"
                 title="Sidebarni ochish"
               >
@@ -753,7 +854,10 @@ export default function Home() {
             <button
               type="button"
               className="mobile-close-btn"
-              onClick={() => setMobileMenuOpen(false)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileMenuOpen(false);
+              }}
               aria-label="Menyuni yopish"
             >
               <IconClose className="icon-sm" />
@@ -765,7 +869,8 @@ export default function Home() {
             <button
               type="button"
               className="sidebar-add-task-btn"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setShowCreateModal(true);
                 setMobileMenuOpen(false);
               }}
@@ -784,7 +889,8 @@ export default function Home() {
               <button
                 type="button"
                 className={`nav-item ${activeTab === "today" ? "active" : ""}`}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setActiveTab("today");
                   setMobileMenuOpen(false);
                 }}
@@ -797,7 +903,8 @@ export default function Home() {
               <button
                 type="button"
                 className={`nav-item ${activeTab === "activities" ? "active" : ""}`}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setActiveTab("activities");
                   setMobileMenuOpen(false);
                 }}
@@ -810,7 +917,8 @@ export default function Home() {
               <button
                 type="button"
                 className={`nav-item ${activeTab === "analytics" ? "active" : ""}`}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setActiveTab("analytics");
                   setMobileMenuOpen(false);
                 }}
@@ -823,7 +931,8 @@ export default function Home() {
               <button
                 type="button"
                 className={`nav-item ${activeTab === "profile" ? "active" : ""}`}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setActiveTab("profile");
                   setMobileMenuOpen(false);
                 }}
@@ -840,7 +949,8 @@ export default function Home() {
             <button
               type="button"
               className="user-profile-card-btn"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setActiveTab("profile");
                 setMobileMenuOpen(false);
               }}
@@ -865,7 +975,10 @@ export default function Home() {
             <button
               type="button"
               className="logout-action-btn"
-              onClick={signOut}
+              onClick={(e) => {
+                e.stopPropagation();
+                void signOut();
+              }}
               title="Tizimdan chiqish"
             >
               <IconLogOut className="icon-sm" />
@@ -943,7 +1056,7 @@ export default function Home() {
 
             {/* TAB 1: BUGUNGI REJA */}
             {activeTab === "today" && (
-              <>
+              <div key="tab-today" className="tab-pane-container">
                 <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
                   <article className="stat-card progress-card">
                     <div className="stat-header">
@@ -1138,12 +1251,13 @@ export default function Home() {
                     </div>
                   )}
                 </section>
-              </>
+              </div>
             )}
 
             {/* TAB 2: BARCHA FAOLIYATLAR */}
             {activeTab === "activities" && (
-              <section className="activities-container">
+              <div key="tab-activities" className="tab-pane-container">
+                <section className="activities-container">
                 <div className="section-header-bar">
                   <div>
                     <span className="section-sub">BARCHA FAOLIYATLARINGIZ</span>
@@ -1284,11 +1398,13 @@ export default function Home() {
                   </div>
                 )}
               </section>
+            </div>
             )}
 
             {/* TAB 3: STATISTIKA & TAHLIL */}
             {activeTab === "analytics" && (
-              <section className="analytics-view">
+              <div key="tab-analytics" className="tab-pane-container">
+                <section className="analytics-view">
                 <div className="section-header-bar">
                   <div>
                     <span className="section-sub">TARAQQIYOTINGIZ KO‘ZGUSI</span>
@@ -1350,11 +1466,13 @@ export default function Home() {
                   </p>
                 </div>
               </section>
+            </div>
             )}
 
             {/* TAB 4: MENING PROFILIM (READ-ONLY + PROFILE PIC) */}
             {activeTab === "profile" && (
-              <section className="profile-view">
+              <div key="tab-profile" className="tab-pane-container">
+                <section className="profile-view">
                 <div className="section-header-bar">
                   <div>
                     <span className="section-sub">SHAXSIY HISOBINGIZ</span>
@@ -1438,6 +1556,7 @@ export default function Home() {
                   </div>
                 </div>
               </section>
+            </div>
             )}
 
             {/* Workspace Footer */}
@@ -1665,9 +1784,9 @@ export default function Home() {
                       maxLength={3}
                       required
                     />
-                    {isAgeTooHigh && (
+                    {debouncedAgeError && (
                       <p className="auth-validation-error" role="alert">
-                        Oka nima qilas bizi aldap {age} yoshga dunyoda hech kim kirmaganku
+                        {debouncedAgeError}
                       </p>
                     )}
                   </div>
@@ -1697,6 +1816,11 @@ export default function Home() {
                       {showPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
                     </button>
                   </div>
+                  {mode === "login" && debouncedPasswordError && (
+                    <p className="auth-validation-error" role="alert">
+                      {debouncedPasswordError}
+                    </p>
+                  )}
                 </div>
 
                 {/* Confirm Password input with eye toggle (signup only) */}
@@ -1724,6 +1848,11 @@ export default function Home() {
                         {showConfirmPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
                       </button>
                     </div>
+                    {debouncedPasswordError && (
+                      <p className="auth-validation-error" role="alert">
+                        {debouncedPasswordError}
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -1748,7 +1877,16 @@ export default function Home() {
                 <button
                   className="btn-auth-submit"
                   type="submit"
-                  disabled={busy || !configured || (mode === "signup" && isAgeTooHigh)}
+                  disabled={
+                    busy ||
+                    !configured ||
+                    (mode === "signup" &&
+                      (Boolean(debouncedAgeError) ||
+                        isAgeTooHigh ||
+                        password.length < 8 ||
+                        password !== confirmPassword)) ||
+                    (mode === "login" && (username.trim().length < 3 || password.length < 8))
+                  }
                 >
                   <span>
                     {busy

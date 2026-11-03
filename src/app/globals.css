@@ -160,40 +160,29 @@ select:focus-visible {
 
 .loading-card {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 18px;
-  padding: 40px;
-  border-radius: 20px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-medium);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-  text-align: center;
+  justify-content: center;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
 }
 
 .loading-logo {
   filter: none !important;
   box-shadow: none !important;
+  animation: splashPulse 2s ease-in-out infinite;
 }
 
-.loading-spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(180, 240, 76, 0.15);
-  border-top-color: var(--accent-lime);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+@keyframes splashPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.92;
   }
-}
-
-.loading-card p {
-  color: var(--text-secondary);
-  font-size: 14px;
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
 }
 
 /* ==========================================================================
@@ -222,10 +211,13 @@ select:focus-visible {
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  padding: 24px 18px;
+  padding: 24px 12px;
   z-index: 40;
-  transition: width var(--dur-med) var(--ease-smooth), padding var(--dur-med) var(--ease-smooth);
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width;
   flex-shrink: 0;
+  overflow-x: hidden;
+  user-select: none;
 }
 
 .app-layout.sidebar-expanded .app-sidebar {
@@ -236,7 +228,7 @@ select:focus-visible {
   width: var(--sidebar-w-collapsed);
   padding: 24px 12px;
   cursor: pointer;
-  transition: width var(--dur-med) var(--ease-smooth), padding var(--dur-med) var(--ease-smooth), background-color var(--dur-fast), border-color var(--dur-fast);
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), background-color var(--dur-fast), border-color var(--dur-fast);
 }
 
 .app-layout.sidebar-collapsed .app-sidebar:hover {
@@ -244,7 +236,7 @@ select:focus-visible {
   background: var(--bg-surface-elevated);
 }
 
-/* Sidebar ichidagi matnlar silliq ochilib-yopilishi (Fade + Width Transition) */
+/* Sidebar ichidagi matnlar silliq ochilib-yopilishi (Zero wobble, Fade + Width Transition) */
 .sidebar-brand .brand-title,
 .nav-caption,
 .nav-label,
@@ -257,7 +249,7 @@ select:focus-visible {
   overflow: hidden;
   text-overflow: clip;
   transform: translateX(0);
-  transition: max-width var(--dur-med) var(--ease-smooth), opacity 0.22s ease, transform var(--dur-med) var(--ease-smooth);
+  transition: max-width 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .app-layout.sidebar-collapsed .sidebar-brand .brand-title,
@@ -268,7 +260,8 @@ select:focus-visible {
 .app-layout.sidebar-collapsed .logout-text {
   max-width: 0;
   opacity: 0;
-  transform: translateX(-12px);
+  margin-left: 0;
+  transform: translateX(-8px);
   pointer-events: none;
 }
 
@@ -278,12 +271,13 @@ select:focus-visible {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
   min-height: 40px;
+  padding: 0 2px;
 }
 
 .brand-logo {
-  border-radius: 50%;
+  border-radius: 50% !important;
   object-fit: contain;
   background: transparent !important;
   filter: none !important;
@@ -300,7 +294,7 @@ select:focus-visible {
 
 .sidebar-brand .brand-logo {
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: 50% !important;
   filter: none !important;
   box-shadow: none !important;
 }
@@ -318,23 +312,25 @@ select:focus-visible {
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--border-medium);
-  background: var(--bg-surface-elevated);
+  border-radius: 50% !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
   color: var(--text-secondary);
-  transition: all var(--dur-fast);
+  cursor: pointer;
+  transition: color var(--dur-fast), transform var(--dur-fast);
 }
 
 .sidebar-collapse-btn:hover {
-  background: var(--accent-lime-dim);
+  background: transparent !important;
   color: var(--accent-lime);
-  border-color: var(--border-active);
+  transform: scale(1.15);
 }
 
 /* Collapsed Header State: Alohida open tugmasi yo'q, faqat logo, hoverda open paydo bo'ladi */
 .app-layout.sidebar-collapsed .sidebar-header {
   justify-content: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .sidebar-collapsed-logo-trigger {
@@ -343,16 +339,18 @@ select:focus-visible {
   height: 40px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  background: transparent;
-  border: none;
+  border-radius: 50% !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
   padding: 0;
   cursor: pointer;
   outline: none;
+  margin: 0 auto;
 }
 
 .sidebar-collapsed-logo-trigger .brand-logo {
-  border-radius: 50%;
+  border-radius: 50% !important;
   width: 36px;
   height: 36px;
   object-fit: contain;
@@ -364,8 +362,8 @@ select:focus-visible {
 .collapsed-open-hint {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: rgba(14, 17, 23, 0.9);
+  border-radius: 50% !important;
+  background: rgba(14, 17, 23, 0.95);
   border: 1.5px solid var(--accent-lime);
   color: var(--accent-lime);
   display: grid;
@@ -373,7 +371,6 @@ select:focus-visible {
   opacity: 0;
   transform: scale(0.7);
   transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
-  box-shadow: 0 0 14px rgba(180, 240, 76, 0.35);
   pointer-events: none;
 }
 
@@ -425,21 +422,22 @@ select:focus-visible {
 .nav-links {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .nav-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
   width: 100%;
-  padding: 12px 14px;
+  height: 42px;
+  padding: 0 10px;
   border-radius: 12px;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 550;
   overflow: hidden;
+  cursor: pointer;
   transition: background-color var(--dur-fast), color var(--dur-fast);
 }
 
@@ -462,9 +460,22 @@ select:focus-visible {
 }
 
 .nav-label {
+  margin-left: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: clip;
+  max-width: 150px;
+  opacity: 1;
+  transform: translateX(0);
+  transition: max-width 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-layout.sidebar-collapsed .nav-label {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
+  transform: translateX(-8px);
+  pointer-events: none;
 }
 
 .active-indicator {
@@ -472,7 +483,7 @@ select:focus-visible {
   right: 12px;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: 50% !important;
   background: var(--accent-lime);
   box-shadow: 0 0 8px var(--accent-lime);
   transition: opacity var(--dur-fast);
@@ -486,27 +497,38 @@ select:focus-visible {
 /* Sidebar Footer (Profile + Logout) */
 .sidebar-footer {
   margin-top: auto;
-  padding-top: 20px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
 }
 
-.user-profile-card {
+.user-profile-card,
+.user-profile-card-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 4px;
+  width: 100%;
+  height: 44px;
+  padding: 0 4px;
+  border-radius: 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
   overflow: hidden;
+  transition: background-color var(--dur-fast);
+}
+
+.user-profile-card-btn:hover {
+  background: var(--bg-surface-elevated);
 }
 
 .user-avatar {
-  width: 38px;
-  min-width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  border-radius: 50% !important;
   background: linear-gradient(135deg, #1c2612 0%, #10190a 100%);
   border: 1px solid var(--border-active);
   color: var(--accent-lime);
@@ -515,13 +537,34 @@ select:focus-visible {
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.user-avatar img,
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50% !important;
 }
 
 .user-info {
+  margin-left: 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  max-width: 140px;
+  opacity: 1;
+  text-align: left;
+  transition: max-width 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.app-layout.sidebar-collapsed .user-info {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
+  pointer-events: none;
 }
 
 .user-name {
@@ -541,15 +584,17 @@ select:focus-visible {
 .logout-action-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
   width: 100%;
-  padding: 10px 14px;
+  height: 38px;
+  padding: 0 10px;
   border-radius: 10px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   border: 1px solid transparent;
+  background: transparent;
   overflow: hidden;
+  cursor: pointer;
   transition: all var(--dur-fast);
 }
 
@@ -557,6 +602,41 @@ select:focus-visible {
   background: rgba(239, 68, 68, 0.08);
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.2);
+}
+
+.logout-text {
+  margin-left: 12px;
+  white-space: nowrap;
+  max-width: 100px;
+  opacity: 1;
+  transition: max-width 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.app-layout.sidebar-collapsed .logout-text {
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
+  pointer-events: none;
+}
+
+/* Silliq Tab O'tish animatsiyasi */
+.tab-pane-container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  animation: tabFadeSlide 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+@keyframes tabFadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -965,7 +1045,7 @@ select:focus-visible {
 .empty-icon-wrap {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 50% !important;
   background: var(--accent-lime-dim);
   border: 1px solid var(--border-active);
   color: var(--accent-lime);
@@ -1039,7 +1119,7 @@ select:focus-visible {
 .checkbox-btn {
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: 50% !important;
   border: 2px solid var(--border-medium);
   background: var(--bg-base);
   display: grid;
@@ -1137,7 +1217,7 @@ select:focus-visible {
 .btn-archive {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50% !important;
   display: grid;
   place-items: center;
   color: var(--text-muted);
@@ -1274,13 +1354,14 @@ select:focus-visible {
   display: grid;
   grid-template-columns: 1.15fr 0.95fr;
   gap: 60px;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .hero-content {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  align-self: flex-start;
 }
 
 .hero-badge {
@@ -1679,7 +1760,7 @@ select:focus-visible {
 .step-badge {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: 50% !important;
   background: var(--accent-lime-dim);
   border: 1px solid var(--border-active);
   color: var(--accent-lime);
@@ -1823,7 +1904,7 @@ select:focus-visible {
     place-items: center;
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: 50% !important;
     background: var(--bg-surface-elevated);
     color: var(--text-secondary);
   }
@@ -1885,7 +1966,7 @@ select:focus-visible {
     place-items: center;
     width: 38px;
     height: 38px;
-    border-radius: 10px;
+    border-radius: 50% !important;
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border-subtle);
     color: var(--text-primary);
@@ -1903,7 +1984,7 @@ select:focus-visible {
   .mobile-user-avatar {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: 50% !important;
     background: var(--accent-lime-dim);
     border: 1px solid var(--border-active);
     color: var(--accent-lime);
@@ -1911,6 +1992,7 @@ select:focus-visible {
     font-size: 13px;
     display: grid;
     place-items: center;
+    overflow: hidden;
   }
 
   /* Mobile Content Padding */
@@ -2180,7 +2262,7 @@ select:focus-visible {
   display: grid;
   place-items: center;
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: 50% !important;
   transition: all var(--dur-fast);
   background: transparent;
 }
@@ -2205,7 +2287,7 @@ select:focus-visible {
   justify-content: center;
   gap: 8px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: 999px !important;
   background: var(--accent-lime);
   color: var(--text-inverse);
   font-weight: 750;
@@ -2224,7 +2306,7 @@ select:focus-visible {
   width: 44px;
   height: 44px;
   padding: 0;
-  border-radius: 12px;
+  border-radius: 50% !important;
   margin: 0 auto;
 }
 
@@ -2300,7 +2382,7 @@ select:focus-visible {
 .modal-close-btn {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50% !important;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
@@ -2442,7 +2524,7 @@ select:focus-visible {
   position: relative;
   width: 96px;
   height: 96px;
-  border-radius: 24px;
+  border-radius: 50% !important;
   overflow: hidden;
   border: 2px solid var(--border-active);
   background: var(--bg-surface-elevated);
@@ -2666,7 +2748,7 @@ select:focus-visible {
   .profile-large-avatar-wrap {
     width: 80px;
     height: 80px;
-    border-radius: 20px;
+    border-radius: 50% !important;
   }
 
   .floating-modal-box {
