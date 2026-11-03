@@ -90,15 +90,26 @@ export default function Home() {
     if (!configured) return;
     let active = true;
     const supabase = createClient();
-    // INITIAL_SESSION is emitted after Supabase has restored its persisted browser session.
-    // Keep the login screen hidden until that check completes to avoid a false logged-out render.
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!active) return;
+    // Subscribe first so sign-in/sign-out events cannot be missed while the stored
+    // browser session is being restored. getSession() is the authoritative initial read.
+    const applySession = (session: Awaited<ReturnType<typeof supabase.auth.getSession>>["data"]["session"]) => {
       const user = session?.user;
       setUserId(user?.id ?? null);
       if (user) setAccountName(String(user.user_metadata?.full_name || user.user_metadata?.username || "Do‘stim"));
       else { setActivities([]); setOccurrences([]); setAccountName(""); }
       setAuthReady(true);
+    };
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) applySession(session);
+    });
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setMessage("Sessiyani tekshirishda xatolik: " + error.message);
+      applySession(data.session);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setMessage(error instanceof Error ? error.message : "Sessiyani tekshirishda xatolik.");
+      applySession(null);
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [configured]);
