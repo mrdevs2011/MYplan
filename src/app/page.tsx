@@ -133,6 +133,37 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
+function playCompletionSound() {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const notes = [659.25, 830.61, 987.77];
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+
+      gain.gain.setValueAtTime(0, now + idx * 0.08);
+      gain.gain.linearRampToValueAtTime(0.12, now + idx * 0.08 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + idx * 0.08);
+      osc.stop(now + idx * 0.08 + 0.36);
+    });
+  } catch {
+    // Non-blocking fallback
+  }
+}
+
 export default function Home() {
   const router = useRouter();
 
@@ -347,7 +378,7 @@ export default function Home() {
         setOccurrences(existingOccs);
       }
 
-      // Restore saved counts from local storage
+      // Restore saved counts from local storage & cloud progress events
       const initialCounts: Record<string, number> = {};
       existingOccs.forEach((occ) => {
         const saved = localStorage.getItem(`myplan_count_${occ.id}`);
@@ -355,6 +386,30 @@ export default function Home() {
           initialCounts[occ.id] = parseInt(saved, 10) || 0;
         }
       });
+
+      // Cloud progress events synchronization
+      try {
+        const occIds = existingOccs.map((o) => o.id);
+        if (occIds.length > 0) {
+          const { data: pEvents } = await supabase
+            .from("progress_events")
+            .select("occurrence_id, amount")
+            .in("occurrence_id", occIds);
+          if (pEvents && pEvents.length > 0) {
+            const serverTotals: Record<string, number> = {};
+            pEvents.forEach((pe) => {
+              serverTotals[pe.occurrence_id] = (serverTotals[pe.occurrence_id] || 0) + Number(pe.amount);
+            });
+            Object.keys(serverTotals).forEach((occId) => {
+              const local = initialCounts[occId] || 0;
+              initialCounts[occId] = Math.max(local, Math.max(0, serverTotals[occId]));
+            });
+          }
+        }
+      } catch {
+        // Non-blocking progress sync fallback
+      }
+
       setTaskCounts(initialCounts);
     } catch (err) {
       console.error("Workspace loading error:", err);
@@ -597,10 +652,17 @@ export default function Home() {
       if ("Notification" in window) {
         setTimeout(() => setPushPermission(Notification.permission), 0);
       }
+
+      // High-performance PWA service worker registration
+      if (typeof window !== "undefined" && "serviceWorker" in navigator && process.env.NODE_ENV === "production") {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
     }
 
+    const activeTimers = counterTimersRef.current;
     return () => {
       listener.subscription.unsubscribe();
+      Object.values(activeTimers).forEach(clearTimeout);
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
         window.removeEventListener("appinstalled", handleAppInstalled);
@@ -644,17 +706,25 @@ export default function Home() {
       curr.map((item) => (item.id === occ.id ? { ...item, status: nextStatus } : item))
     );
 
+    if (nextStatus === "completed" && soundEnabled) {
+      playCompletionSound();
+    }
+
     if (activity.measurement_type === "count" && activity.target) {
       const newCount = nextStatus === "completed" ? activity.target : 0;
       setTaskCounts((prev) => ({ ...prev, [occ.id]: newCount }));
       localStorage.setItem(`myplan_count_${occ.id}`, String(newCount));
     }
 
-    const supabase = createClient();
-    await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
+    try {
+      const supabase = createClient();
+      await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
+    } catch (err) {
+      console.warn("Occ status update failed:", err);
+    }
   }
 
-  // Counter Increment (+1, +5, +10) with 10-Second Inactivity Collapse Logic
+  // Counter Increment (+1, +5, +10...) with 10-Second Inactivity Collapse Logic
   async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
     if (!userId) return;
     const current = taskCounts[occurrence.id] || 0;
@@ -687,15 +757,34 @@ export default function Home() {
     }
 
     // Auto complete when target is reached
-    if (next >= target && occurrence.status !== "completed") {
+    const reachedTarget = next >= target && occurrence.status !== "completed";
+    if (reachedTarget) {
       setOccurrences((curr) =>
         curr.map((item) => (item.id === occurrence.id ? { ...item, status: "completed" } : item))
       );
-      await createClient()
-        .from("occurrences")
-        .update({ status: "completed" })
-        .eq("id", occurrence.id)
-        .eq("user_id", userId);
+      if (soundEnabled) {
+        playCompletionSound();
+      }
+    }
+
+    // Cloud persistence for progress event and status
+    try {
+      const supabase = createClient();
+      await supabase.from("progress_events").insert({
+        user_id: userId,
+        occurrence_id: occurrence.id,
+        amount: actualAdd,
+        note: `+${actualAdd}`,
+      });
+      if (reachedTarget) {
+        await supabase
+          .from("occurrences")
+          .update({ status: "completed" })
+          .eq("id", occurrence.id)
+          .eq("user_id", userId);
+      }
+    } catch (err) {
+      console.warn("Background progress insert error:", err);
     }
   }
 
@@ -723,15 +812,30 @@ export default function Home() {
       localStorage.setItem(`myplan_count_${occurrence.id}`, String(next));
     }
 
-    if (next < (activity.target || 0) && occurrence.status === "completed") {
+    const needsStatusRevert = next < (activity.target || 0) && occurrence.status === "completed";
+    if (needsStatusRevert) {
       setOccurrences((curr) =>
         curr.map((item) => (item.id === occurrence.id ? { ...item, status: "pending" } : item))
       );
-      await createClient()
-        .from("occurrences")
-        .update({ status: "pending" })
-        .eq("id", occurrence.id)
-        .eq("user_id", userId);
+    }
+
+    try {
+      const supabase = createClient();
+      await supabase.from("progress_events").insert({
+        user_id: userId,
+        occurrence_id: occurrence.id,
+        amount: -lastAdd,
+        note: `Qaytarish (-${lastAdd})`,
+      });
+      if (needsStatusRevert) {
+        await supabase
+          .from("occurrences")
+          .update({ status: "pending" })
+          .eq("id", occurrence.id)
+          .eq("user_id", userId);
+      }
+    } catch (err) {
+      console.warn("Background undo progress insert error:", err);
     }
   }
 
