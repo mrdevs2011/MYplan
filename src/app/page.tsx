@@ -785,6 +785,29 @@ export default function Home() {
 
   // Auth Initialization & Session Listener
   useEffect(() => {
+    // Expose build info & banner in browser console
+    if (typeof window !== "undefined") {
+      (window as unknown as { myplanVersion: unknown }).myplanVersion = {
+        version: "2.4.0",
+        commit: "e08dc52",
+        updatedAt: "2026-11-04 08:09",
+        features: [
+          "Profile editing (Name & Age 3h cooldown, Password 24h cooldown)",
+          "Connected devices with instant 0ms realtime revocation and <3ms boot check",
+          "Exact circle 44px undo button matching +10 +5 +1",
+          "Max 10 counter steps with responsive line wrap",
+          "Vertically centered collapsed sidebar",
+        ],
+        status: "LATEST_VERSION_ACTIVE",
+      };
+      console.log(
+        "%c MYPLAN ACTIVE %c v2.4.0 (commit: e08dc52) %c Eng so‘nggi versiya ishlamoqda ",
+        "background: #b4f04c; color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px 0 0 4px;",
+        "background: #1e293b; color: #38bdf8; font-weight: 700; padding: 4px 8px;",
+        "background: #0f172a; color: #a3e635; font-weight: 600; padding: 4px 8px; border-radius: 0 4px 4px 0;"
+      );
+    }
+
     // 100% Guaranteed Splash Screen Preload
     if (typeof window !== "undefined") {
       const img = new window.Image();
