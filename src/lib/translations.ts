@@ -63,6 +63,15 @@ export const translations = {
     no_tasks_sub: "Yangi vazifa qo‘shish uchun chap paneldagi (yoki pastdagi) + tugmasidan foydalaning.",
     no_tasks_filter: "Bu vaqt qismi uchun vazifalar yo‘q",
     no_tasks_filter_sub: "Boshqa bo‘limni tanlang yoki yangi vazifa qo‘shganda vaqt zonasini belgilang.",
+    footer_tagline: "Kuningizni rejalashtiring. Vaqtingiz egasi bo‘ling.",
+
+    // Notifications content
+    notif_daily_title: "Bugungi kuningiz barakali bo‘lsin!",
+    notif_daily_msg: "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
+    notif_counter_title: "Sanoqli vazifalaringiz monitoringi",
+    notif_counter_msg: "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
+    notif_welcome_title: "Kuningizni rejalashtiring. Vaqtingiz egasi bo‘ling.",
+    notif_welcome_msg: "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
 
     // Settings
     setting_appearance: "Tashqi ko‘rinish",
@@ -171,6 +180,15 @@ export const translations = {
     no_tasks_sub: "Use the + button on the panel to create your first activity.",
     no_tasks_filter: "No tasks for this time zone",
     no_tasks_filter_sub: "Choose another zone or select a zone when creating tasks.",
+    footer_tagline: "Plan your day. Own your time.",
+
+    // Notifications content
+    notif_daily_title: "Have a blessed and productive day!",
+    notif_daily_msg: "Every new day brings fresh opportunities. Set your plan and start your first task.",
+    notif_counter_title: "Track your countable habits",
+    notif_counter_msg: "After completing recurring routines during the day, remember to record your progress with counter buttons.",
+    notif_welcome_title: "Plan your day. Own your time.",
+    notif_welcome_msg: "Welcome to the MyPlan platform! We are thrilled to see you taking disciplined steps toward your goals.",
 
     // Settings
     setting_appearance: "Appearance",
@@ -279,6 +297,15 @@ export const translations = {
     no_tasks_sub: "Нажмите кнопку + на панели, чтобы создать первую задачу.",
     no_tasks_filter: "В этой зоне нет задач",
     no_tasks_filter_sub: "Выберите другую зону или укажите ее при создании задачи.",
+    footer_tagline: "Планируйте свой день. Управляйте временем.",
+
+    // Notifications content
+    notif_daily_title: "Удачного и продуктивного дня!",
+    notif_daily_msg: "Каждый новый день — новая возможность. Определите цели и начните с первой задачи.",
+    notif_counter_title: "Мониторинг числовых привычек",
+    notif_counter_msg: "Выполняя повторяющиеся действия в течение дня, не забывайте фиксировать результат кнопками подсчёта.",
+    notif_welcome_title: "Планируйте свой день. Управляйте временем.",
+    notif_welcome_msg: "Добро пожаловать в MyPlan! Рады видеть ваши уверенные шаги к поставленным целям.",
 
     // Settings
     setting_appearance: "Внешний вид",

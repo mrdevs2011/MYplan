@@ -788,21 +788,20 @@ export default function Home() {
     // Expose build info & banner in browser console
     if (typeof window !== "undefined") {
       (window as unknown as { myplanVersion: unknown }).myplanVersion = {
-        version: "2.5.0",
-        commit: "126d92d",
-        updatedAt: "2026-11-04 08:52",
+        version: "2.6.0",
+        commit: "apex-v2.6",
+        updatedAt: "2026-11-04 09:00",
         features: [
-          "Transparent logo everywhere (no black background in light mode)",
-          "Pure light mode ecosystem (all dark cards & toasts converted to clean light theme)",
-          "Notification pill moved further right without overlapping active indicator",
-          "Notification dates realistic (no 2-3 day lag for newly created users)",
-          "Zero-latency Supabase settings sync (language, steps, sound, notifs)",
-          "Network-First PWA Service Worker (prevents stale cache lock)",
+          "Zero English text in Uzbek UI (notifications, footer, messages fully localized)",
+          "Undo button strict 44px circle with zero text and anchor right alignment",
+          "Sidebar collapsed layout starts from top (no vertical center drift)",
+          "Light mode unread notifications color-harmonized with crisp dark typography",
+          "Cache busted via Service Worker v6",
         ],
         status: "LATEST_VERSION_ACTIVE",
       };
       console.log(
-        "%c MYPLAN ACTIVE %c v2.5.0 (LATEST) %c Yangi versiya muvaffaqiyatli ishga tushdi ",
+        "%c MYPLAN ACTIVE %c v2.6.0 (LATEST) %c Yangi versiya muvaffaqiyatli ishga tushdi ",
         "background: #b4f04c; color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px 0 0 4px;",
         "background: #1e293b; color: #38bdf8; font-weight: 700; padding: 4px 8px;",
         "background: #0f172a; color: #a3e635; font-weight: 600; padding: 4px 8px; border-radius: 0 4px 4px 0;"
@@ -1110,11 +1109,11 @@ export default function Home() {
         }
       }
 
-      // Notification History (clean, fresh, natural tone, respecting account age)
+      // Notification History (clean, fresh, natural tone, respecting account age & current language)
       const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
       const now = Date.now();
       try {
-        const NOTIF_CLEAN_KEY = "myplan_notif_v5_realistic";
+        const NOTIF_CLEAN_KEY = "myplan_notif_v6_uz_clean";
         if (!localStorage.getItem(NOTIF_CLEAN_KEY)) {
           localStorage.removeItem("myplan_notifications_history");
           localStorage.setItem(NOTIF_CLEAN_KEY, "true");
@@ -1123,6 +1122,9 @@ export default function Home() {
         let parsed: MyPlanNotification[] = rawNotifs ? JSON.parse(rawNotifs) : [];
         parsed = parsed.filter((n) => now - n.createdAt <= THREE_DAYS_MS);
 
+        const curLang = (localStorage.getItem("myplan_lang") as Language) || "uz";
+        const initT = translations[curLang] || translations.uz;
+
         if (parsed.length === 0) {
           parsed = [
             {
@@ -1130,9 +1132,9 @@ export default function Home() {
               sender: "MyPlan Shaxsiy Yordamchisi",
               category: "daily",
               categoryLabel: "KUNLIK MARRA",
-              title: "Bugungi kuningiz barakali bo‘lsin!",
+              title: initT.notif_daily_title || "Bugungi kuningiz barakali bo‘lsin!",
               message:
-                "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
+                initT.notif_daily_msg || "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
               createdAt: now - 1000 * 60 * 10,
               isRead: false,
             },
@@ -1141,9 +1143,9 @@ export default function Home() {
               sender: "Intizom Kuzatuvchisi",
               category: "productivity",
               categoryLabel: "UNUMDORLIK",
-              title: "Sanoqli vazifalaringiz monitoringi",
+              title: initT.notif_counter_title || "Sanoqli vazifalaringiz monitoringi",
               message:
-                "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
+                initT.notif_counter_msg || "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
               createdAt: now - 1000 * 60 * 30,
               isRead: true,
             },
@@ -1152,9 +1154,9 @@ export default function Home() {
               sender: "MyPlan Tizimi",
               category: "streak",
               categoryLabel: "SHAXSIY O‘SISH",
-              title: "Plan your day. Own your time.",
+              title: initT.notif_welcome_title || "Kuningizni rejalashtiring. Vaqtingiz egasi bo‘ling.",
               message:
-                "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
+                initT.notif_welcome_msg || "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
               createdAt: now - 1000 * 60 * 55,
               isRead: true,
             },
@@ -1790,6 +1792,27 @@ export default function Home() {
       month: "long",
     });
     setFormattedToday(dateFmt.format(new Date()));
+
+    const newT = translations[newLang] || translations.uz;
+    setNotifications((prev) => {
+      const updated = prev.map((n) => {
+        if (n.id === "notif-1") {
+          return { ...n, title: newT.notif_daily_title, message: newT.notif_daily_msg };
+        }
+        if (n.id === "notif-2") {
+          return { ...n, title: newT.notif_counter_title, message: newT.notif_counter_msg };
+        }
+        if (n.id === "notif-3") {
+          return { ...n, title: newT.notif_welcome_title, message: newT.notif_welcome_msg };
+        }
+        return n;
+      });
+      try {
+        localStorage.setItem("myplan_notifications_history", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
     if (userId) {
       const supabase = createClient();
       void supabase.from("profiles").update({ language: newLang }).eq("id", userId);
@@ -4081,7 +4104,7 @@ export default function Home() {
             <div className="footer-left">
               <span className="footer-brand">MyPlan</span>
               <span className="footer-separator">•</span>
-              <span className="footer-tagline">Plan your day. Own your time.</span>
+              <span className="footer-tagline">{t.footer_tagline}</span>
             </div>
             <div className="footer-right">
               <span>© 2026 MyPlan Inc.</span>

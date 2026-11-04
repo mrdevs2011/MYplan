@@ -546,10 +546,10 @@ select:focus-visible {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
   align-items: center !important;
   flex: 1 !important;
-  margin: auto 0 !important;
+  margin: 0 !important;
 }
 
 .app-layout.sidebar-collapsed .nav-caption {
@@ -562,7 +562,7 @@ select:focus-visible {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
   align-items: center !important;
   gap: 8px !important;
 }
@@ -3268,6 +3268,9 @@ select:focus-visible {
   min-width: 44px;
   min-height: 44px;
   max-width: 44px;
+  max-height: 44px;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
   margin-left: auto !important;
   padding: 0 !important;
   border-radius: 50% !important;
@@ -5970,6 +5973,20 @@ select:focus-visible {
 [data-theme="light"] .notification-card.is-unread {
   background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%) !important;
   border-color: rgba(101, 163, 13, 0.35) !important;
+  box-shadow: 0 4px 16px rgba(101, 163, 13, 0.08) !important;
+}
+
+[data-theme="light"] .notification-card .notification-item-title,
+[data-theme="light"] .notification-card .sender-name-text {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .notification-card .notification-item-message {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .notification-card .notification-time-tag {
+  color: #64748b !important;
 }
 
 [data-theme="light"] .notifications-immutable-badge {
@@ -6059,10 +6076,20 @@ select:focus-visible {
 }
 
 [data-theme="light"] .btn-counter-undo {
-  background: #fef3c7;
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #d97706;
-  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
+  background: #fef3c7 !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+  color: #d97706 !important;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15) !important;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
+  max-width: 44px !important;
+  max-height: 44px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  aspect-ratio: 1 / 1 !important;
+  overflow: hidden !important;
 }
 
 [data-theme="light"] .btn-counter-undo:hover {
