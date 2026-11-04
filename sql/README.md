@@ -1,6 +1,8 @@
 # MYPLAN database deployment
 
-The SQL files in this directory are the canonical schema scripts. Apply them to the intended Supabase project in **Supabase Dashboard → SQL Editor**, in numeric order, and verify each script completes before proceeding. Take a database backup before applying schema changes to a project containing data.
+The SQL files in this directory are the canonical schema scripts. Matching Supabase CLI migrations are mirrored in `supabase/migrations/` and the project is linked in `supabase/config.toml`.
+
+**Do not run `supabase db push` until the remote migration history is reconciled.** The live tables already exist, but the current CLI identity cannot read the remote migration history (`database_write` permission is missing). If these scripts were previously applied through the Dashboard SQL Editor, first verify all 11 schema changes on the linked project, then use `supabase migration repair --status applied <version>` for each verified version. Only then use `supabase db push` for future migrations. Take a database backup before any schema change.
 
 ## Migration order
 
@@ -28,12 +30,13 @@ The scripts use `IF NOT EXISTS`/replace patterns where practical, but they are n
 
 ## Production verification checklist
 
-- Confirm all 11 scripts have been applied to the correct Supabase project.
+- Confirm all 11 migrations have been applied to the correct Supabase project and reconcile the CLI migration history before using `supabase db push`.
 - Verify RLS is enabled on `profiles`, `activities`, `occurrences`, `progress_events`, and `user_devices`.
 - Test two separate accounts to confirm one user cannot read or mutate another user's rows.
 - Test signup, login, session refresh, logout, password update, and device revocation against a non-production project first.
 - Configure Auth rate limits, CAPTCHA/abuse protection, backup/PITR policy, database alerts, and Realtime only for tables that need it.
 - Do not delete Auth users or application rows until the target project and the intended data scope have been independently verified.
+- A browser clean-slate epoch only signs out/clears browser-local MYplan state on the next visit; it does not delete Auth users, database rows, or Storage objects.
 
 ## Important current limitations
 

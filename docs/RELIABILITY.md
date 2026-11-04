@@ -25,7 +25,7 @@ npm run build
 - Automated unit, integration, and end-to-end coverage is still absent.
 - Remote Supabase migration state could not be verified from the current linked CLI identity (the API returned missing `database_write` permission).
 - The username-only reserved-email authentication flow has no email-based recovery path.
-- The current clean-slate client epoch logs out a browser on its next visit; it does not delete Auth users or revoke every user's server-side sessions immediately.
+- The v4 clean-slate client epoch signs out a browser and clears MYplan/Supabase local and session storage on its next visit; it does not delete Auth users, database rows, or Storage objects, and cannot force an already-open tab to log out immediately.
 
 ## Change policy
 

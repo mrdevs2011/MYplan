@@ -1186,32 +1186,25 @@ export default function Home() {
 
     void supabase.auth.getSession().then(async ({ data: { session } }) => {
       // Clean Production Start Epoch (Purge legacy test sessions so returning test users cleanly log out)
-      const PROD_CLEAN_SLATE_EPOCH = "v3_production_clean_20261104";
+      const PROD_CLEAN_SLATE_EPOCH = "v4_production_clean_20261104";
       if (typeof window !== "undefined") {
         const storedEpoch = localStorage.getItem("myplan_production_epoch");
         if (storedEpoch !== PROD_CLEAN_SLATE_EPOCH) {
           try {
             await supabase.auth.signOut();
           } catch {}
-          const keysToPurge = [
-            "myplan_accounts_vault",
-            "myplan_active_account_id",
-            "myplan_device_session_token",
-            "myplan_offline_sync_queue",
-            "myplan_notifications_history",
-            "myplan_custom_time_slots",
-          ];
-          keysToPurge.forEach((k) => localStorage.removeItem(k));
+          // Remove every MYplan-owned browser value plus Supabase auth tokens.
+          // Keep only the epoch marker written below so this purge runs once per release.
           for (let i = localStorage.length - 1; i >= 0; i--) {
-            const k = localStorage.key(i);
-            if (
-              k &&
-              (k.startsWith("myplan_count_") ||
-                k.startsWith("myplan_avatar_") ||
-                k.startsWith("myplan_last_streak_") ||
-                k.startsWith("sb-"))
-            ) {
-              localStorage.removeItem(k);
+            const key = localStorage.key(i);
+            if (key && (key.startsWith("myplan_") || key.startsWith("sb-"))) {
+              localStorage.removeItem(key);
+            }
+          }
+          for (let i = sessionStorage.length - 1; i >= 0; i--) {
+            const key = sessionStorage.key(i);
+            if (key && (key.startsWith("myplan_") || key.startsWith("sb-"))) {
+              sessionStorage.removeItem(key);
             }
           }
           localStorage.setItem("myplan_production_epoch", PROD_CLEAN_SLATE_EPOCH);
