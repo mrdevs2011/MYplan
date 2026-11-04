@@ -884,6 +884,13 @@ export default function Home() {
               const l = p.language as Language;
               setLanguage(l);
               localStorage.setItem("myplan_lang", l);
+              const locale = l === "en" ? "en-US" : l === "ru" ? "ru-RU" : "uz-UZ";
+              const dateFmt = new Intl.DateTimeFormat(locale, {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              });
+              setFormattedToday(dateFmt.format(new Date()));
             }
             if (Array.isArray(p.counter_steps) && p.counter_steps.length > 0) {
               const steps = (p.counter_steps as number[])
@@ -1102,11 +1109,11 @@ export default function Home() {
         }
       }
 
-      // Notification History (clean, fresh, natural tone)
+      // Notification History (clean, fresh, natural tone, respecting account age)
       const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
       const now = Date.now();
       try {
-        const NOTIF_CLEAN_KEY = "myplan_notif_v3_fresh";
+        const NOTIF_CLEAN_KEY = "myplan_notif_v5_realistic";
         if (!localStorage.getItem(NOTIF_CLEAN_KEY)) {
           localStorage.removeItem("myplan_notifications_history");
           localStorage.setItem(NOTIF_CLEAN_KEY, "true");
@@ -1125,7 +1132,7 @@ export default function Home() {
               title: "Bugungi kuningiz barakali bo‘lsin!",
               message:
                 "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
-              createdAt: now - 1000 * 60 * 15,
+              createdAt: now - 1000 * 60 * 10,
               isRead: false,
             },
             {
@@ -1136,7 +1143,7 @@ export default function Home() {
               title: "Sanoqli vazifalaringiz monitoringi",
               message:
                 "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
-              createdAt: now - 1000 * 60 * 45,
+              createdAt: now - 1000 * 60 * 30,
               isRead: true,
             },
             {
@@ -1147,7 +1154,7 @@ export default function Home() {
               title: "Plan your day. Own your time.",
               message:
                 "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
-              createdAt: now - 1000 * 60 * 60 * 2,
+              createdAt: now - 1000 * 60 * 55,
               isRead: true,
             },
           ];
@@ -1925,7 +1932,7 @@ export default function Home() {
         <div className="loading-card">
           <Image
             className="loading-logo"
-            src="/myplan-logo.png"
+            src="/myplan-logo-transparent.png"
             alt="MyPlan"
             width={96}
             height={96}
@@ -2479,7 +2486,7 @@ export default function Home() {
                 }}
                 aria-label="Bosh sahifa"
               >
-                <Image className="brand-logo" src="/myplan-logo.png" alt="MyPlan" width={36} height={36} priority />
+                <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={36} height={36} priority />
                 <span className="brand-title">MyPlan</span>
               </button>
               <button
@@ -2506,7 +2513,7 @@ export default function Home() {
               aria-label="Sidebarni ochish"
               title="Sidebarni ochish"
             >
-              <Image className="brand-logo" src="/myplan-logo.png" alt="MyPlan" width={36} height={36} priority />
+              <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={36} height={36} priority />
               <span className="collapsed-open-hint" aria-hidden="true">
                 <IconChevronRight className="icon-sm" />
               </span>
@@ -2589,7 +2596,7 @@ export default function Home() {
               <IconBell className="nav-icon" />
               <span className="nav-label">{t.tab_notifications}</span>
               {unreadNotifsCount > 0 && <span className="nav-unread-pill">{unreadNotifsCount}</span>}
-              {activeTab === "notifications" && <span className="active-indicator" />}
+              {activeTab === "notifications" && unreadNotifsCount === 0 && <span className="active-indicator" />}
             </button>
 
             <button
@@ -2718,7 +2725,7 @@ export default function Home() {
             className="mobile-brand-btn"
             onClick={() => setActiveTab("today")}
           >
-            <Image src="/myplan-logo.png" alt="MyPlan" width={28} height={28} priority />
+            <Image src="/myplan-logo-transparent.png" alt="MyPlan" width={28} height={28} priority />
             <span>MyPlan</span>
           </button>
 

@@ -315,7 +315,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           <Link href="/" className="brand-link" aria-label="MyPlan bosh sahifasi">
             <Image
               className="brand-logo"
-              src="/myplan-logo.png"
+              src="/myplan-logo-transparent.png"
               alt="MyPlan"
               width={38}
               height={38}

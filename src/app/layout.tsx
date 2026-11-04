@@ -31,11 +31,23 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="uz">
+    <html lang="uz" suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var t = localStorage.getItem("myplan_theme") || "system";
+                  var isLight = t === "light" || (t === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
+                  document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
         <link rel="manifest" href="/manifest.json" />
         <link rel="preload" as="image" href="/myplan-logo-transparent.png" type="image/png" />
-        <link rel="preload" as="image" href="/myplan-logo.png" type="image/png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>

@@ -642,14 +642,20 @@ select:focus-visible {
 
 .nav-unread-pill {
   margin-left: auto;
-  margin-right: 8px;
+  margin-right: -2px !important;
   background: var(--accent-lime);
-  color: var(--text-inverse);
-  font-size: 10px;
+  color: #0b0f0a;
+  font-size: 11px;
   font-weight: 800;
-  padding: 2px 7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
   border-radius: 999px;
-  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 0 8px rgba(180, 240, 76, 0.4);
 }
 
 .mobile-unread-dot {
@@ -5881,8 +5887,119 @@ select:focus-visible {
 }
 
 [data-theme="light"] .stat-card.progress-card {
-  background: linear-gradient(135deg, #f0fdf4 0%, #f7fee7 100%);
-  border-color: rgba(101, 163, 13, 0.25);
+  background: linear-gradient(135deg, #f0fdf4 0%, #f7fee7 100%) !important;
+  border-color: rgba(101, 163, 13, 0.3) !important;
+  box-shadow: 0 4px 16px rgba(101, 163, 13, 0.08) !important;
+}
+
+[data-theme="light"] .stat-card.progress-card .stat-tag {
+  color: #65a30d !important;
+}
+
+[data-theme="light"] .stat-card.progress-card .stat-value {
+  color: #1e3a10 !important;
+}
+
+[data-theme="light"] .stat-card.progress-card .stat-unit {
+  color: #65a30d !important;
+}
+
+[data-theme="light"] .stat-card.progress-card .stat-footer {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .stat-card.progress-card .progress-bar-track {
+  background: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* User Avatars across the app in light mode */
+[data-theme="light"] .user-profile-avatar-sm,
+[data-theme="light"] .profile-large-avatar,
+[data-theme="light"] .profile-avatar-placeholder,
+[data-theme="light"] .account-avatar-sm,
+[data-theme="light"] .mobile-user-avatar {
+  background: linear-gradient(135deg, #ecfccb 0%, #d9f99d 100%) !important;
+  color: #3f6212 !important;
+  border: 1.5px solid rgba(101, 163, 13, 0.4) !important;
+  box-shadow: 0 2px 8px rgba(101, 163, 13, 0.15) !important;
+}
+
+/* Floating Realtime Toast in light mode */
+[data-theme="light"] .floating-inapp-toast {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1.5px solid rgba(101, 163, 13, 0.4) !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(101, 163, 13, 0.2) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .floating-inapp-toast .toast-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .floating-inapp-toast .toast-msg {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .floating-inapp-toast .toast-icon-badge {
+  background: rgba(101, 163, 13, 0.12) !important;
+  border: 1px solid rgba(101, 163, 13, 0.3) !important;
+  color: #65a30d !important;
+}
+
+[data-theme="light"] .floating-inapp-toast .toast-close-action {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .floating-inapp-toast .toast-close-action:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+/* Notification cards in light mode */
+[data-theme="light"] .notification-card {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04) !important;
+}
+
+[data-theme="light"] .notification-card:hover {
+  background: #f8fafc !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+[data-theme="light"] .notification-card.is-unread {
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%) !important;
+  border-color: rgba(101, 163, 13, 0.35) !important;
+}
+
+[data-theme="light"] .notifications-immutable-badge {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  color: #64748b !important;
+}
+
+[data-theme="light"] .notifications-policy-banner {
+  background: rgba(101, 163, 13, 0.06) !important;
+  border-color: rgba(101, 163, 13, 0.2) !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .onboarding-steps-block {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04) !important;
+}
+
+[data-theme="light"] .analytics-tips-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+  border-color: rgba(101, 163, 13, 0.25) !important;
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06) !important;
+}
+
+[data-theme="light"] .evening-review-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06) !important;
 }
 
 [data-theme="light"] .pocket-streak-banner {
