@@ -321,7 +321,9 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
               height={38}
               priority
             />
-            <span className="brand-title">MyPlan</span>
+            <span className="brand-title">
+              <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+            </span>
           </Link>
 
           <div className="navbar-right-actions">

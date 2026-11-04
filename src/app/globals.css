@@ -323,27 +323,60 @@ select:focus-visible {
   box-shadow: none !important;
 }
 
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.sidebar-brand,
+.sidebar-brand-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
   overflow: hidden;
-  background: transparent;
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 6px !important;
+  cursor: pointer;
+  outline: none;
+  border-radius: 9999px !important;
+  white-space: nowrap !important;
+  text-decoration: none;
 }
 
-.sidebar-brand .brand-logo {
+.sidebar-brand .brand-logo,
+.sidebar-brand-btn .brand-logo {
   flex-shrink: 0;
   border-radius: 50% !important;
   filter: none !important;
   box-shadow: none !important;
 }
 
-.sidebar-brand .brand-title {
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  color: var(--text-primary);
-  white-space: nowrap;
+.brand-title {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.brand-my {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  transition: color var(--dur-fast);
+}
+
+.brand-plan {
+  color: var(--accent-lime) !important;
+  font-weight: 900 !important;
+  transition: color var(--dur-fast);
+}
+
+[data-theme="light"] .brand-my {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .brand-plan {
+  color: #65a30d !important;
 }
 
 .sidebar-collapse-btn {
@@ -2587,36 +2620,32 @@ select:focus-visible {
   position: fixed;
   inset: 0;
   z-index: 120;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px 16px;
+  padding: 40px 16px 60px 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   animation: fadeIn 0.2s ease;
 }
 
 .floating-modal-box {
   width: 100%;
-  max-width: 530px;
-  max-height: min(88vh, 800px);
+  max-width: 540px;
   margin: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-medium) transparent;
   background: var(--bg-surface);
   border: 1px solid var(--border-active);
-  border-radius: 22px;
-  padding: 28px 24px;
-  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(180, 240, 76, 0.15) inset;
+  border-radius: 34px !important;
+  padding: 34px 28px !important;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(180, 240, 76, 0.2) inset !important;
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .floating-modal-box::-webkit-scrollbar {
@@ -7334,5 +7363,225 @@ select:focus-visible {
   background: rgba(101, 163, 13, 0.12);
   border-color: rgba(101, 163, 13, 0.3);
   color: #4d7c0f;
+}
+
+/* ==========================================================================
+   MASTER EXECUTIVE SOFT UI: MAXIMUM SQUIRCLE RADII & GENEROUS ELEMENT SIZES
+   Strictly zero sharp corners across all views, modals, cards, tabs & controls
+   ========================================================================== */
+
+/* 1. Cards, Modals, Banners & Panels: Deep Soft Squircle (32px-34px) */
+.settings-card,
+.profile-card,
+.profile-header-card,
+.stat-card,
+.catalog-card,
+.task-card,
+.task-card-swipe-wrap,
+.pocket-streak-banner,
+.focus-spotlight-card,
+.evening-summary-banner,
+.system-notice-banner,
+.empty-state-box,
+.floating-modal-box,
+.custom-time-dialog-box,
+.zen-focus-card,
+.devices-list,
+.auth-box,
+.profile-danger-card {
+  border-radius: 32px !important;
+}
+
+/* 2. Pure Stadium Pills (9999px) for ALL buttons, controls, pills and tabs */
+.btn-add-task,
+.btn-save-profile,
+.btn-modal-submit,
+.btn-modal-cancel,
+.btn-catalog-edit,
+.btn-catalog-archive,
+.btn-evening-review-trigger,
+.btn-focus-start,
+.btn-counter-inc,
+.btn-counter-undo,
+.btn-add-step,
+.btn-remove-step,
+.btn-pwa-install,
+.btn-add-account-action,
+.setting-choice-btn,
+.time-filter-chip,
+.catalog-filter-btn,
+.weekday-preset-chip,
+.duration-preset-btn,
+.modal-tab-switch,
+.modal-tab-btn,
+.weekday-btn,
+.status-pill,
+.schedule-badge,
+.modal-badge,
+.streak-shield-badge,
+.best-streak-tag,
+.step-count-badge,
+.offline-status-pill,
+.brand-tagline-badge,
+.nav-item,
+.sidebar-brand-btn,
+.time-choice-btn,
+.custom-time-choice,
+.custom-slot-chip-wrap {
+  border-radius: 9999px !important;
+}
+
+/* 3. Inputs, Selects & Search Bars: Stadium Pill with Generous Sizing */
+.modal-form input:not([type="checkbox"]):not([type="radio"]),
+.modal-form select,
+.profile-input,
+.catalog-search-input,
+.custom-duration-input-row input,
+.custom-duration-input-row select,
+.count-input-row input,
+.count-unit-select,
+.step-input-row input,
+.step-input-row select {
+  min-height: 54px !important;
+  border-radius: 9999px !important;
+  padding: 12px 22px !important;
+  font-size: 15px !important;
+}
+
+textarea.profile-input,
+textarea.modal-input {
+  border-radius: 26px !important;
+  min-height: 100px !important;
+  padding: 16px 22px !important;
+}
+
+/* 4. Generous Heights & Comfortable Hit Areas */
+.btn-add-task,
+.btn-save-profile,
+.btn-modal-submit,
+.btn-modal-cancel,
+.btn-evening-review-trigger,
+.setting-choice-btn {
+  min-height: 54px !important;
+  padding: 14px 24px !important;
+  font-size: 14.5px !important;
+  font-weight: 750 !important;
+}
+
+.modal-tab-switch {
+  min-height: 52px !important;
+  padding: 5px !important;
+}
+
+.modal-tab-btn {
+  min-height: 42px !important;
+  padding: 10px 18px !important;
+  font-size: 13.5px !important;
+  font-weight: 750 !important;
+}
+
+.time-choice-btn {
+  min-height: 56px !important;
+  padding: 12px 18px !important;
+  font-size: 13px !important;
+}
+
+.duration-preset-btn {
+  min-height: 48px !important;
+  padding: 10px 18px !important;
+  font-size: 13px !important;
+}
+
+.time-filter-chip {
+  min-height: 44px !important;
+  padding: 10px 20px !important;
+  font-size: 13.5px !important;
+}
+
+.catalog-filter-btn {
+  min-height: 46px !important;
+  padding: 10px 20px !important;
+  font-size: 13.5px !important;
+}
+
+.task-card {
+  min-height: 90px !important;
+  padding: 22px 26px !important;
+}
+
+.stat-card {
+  min-height: 136px !important;
+  padding: 24px 26px !important;
+}
+
+/* 5. Executive Two-Tone Brand Title Styling */
+.sidebar-header {
+  min-height: 44px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.sidebar-brand-btn {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 6px !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+
+.brand-title {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  font-size: 21px !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.brand-my {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  transition: color var(--dur-fast);
+}
+
+.brand-plan {
+  color: var(--accent-lime) !important;
+  font-weight: 900 !important;
+  transition: color var(--dur-fast);
+}
+
+[data-theme="light"] .brand-my {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .brand-plan {
+  color: #65a30d !important;
+}
+
+/* 6. High Contrast Light Theme Refinements for Soft Radii */
+[data-theme="light"] .settings-card,
+[data-theme="light"] .profile-card,
+[data-theme="light"] .stat-card,
+[data-theme="light"] .catalog-card,
+[data-theme="light"] .task-card,
+[data-theme="light"] .floating-modal-box {
+  border-radius: 32px !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05) !important;
+}
+
+[data-theme="light"] .setting-choice-btn.active,
+[data-theme="light"] .time-filter-chip.active,
+[data-theme="light"] .catalog-filter-btn.active,
+[data-theme="light"] .duration-preset-btn.active,
+[data-theme="light"] .modal-tab-btn.active {
+  border-radius: 9999px !important;
+  border-color: rgba(101, 163, 13, 0.5) !important;
 }
 

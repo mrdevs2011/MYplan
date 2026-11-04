@@ -309,7 +309,7 @@ export default function Home() {
 
   const durationPresets = useMemo(
     () => [
-      { id: "unlimited" as const, label: `∞ ${t.preset_unlimited}`, days: null },
+      { id: "unlimited" as const, label: t.preset_unlimited, days: null },
       { id: "1_week" as const, label: t.preset_1w, days: 7 },
       { id: "2_weeks" as const, label: t.preset_2w, days: 14 },
       { id: "3_weeks" as const, label: t.preset_3w, days: 21 },
@@ -1547,6 +1547,31 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showCreateModal, resetModalState]);
 
+  // Scroll lock background when any modal is open so modal scrolls freely
+  useEffect(() => {
+    const isModalActive =
+      showCreateModal ||
+      focusModalOpen ||
+      showInstallGuideModal ||
+      showCustomTimeModal ||
+      showEveningReview;
+    if (typeof document !== "undefined") {
+      if (isModalActive) {
+        document.body.style.overflow = "hidden";
+        document.documentElement.style.overflow = "hidden";
+      } else {
+        document.body.style.overflow = "";
+        document.documentElement.style.overflow = "";
+      }
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = "";
+        document.documentElement.style.overflow = "";
+      }
+    };
+  }, [showCreateModal, focusModalOpen, showInstallGuideModal, showCustomTimeModal, showEveningReview]);
+
   // PWA Install handler with full fallback guide modal
   const handleInstallApp = async () => {
     const promptEvent =
@@ -2621,8 +2646,8 @@ export default function Home() {
               </button>
             </div>
 
-            {/* 2 Tabs: Bir martalik vs Sanoqli — ONLY show when creating new task. In edit mode, activity kind is fixed */}
-            {!editingActivity ? (
+            {/* 2 Tabs: Bir martalik vs Sanoqli — ONLY show when creating new task. In edit mode, hidden */}
+            {!editingActivity && (
               <div className="modal-tab-switch" role="tablist" aria-label={t.modal_title}>
                 <button
                   type="button"
@@ -2644,14 +2669,6 @@ export default function Home() {
                   <IconHash className="icon-sm" />
                   <span>{t.tab_countable}</span>
                 </button>
-              </div>
-            ) : (
-              <div className="modal-edit-locked-banner">
-                <span className="locked-kind-pill">
-                  {editingActivity.measurement_type === "count" ? <IconHash className="icon-xs" /> : <IconCheck className="icon-xs" />}
-                  {editingActivity.measurement_type === "count" ? t.tab_countable : t.tab_single}
-                </span>
-                <span className="locked-kind-hint">{t.edit_kind_locked_hint}</span>
               </div>
             )}
 
@@ -2710,7 +2727,6 @@ export default function Home() {
                       <IconAlertTriangle className="icon-xs inline-icon" /> {debouncedCountError}
                     </p>
                   )}
-                  <p className="count-hint">{t.hint_count_limits}</p>
                 </div>
               )}
 
@@ -2729,7 +2745,6 @@ export default function Home() {
               <div className="form-group time-of-day-picker-group">
                 <div className="field-label-row">
                   <span>{t.label_time_of_day}</span>
-                  <span className="field-sub-hint">{t.sub_time_of_day}</span>
                 </div>
                 <div className="time-of-day-grid" role="radiogroup" aria-label={t.label_time_of_day}>
                   <button
@@ -2829,7 +2844,6 @@ export default function Home() {
               <div className="form-group duration-picker-group">
                 <label className="field-label-row">
                   <span>{t.label_duration}</span>
-                  <span className="field-sub-hint">{t.sub_duration}</span>
                 </label>
 
                 <div className="duration-presets-grid" role="radiogroup" aria-label={t.label_duration}>
@@ -2918,7 +2932,6 @@ export default function Home() {
               <div className="form-group weekdays-picker-group">
                 <div className="field-label-row">
                   <span>{t.label_weekdays}</span>
-                  <span className="field-sub-hint">{t.sub_weekdays}</span>
                 </div>
 
                 <div className="weekdays-presets-row">
@@ -3310,8 +3323,10 @@ export default function Home() {
                 }}
                 aria-label="Bosh sahifa"
               >
-                <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={36} height={36} priority />
-                <span className="brand-title">MyPlan</span>
+                <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={34} height={34} priority />
+                <span className="brand-title">
+                  <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+                </span>
               </button>
               <button
                 type="button"
@@ -3588,7 +3603,7 @@ export default function Home() {
                     <IconSparkles className="icon-xs" /> {t.today_kicker}
                   </span>
                   <h1 className="page-title">{t.today_title}</h1>
-                  <p className="page-subtitle">{t.today_sub}{formattedToday ? ` · ${formattedToday}` : ""}</p>
+                  <p className="page-subtitle">{formattedToday || t.today_title}</p>
                 </>
               )}
               {activeTab === "activities" && (
@@ -3687,13 +3702,6 @@ export default function Home() {
                       <span className="dot-separator">•</span>
                       <span>{t.momentum_index_label}: <strong>{momentumScore}%</strong></span>
                     </div>
-                    <p className="streak-status-hint">
-                      {percent === 100
-                        ? t.streak_100
-                        : streakCount > 0
-                        ? t.streak_keep
-                        : t.streak_start}
-                    </p>
                   </div>
                 </div>
 
@@ -3738,7 +3746,6 @@ export default function Home() {
                   <div className="stat-value-row">
                     <span className="stat-value">{activeActivities.length.toString().padStart(2, "0")}</span>
                   </div>
-                  <p className="stat-footer">{t.stat_plans_desc}</p>
                 </article>
 
                 <article className="stat-card">
@@ -3749,7 +3756,6 @@ export default function Home() {
                   <div className="stat-value-row">
                     <span className="stat-value text-lime">{completedCount.toString().padStart(2, "0")}</span>
                   </div>
-                  <p className="stat-footer">{t.stat_success_desc}</p>
                 </article>
               </section>
 
@@ -4594,7 +4600,6 @@ export default function Home() {
                       <IconGlobe className="icon-sm text-lime" />
                       <div>
                         <h3>{t.setting_language}</h3>
-                        <p>{t.setting_language_sub}</p>
                       </div>
                     </div>
                     <div className="settings-options-grid">
@@ -4631,7 +4636,6 @@ export default function Home() {
                       <IconMoon className="icon-sm text-lime" />
                       <div>
                         <h3>{t.setting_appearance}</h3>
-                        <p>{t.setting_appearance_sub}</p>
                       </div>
                     </div>
                     <div className="settings-options-grid">
@@ -4671,11 +4675,10 @@ export default function Home() {
                       <IconSparkles className="icon-sm text-lime" />
                       <div>
                         <h3>{t.setting_sounds}</h3>
-                        <p>{t.setting_sounds_sub}</p>
                       </div>
                     </div>
                     <div className="settings-toggle-row">
-                      <span>{t.setting_sounds_sub}</span>
+                      <span>{t.setting_sounds}</span>
                       <button
                         type="button"
                         className={`toggle-switch-btn ${soundEnabled ? "on" : "off"}`}
@@ -4693,11 +4696,10 @@ export default function Home() {
                       <IconBell className="icon-sm text-lime" />
                       <div>
                         <h3>{t.setting_notifs}</h3>
-                        <p>{t.setting_notifs_sub}</p>
                       </div>
                     </div>
                     <div className="settings-toggle-row">
-                      <span>{t.setting_notifs_sub}</span>
+                      <span>{t.setting_notifs}</span>
                       <button
                         type="button"
                         className={`toggle-switch-btn ${notificationsEnabled ? "on" : "off"}`}
@@ -4914,7 +4916,6 @@ export default function Home() {
                       <IconDownload className="icon-sm text-lime" />
                       <div>
                         <h3>{t.settings_pwa_title}</h3>
-                        <p>{t.settings_pwa_sub}</p>
                       </div>
                     </div>
                     <div className="pwa-status-box">
