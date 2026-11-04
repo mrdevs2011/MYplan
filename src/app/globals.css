@@ -546,13 +546,23 @@ select:focus-visible {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   align-items: center !important;
+  flex: 1 !important;
+  margin: auto 0 !important;
+}
+
+.app-layout.sidebar-collapsed .nav-caption {
+  max-width: 0;
+  opacity: 0;
+  display: none !important;
 }
 
 .app-layout.sidebar-collapsed .nav-links {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
   align-items: center !important;
   gap: 8px !important;
 }
@@ -3105,7 +3115,8 @@ select:focus-visible {
 .count-buttons-cluster {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .btn-counter-inc {
@@ -3195,32 +3206,37 @@ select:focus-visible {
   transform: scale(0.96);
 }
 
-/* Sanoqli vazifa uchun Undo (oxirgi amalni qaytarish) tugmasi */
+/* Sanoqli vazifa uchun Undo (oxirgi amalni qaytarish) tugmasi - EXACT CIRCLE matching +10 +5 +1 */
 .btn-counter-undo {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.24);
-  color: #fca5a5;
-  font-size: 11px;
-  font-weight: 650;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 44px;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1.5px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
   cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
   transition: all var(--dur-fast);
   animation: fadeIn 0.2s ease-out;
+  flex-shrink: 0;
 }
 
 .btn-counter-undo:hover {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.45);
-  color: #f87171;
-  transform: scale(1.02);
+  background: rgba(245, 158, 11, 0.24);
+  border-color: #fbbf24;
+  color: #fef08a;
+  transform: scale(1.08);
 }
 
 .btn-counter-undo:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
 
 .task-kind-badge {
@@ -4860,6 +4876,49 @@ select:focus-visible {
   line-height: 1.4;
 }
 
+.step-header-text {
+  flex: 1;
+}
+
+.step-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.step-count-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(180, 240, 76, 0.12);
+  color: var(--accent-lime);
+  border: 1px solid rgba(180, 240, 76, 0.3);
+}
+
+.step-limit-notice {
+  font-size: 12px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.4;
+  animation: fadeIn 0.2s ease;
+}
+
+.btn-add-step:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.step-number-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 
 /* ==========================================================================
    POCKET EXPERIENCE: OFFLINE STATUS PILL & TOPBAR
@@ -5501,14 +5560,17 @@ select:focus-visible {
 }
 
 [data-theme="light"] .btn-counter-undo {
-  background: #f8fafc;
-  border-color: rgba(15, 23, 42, 0.1);
-  color: #64748b;
+  background: #fef3c7;
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #d97706;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
 }
 
 [data-theme="light"] .btn-counter-undo:hover {
+  background: #fde68a;
   border-color: #d97706;
-  color: #d97706;
+  color: #b45309;
+  transform: scale(1.08);
 }
 
 [data-theme="light"] .floating-modal-box {

@@ -802,6 +802,11 @@ export default function Home() {
       const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
       const now = Date.now();
       try {
+        const NOTIF_CLEAN_KEY = "myplan_notif_v3_fresh";
+        if (!localStorage.getItem(NOTIF_CLEAN_KEY)) {
+          localStorage.removeItem("myplan_notifications_history");
+          localStorage.setItem(NOTIF_CLEAN_KEY, "true");
+        }
         const rawNotifs = localStorage.getItem("myplan_notifications_history");
         let parsed: MyPlanNotification[] = rawNotifs ? JSON.parse(rawNotifs) : [];
         parsed = parsed.filter((n) => now - n.createdAt <= THREE_DAYS_MS);
@@ -1261,6 +1266,10 @@ export default function Home() {
   // Sanoqli qadamlar (+10, +5, +1, +15...) boshqaruvi
   const handleAddCounterStep = () => {
     setNewStepError("");
+    if (counterSteps.length >= 10) {
+      setNewStepError("Maksimal 10 ta hisoblash qadami kiritish mumkin (limitga yetildi).");
+      return;
+    }
     const trimmed = newStepInput.trim();
     if (!trimmed) {
       setNewStepError("Iltimos, qadam miqdorini kiriting.");
@@ -2791,20 +2800,20 @@ export default function Home() {
                                               </button>
                                             );
                                           })}
-                                      </div>
 
-                                      {/* Undo Button */}
-                                      {(taskHistory[occ.id]?.length || 0) > 0 && (
-                                        <button
-                                          type="button"
-                                          className="btn-counter-undo"
-                                          onClick={() => void undoTaskCount(activity, occ)}
-                                          title="Oxirgi amalni qaytarish"
-                                        >
-                                          <IconUndo className="icon-xs" />
-                                          <span>Qaytarish (-{taskHistory[occ.id].slice(-1)[0]})</span>
-                                        </button>
-                                      )}
+                                        {/* Undo Button - Pure circle matching +10 +5 +1 */}
+                                        {(taskHistory[occ.id]?.length || 0) > 0 && (
+                                          <button
+                                            type="button"
+                                            className="btn-counter-undo"
+                                            onClick={() => void undoTaskCount(activity, occ)}
+                                            title={`Qaytarish (-${taskHistory[occ.id].slice(-1)[0]})`}
+                                            aria-label="Amalni qaytarish"
+                                          >
+                                            <IconUndo className="icon-sm" />
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -3397,8 +3406,11 @@ export default function Home() {
                   <div className="settings-card counter-steps-manage-card">
                     <div className="settings-card-header">
                       <IconHash className="icon-sm text-lime" />
-                      <div>
-                        <h3>{t.setting_counter}</h3>
+                      <div className="step-header-text">
+                        <div className="step-title-row">
+                          <h3>{t.setting_counter}</h3>
+                          <span className="step-count-badge">{counterSteps.length} / 10 ta</span>
+                        </div>
                         <p>{t.setting_counter_sub}</p>
                       </div>
                     </div>
@@ -3438,8 +3450,9 @@ export default function Home() {
                               setNewStepInput(val);
                               setNewStepError("");
                             }}
-                            placeholder="Masalan: 15"
+                            placeholder={counterSteps.length >= 10 ? "Limitga yetildi" : "Masalan: 15"}
                             maxLength={2}
+                            disabled={counterSteps.length >= 10}
                             onKeyDown={(e) => {
                               if (e.key === "Enter") {
                                 e.preventDefault();
@@ -3452,6 +3465,7 @@ export default function Home() {
                           type="button"
                           className="btn-add-step"
                           onClick={handleAddCounterStep}
+                          disabled={counterSteps.length >= 10}
                         >
                           <IconPlus className="icon-xs" />
                           <span>{t.btn_add}</span>
@@ -3471,9 +3485,15 @@ export default function Home() {
                           ⚠️ {newStepError}
                         </p>
                       )}
-                      <p className="step-hint">
-                        {t.step_hint}
-                      </p>
+                      {counterSteps.length >= 10 ? (
+                        <p className="step-limit-notice">
+                          ✓ Maksimal 10 ta hisoblash qadami kiritildi. Yangi qo‘shish uchun mavjudlaridan birini o‘chiring.
+                        </p>
+                      ) : (
+                        <p className="step-hint">
+                          {t.step_hint} (Maksimal 10 ta qadam).
+                        </p>
+                      )}
                     </div>
                   </div>
 
