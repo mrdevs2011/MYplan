@@ -2060,6 +2060,16 @@ select:focus-visible {
   .create-inputs-grid .field-schedule {
     grid-column: 1 / -1;
   }
+
+  .profile-details-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+
+  .profile-form-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -2389,6 +2399,42 @@ select:focus-visible {
 
   .footer-center-tag {
     display: none;
+  }
+
+  .profile-details-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .profile-form-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .profile-edit-section {
+    padding: 18px 16px;
+  }
+
+  .device-item-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .device-item-left {
+    width: 100%;
+  }
+
+  .device-item-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .btn-revoke-device {
+    width: 100%;
+    justify-content: center;
+    height: 42px;
   }
 }
 
@@ -4919,6 +4965,341 @@ select:focus-visible {
   opacity: 0.6;
 }
 
+/* ==========================================================================
+   PROFILE EDITING & LOGIN SECURITY COOLDOWNS
+   ========================================================================== */
+.profile-edit-section {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: border-color var(--dur-fast);
+}
+
+.profile-edit-section:focus-within {
+  border-color: var(--border-active);
+}
+
+.profile-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.profile-section-title-row h4 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.security-badge.locked {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.security-badge.unlocked {
+  background: var(--accent-lime-dim);
+  border: 1px solid var(--border-active);
+  color: var(--accent-lime);
+}
+
+.security-hint-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.profile-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.profile-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-form-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.profile-input {
+  width: 100%;
+  height: 46px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: all var(--dur-fast);
+}
+
+.profile-input:focus {
+  border-color: var(--accent-lime);
+  box-shadow: 0 0 0 3px var(--accent-lime-dim);
+}
+
+.profile-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--bg-base);
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.profile-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.btn-save-profile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 12px;
+  background: var(--accent-lime);
+  color: #0b0f0a;
+  font-size: 13px;
+  font-weight: 750;
+  border: none;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+  box-shadow: 0 2px 10px rgba(180, 240, 76, 0.2);
+}
+
+.btn-save-profile:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(180, 240, 76, 0.35);
+}
+
+.btn-save-profile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.profile-feedback-msg {
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(180, 240, 76, 0.08);
+  border: 1px solid rgba(180, 240, 76, 0.25);
+  color: var(--accent-lime);
+  animation: fadeIn 0.2s ease;
+}
+
+/* ==========================================================================
+   CONNECTED DEVICES (ULANGAN QURILMALAR)
+   ========================================================================== */
+.connected-devices-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device-item-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--dur-fast);
+}
+
+.device-item-card:hover {
+  background: var(--bg-surface-elevated);
+  border-color: var(--border-medium);
+}
+
+.device-item-card.is-current-device {
+  border-color: rgba(180, 240, 76, 0.35);
+  background: rgba(180, 240, 76, 0.03);
+}
+
+.device-item-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.device-icon-wrap {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.device-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.device-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.device-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-current-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 750;
+  color: var(--accent-lime);
+  background: var(--accent-lime-dim);
+  border: 1px solid var(--border-active);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.device-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 750;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50% !important;
+}
+
+.status-dot.green {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+}
+
+.device-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.device-meta-tag {
+  color: var(--text-secondary);
+  font-weight: 550;
+}
+
+.device-meta-divider {
+  color: var(--border-medium);
+  font-size: 10px;
+}
+
+.device-meta-time {
+  color: var(--text-muted);
+}
+
+.device-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-revoke-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.btn-revoke-device:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ffffff;
+  transform: scale(1.04);
+}
+
+.btn-revoke-device:active {
+  transform: scale(0.96);
+}
+
+.this-device-indicator {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 
 /* ==========================================================================
    POCKET EXPERIENCE: OFFLINE STATUS PILL & TOPBAR
@@ -5680,4 +6061,44 @@ select:focus-visible {
 [data-theme="light"] .onboarding-showcase-section {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
   border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .profile-edit-section,
+[data-theme="light"] .device-item-card {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .device-item-card:hover {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+[data-theme="light"] .profile-input {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+}
+
+[data-theme="light"] .profile-input:disabled {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.06);
+  color: #94a3b8;
+}
+
+[data-theme="light"] .device-icon-wrap {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .btn-revoke-device {
+  background: #fef2f2;
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #dc2626;
+}
+
+[data-theme="light"] .btn-revoke-device:hover {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #b91c1c;
 }

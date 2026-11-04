@@ -17,6 +17,7 @@ import {
   IconBarChart,
   IconDownload,
 } from "@/components/icons";
+import { syncCurrentDeviceSession } from "@/lib/device-session";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -209,6 +210,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         const newUser = data.user;
         if (data.session && newUser) {
           if (typeof window !== "undefined") {
+            void syncCurrentDeviceSession(supabase, newUser.id);
             localStorage.removeItem("myplan_add_account_intent");
             try {
               const rawVault = localStorage.getItem("myplan_accounts_vault");
@@ -242,6 +244,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         if (error) throw error;
         if (typeof window !== "undefined" && signInData.user) {
           localStorage.removeItem("myplan_add_account_intent");
+          void syncCurrentDeviceSession(supabase, signInData.user.id);
           try {
             const rawVault = localStorage.getItem("myplan_accounts_vault");
             const vault = rawVault ? JSON.parse(rawVault) : [];

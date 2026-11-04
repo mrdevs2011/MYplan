@@ -38,7 +38,20 @@ import {
   IconFlame,
   IconSunrise,
   IconWifiOff,
+  IconSmartphone,
+  IconTablet,
+  IconLaptop,
+  IconLock,
+  IconKey,
+  IconEdit,
 } from "@/components/icons";
+import {
+  getOrCreateSessionToken,
+  syncCurrentDeviceSession,
+  checkDeviceSessionActive,
+  revokeDeviceSession,
+  type UserDevice,
+} from "@/lib/device-session";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -192,6 +205,22 @@ export default function Home() {
   const [accountUsername, setAccountUsername] = useState("");
   const [userAge, setUserAge] = useState<string | number>("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  // User Auth Timestamps & Session Security
+  const [userLastSignInAt, setUserLastSignInAt] = useState<string>("");
+  const [userCreatedAt, setUserCreatedAt] = useState<string>("");
+  const [activeDevices, setActiveDevices] = useState<UserDevice[]>([]);
+
+  // Profile Editing States
+  const [editFullName, setEditFullName] = useState("");
+  const [editAge, setEditAge] = useState<string | number>("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [profileActionMsg, setProfileActionMsg] = useState("");
+  const [passwordActionMsg, setPasswordActionMsg] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
 
   // App Data
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -417,6 +446,200 @@ export default function Home() {
     }
   }, []);
 
+  // Timer to keep session countdowns and timestamps reactive
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatRemainingTime = useCallback((ms: number): string => {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours} soat ${minutes} daqiqa`;
+    }
+    return `${Math.max(1, minutes)} daqiqa`;
+  }, []);
+
+  const formatDeviceTime = useCallback((isoString: string): string => {
+    try {
+      const ms = currentTime - new Date(isoString).getTime();
+      const minutes = Math.floor(ms / (1000 * 60));
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (minutes < 2) return "Hozirgina faol";
+      if (minutes < 60) return `${minutes} daqiqa oldin`;
+      if (hours < 24) return `${hours} soat oldin`;
+      return `${days} kun oldin`;
+    } catch {
+      return "Yaqinda faol";
+    }
+  }, [currentTime]);
+
+  // Security Cooldown Calculations based on user login timestamp
+  const loginTime = useMemo(() => {
+    return userLastSignInAt ? new Date(userLastSignInAt).getTime() : currentTime;
+  }, [userLastSignInAt, currentTime]);
+
+  const accountCreatedTime = useMemo(() => {
+    return userCreatedAt ? new Date(userCreatedAt).getTime() : currentTime;
+  }, [userCreatedAt, currentTime]);
+
+  // 1. Password Cooldown: kamida 24 soat (86,400,000 ms)
+  const PASSWORD_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  const timeSinceLogin = Math.max(0, currentTime - loginTime);
+  const canChangePassword = timeSinceLogin >= PASSWORD_COOLDOWN_MS;
+  const remainingPasswordMs = Math.max(0, PASSWORD_COOLDOWN_MS - timeSinceLogin);
+
+  // 2. Name & Age Cooldown: kamida 3 soat (10,800,000 ms)
+  const NAME_AGE_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+  const canChangeNameAge = timeSinceLogin >= NAME_AGE_COOLDOWN_MS;
+  const remainingNameAgeMs = Math.max(0, NAME_AGE_COOLDOWN_MS - timeSinceLogin);
+
+  // 3. Connected Devices Section: yangi ro'yxatdan o'tganlarga 24 soatdan so'ng ko'rinadi
+  const isMatureAccount = (currentTime - accountCreatedTime) >= (24 * 60 * 60 * 1000);
+
+  // Active Devices Loader
+  const loadActiveDevices = useCallback(async (uid: string) => {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("user_devices")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("is_active", true)
+        .order("last_active_at", { ascending: false });
+      if (!error && data) {
+        setActiveDevices(data as UserDevice[]);
+      }
+    } catch (err) {
+      console.error("loadActiveDevices error:", err);
+    }
+  }, []);
+
+  // Revoke / Logout Remote Device
+  const handleRevokeDevice = useCallback(async (deviceId: string) => {
+    try {
+      const supabase = createClient();
+      const ok = await revokeDeviceSession(supabase, deviceId);
+      if (ok) {
+        setActiveDevices((prev) => prev.filter((d) => d.id !== deviceId));
+        triggerHaptic("medium");
+      }
+    } catch (err) {
+      console.error("handleRevokeDevice error:", err);
+    }
+  }, []);
+
+  // Profile Information Save Handler (Name & Age)
+  const handleSaveProfileInfo = async () => {
+    setProfileActionMsg("");
+    if (!canChangeNameAge) {
+      setProfileActionMsg(
+        `Ism va yoshni o‘zgartirish uchun yangi sessiyadan so‘ng kamida 3 soat o‘tishi shart (Qolgan: ${formatRemainingTime(remainingNameAgeMs)}).`
+      );
+      return;
+    }
+    const trimmedName = editFullName.trim();
+    if (!trimmedName) {
+      setProfileActionMsg("Iltimos, ism va familiyangizni kiriting.");
+      return;
+    }
+    let parsedAge: number | null = null;
+    if (editAge !== "" && editAge !== null && editAge !== undefined) {
+      const num = Number(editAge);
+      if (isNaN(num) || num < 6 || num > 122) {
+        setProfileActionMsg("Yosh 6 dan 122 oralig‘ida bo‘lishi lozim.");
+        return;
+      }
+      parsedAge = Math.floor(num);
+    }
+
+    setIsSavingProfile(true);
+    try {
+      const supabase = createClient();
+      if (userId) {
+        const { error: profileErr } = await supabase
+          .from("profiles")
+          .update({
+            full_name: trimmedName,
+            age: parsedAge,
+          })
+          .eq("id", userId);
+        if (profileErr) throw profileErr;
+
+        await supabase.auth.updateUser({
+          data: {
+            full_name: trimmedName,
+            age: parsedAge,
+          },
+        });
+
+        setAccountName(trimmedName);
+        setUserAge(parsedAge || "");
+        triggerHaptic("success");
+        setProfileActionMsg("✓ Ism va yosh muvaffaqiyatli saqlandi!");
+
+        // Update in accounts vault
+        try {
+          const rawVault = localStorage.getItem("myplan_accounts_vault");
+          if (rawVault) {
+            const vault: UserAccount[] = JSON.parse(rawVault);
+            const updated = vault.map((a) =>
+              a.id === userId ? { ...a, fullName: trimmedName, age: parsedAge } : a
+            );
+            localStorage.setItem("myplan_accounts_vault", JSON.stringify(updated));
+            setSavedAccounts(updated);
+          }
+        } catch {}
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Saqlashda xatolik yuz berdi";
+      setProfileActionMsg(`⚠️ ${msg}`);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  // Password Update Handler
+  const handleUpdatePassword = async () => {
+    setPasswordActionMsg("");
+    if (!canChangePassword) {
+      setPasswordActionMsg(
+        `Parolni o‘zgartirish uchun tizimga kirilganiga kamida 24 soat to‘lgan bo‘lishi lozim (Qolgan: ${formatRemainingTime(remainingPasswordMs)}).`
+      );
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordActionMsg("Yangi parol kamida 6 ta belgidan iborat bo‘lishi lozim.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordActionMsg("Yangi parol va tasdiqlash paroli bir-biriga mos kelmadi.");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) throw error;
+
+      triggerHaptic("success");
+      setPasswordActionMsg("✓ Parol muvaffaqiyatli yangilandi!");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Parolni yangilashda xatolik yuz berdi";
+      setPasswordActionMsg(`⚠️ ${msg}`);
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
   // Load Workspace Data
   const loadWorkspace = useCallback(async (id: string) => {
     setLoadingData(true);
@@ -442,7 +665,12 @@ export default function Home() {
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
         setAccountUsername(profile.username || "");
-        if (profile.age) setUserAge(profile.age);
+        if (profile.full_name) setEditFullName(profile.full_name);
+        if (profile.age) {
+          setUserAge(profile.age);
+          setEditAge(profile.age);
+        }
+        if (profile.created_at) setUserCreatedAt(profile.created_at);
         if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
         if (typeof profile.streak_count === "number") setStreakCount(profile.streak_count);
         if (typeof profile.best_streak === "number") setBestStreak(profile.best_streak);
@@ -645,15 +873,59 @@ export default function Home() {
             if (typeof p.best_streak === "number") setBestStreak(p.best_streak);
             if (typeof p.sound_enabled === "boolean") setSoundEnabled(p.sound_enabled);
             if (typeof p.notifications_enabled === "boolean") setNotificationsEnabled(p.notifications_enabled);
-            if (typeof p.full_name === "string") setAccountName(p.full_name);
+            if (typeof p.full_name === "string") {
+              setAccountName(p.full_name);
+              setEditFullName(p.full_name);
+            }
             if (typeof p.avatar_url === "string") setAvatarUrl(p.avatar_url);
+            if (typeof p.age === "number") {
+              setUserAge(p.age);
+              setEditAge(p.age);
+            }
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "user_devices", filter: `user_id=eq.${uid}` },
+          (payload) => {
+            const currentToken = getOrCreateSessionToken();
+            const updated = payload.new as { session_token?: string; is_active?: boolean } | null;
+            if (
+              payload.eventType === "UPDATE" &&
+              updated?.session_token === currentToken &&
+              updated?.is_active === false
+            ) {
+              const sb = createClient();
+              void sb.auth.signOut().then(() => {
+                if (typeof window !== "undefined") {
+                  localStorage.removeItem("myplan_active_account_id");
+                }
+                setUserId(null);
+                router.replace("/login");
+              });
+              return;
+            }
+            void loadActiveDevices(uid);
           }
         )
         .subscribe();
     };
 
-    void supabase.auth.getSession().then(({ data: { session } }) => {
+    void supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
+        // Instant check if this device was revoked remotely
+        const sessionCheck = await checkDeviceSessionActive(supabase);
+        if (!sessionCheck.allowed) {
+          await supabase.auth.signOut();
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("myplan_active_account_id");
+          }
+          setUserId(null);
+          setAuthReady(true);
+          router.replace("/login");
+          return;
+        }
+
         const currentId = session.user.id;
         const currentName = String(
           session.user.user_metadata?.full_name || session.user.user_metadata?.username || ""
@@ -665,9 +937,18 @@ export default function Home() {
         setAccountName(currentName);
         setAccountUsername(currentUsername);
         setUserAge(currentAge);
+        setEditFullName(currentName);
+        if (currentAge) setEditAge(currentAge);
+        setUserLastSignInAt(
+          session.user.last_sign_in_at || session.user.created_at || new Date().toISOString()
+        );
+        setUserCreatedAt(session.user.created_at || new Date().toISOString());
+
         setAuthReady(true);
         void loadWorkspace(currentId);
         setupRealtime(currentId);
+        void syncCurrentDeviceSession(supabase, currentId);
+        void loadActiveDevices(currentId);
 
         const savedAvatar = localStorage.getItem(`myplan_avatar_${currentId}`);
         if (savedAvatar) setAvatarUrl(savedAvatar);
@@ -920,7 +1201,7 @@ export default function Home() {
         }
       }
     };
-  }, [loadWorkspace, router, processOfflineQueue]);
+  }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices]);
 
   // Close modal on Escape
   useEffect(() => {
@@ -3186,12 +3467,151 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="profile-notice-box">
-                    <IconShield className="icon-sm text-lime" />
-                    <p>
-                      <strong>Xavfsizlik eslatmasi:</strong> Shaxsiy hisob ma’lumotlaringiz xavfsizlikni
-                      ta’minlash maqsadida faqat ko‘rish rejimida saqlanadi.
+                  {/* Shaxsiy ma'lumotlar (Ism va Yosh) tahrirlash */}
+                  <div className="profile-edit-section">
+                    <div className="profile-section-title-row">
+                      <h4>
+                        <IconEdit className="icon-xs text-lime" />
+                        <span>Ism va yoshni tahrirlash</span>
+                      </h4>
+                      {!canChangeNameAge ? (
+                        <span className="security-badge locked" title="Yangi sessiyadan so‘ng 3 soat o‘tishi shart">
+                          <IconLock className="icon-xs" />
+                          <span>3 soatlik himoya: {formatRemainingTime(remainingNameAgeMs)} qoldi</span>
+                        </span>
+                      ) : (
+                        <span className="security-badge unlocked">
+                          <IconCheck className="icon-xs" />
+                          <span>Tahrirlash mumkin</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="security-hint-text">
+                      {!canChangeNameAge
+                        ? "Xavfsizlik qoidasi: hisobga yangi kirilganda ism va yoshni o‘zgartirish uchun kamida 3 soat o‘tishi shart. Ushbu vaqt tugagach tahrirlash avtomatik ochiladi."
+                        : "Profil ma’lumotlaringizni yangilang va saqlash tugmasini bosing."}
                     </p>
+
+                    <div className="profile-form-grid">
+                      <div className="profile-form-field">
+                        <label htmlFor="input-edit-fullname">{t.profile_name_label}</label>
+                        <input
+                          id="input-edit-fullname"
+                          type="text"
+                          className="profile-input"
+                          value={editFullName}
+                          onChange={(e) => setEditFullName(e.target.value)}
+                          placeholder="To‘liq ismingiz"
+                          disabled={!canChangeNameAge || isSavingProfile}
+                          maxLength={60}
+                        />
+                      </div>
+
+                      <div className="profile-form-field">
+                        <label htmlFor="input-edit-age">{t.profile_age_label}</label>
+                        <input
+                          id="input-edit-age"
+                          type="number"
+                          className="profile-input"
+                          value={editAge}
+                          onChange={(e) => setEditAge(e.target.value)}
+                          placeholder="Yoshingiz (masalan: 22)"
+                          disabled={!canChangeNameAge || isSavingProfile}
+                          min={6}
+                          max={122}
+                        />
+                      </div>
+                    </div>
+
+                    {profileActionMsg && (
+                      <p className="profile-feedback-msg">{profileActionMsg}</p>
+                    )}
+
+                    <div className="profile-form-actions">
+                      <button
+                        type="button"
+                        className="btn-save-profile"
+                        onClick={handleSaveProfileInfo}
+                        disabled={!canChangeNameAge || isSavingProfile}
+                      >
+                        <IconCheck className="icon-xs" />
+                        <span>{isSavingProfile ? "Saqlanmoqda..." : t.profile_save_btn}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Parolni yangilash */}
+                  <div className="profile-edit-section">
+                    <div className="profile-section-title-row">
+                      <h4>
+                        <IconKey className="icon-xs text-lime" />
+                        <span>Parolni o‘zgartirish</span>
+                      </h4>
+                      {!canChangePassword ? (
+                        <span className="security-badge locked" title="Kirilganiga kamida 24 soat bo‘lishi lozim">
+                          <IconLock className="icon-xs" />
+                          <span>24 soatlik himoya: {formatRemainingTime(remainingPasswordMs)} qoldi</span>
+                        </span>
+                      ) : (
+                        <span className="security-badge unlocked">
+                          <IconCheck className="icon-xs" />
+                          <span>Parolni yangilash mumkin</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="security-hint-text">
+                      {!canChangePassword
+                        ? "Xavfsizlik qoidasi: parolni o‘zgartirish uchun ushbu hisobga kirilganiga kamida 24 soat (1 kun) to‘lgan bo‘lishi lozim. Bu hisobingiz xavfsizligini ta’minlash uchundir."
+                        : "Hisobingiz xavfsizligi uchun yangi va mustahkam parol kiriting (kamida 6 ta belgi)."}
+                    </p>
+
+                    <div className="profile-form-grid">
+                      <div className="profile-form-field">
+                        <label htmlFor="input-new-password">{t.profile_password_label}</label>
+                        <input
+                          id="input-new-password"
+                          type="password"
+                          className="profile-input"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder={!canChangePassword ? "24 soatdan so‘ng ochiladi" : "Yangi parol (min. 6 ta)"}
+                          disabled={!canChangePassword || isUpdatingPassword}
+                          autoComplete="new-password"
+                        />
+                      </div>
+
+                      <div className="profile-form-field">
+                        <label htmlFor="input-confirm-password">Parolni tasdiqlash</label>
+                        <input
+                          id="input-confirm-password"
+                          type="password"
+                          className="profile-input"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder={!canChangePassword ? "24 soatdan so‘ng ochiladi" : "Parolni qayta kiriting"}
+                          disabled={!canChangePassword || isUpdatingPassword}
+                          autoComplete="new-password"
+                        />
+                      </div>
+                    </div>
+
+                    {passwordActionMsg && (
+                      <p className="profile-feedback-msg">{passwordActionMsg}</p>
+                    )}
+
+                    <div className="profile-form-actions">
+                      <button
+                        type="button"
+                        className="btn-save-profile"
+                        onClick={handleUpdatePassword}
+                        disabled={!canChangePassword || isUpdatingPassword}
+                      >
+                        <IconKey className="icon-xs" />
+                        <span>{isUpdatingPassword ? "Yangilanmoqda..." : t.profile_password_btn}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Multi-Account Management (Switch Account & Add Account, max 5) */}
@@ -3401,6 +3821,88 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Connected Devices (Ulangan qurilmalar) - Faqat ro'yxatdan o'tganiga 24 soat bo'lgan foydalanuvchilarga ko'rinadi */}
+                  {isMatureAccount && (
+                    <div className="settings-card connected-devices-card">
+                      <div className="settings-card-header">
+                        <IconLaptop className="icon-sm text-lime" />
+                        <div className="step-header-text">
+                          <div className="step-title-row">
+                            <h3>{t.devices_title}</h3>
+                            <span className="step-count-badge">
+                              {activeDevices.length} ta faol qurilma
+                            </span>
+                          </div>
+                          <p>{t.devices_sub}</p>
+                        </div>
+                      </div>
+
+                      <div className="devices-list">
+                        {activeDevices.map((dev) => {
+                          const isCurrent = dev.session_token === getOrCreateSessionToken();
+                          return (
+                            <div
+                              key={dev.id}
+                              className={`device-item-card ${isCurrent ? "is-current-device" : ""}`}
+                            >
+                              <div className="device-item-left">
+                                <div className="device-icon-wrap">
+                                  {dev.device_type === "mobile" ? (
+                                    <IconSmartphone className="icon-md text-lime" />
+                                  ) : dev.device_type === "tablet" ? (
+                                    <IconTablet className="icon-md text-lime" />
+                                  ) : (
+                                    <IconLaptop className="icon-md text-lime" />
+                                  )}
+                                </div>
+                                <div className="device-info-col">
+                                  <div className="device-name-row">
+                                    <strong className="device-title">{dev.device_name}</strong>
+                                    {isCurrent ? (
+                                      <span className="device-current-badge">
+                                        <span className="status-dot green" /> {t.devices_current}
+                                      </span>
+                                    ) : (
+                                      <span className="device-active-badge">
+                                        <span className="status-dot green" /> {t.devices_active_badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="device-meta-row">
+                                    <span className="device-meta-tag">{dev.os_name}</span>
+                                    <span className="device-meta-divider">•</span>
+                                    <span className="device-meta-tag">{dev.browser_name}</span>
+                                    <span className="device-meta-divider">•</span>
+                                    <span className="device-meta-time">
+                                      {formatDeviceTime(dev.last_active_at)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="device-item-actions">
+                                {!isCurrent ? (
+                                  <button
+                                    type="button"
+                                    className="btn-revoke-device"
+                                    onClick={() => handleRevokeDevice(dev.id)}
+                                    title="Sessiyani yakunlash (chiqarib yuborish)"
+                                    aria-label="Sessiyani yakunlash"
+                                  >
+                                    <IconLogOut className="icon-xs" />
+                                    <span className="btn-revoke-text">{t.devices_revoke}</span>
+                                  </button>
+                                ) : (
+                                  <span className="this-device-indicator">Ushbu brauzer</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Sanoqli hisoblagich bosqichlari (+ tugmalari) */}
                   <div className="settings-card counter-steps-manage-card">
