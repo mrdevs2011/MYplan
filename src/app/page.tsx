@@ -45,6 +45,11 @@ import {
   IconKey,
   IconEdit,
   IconClock,
+  IconAlertTriangle,
+  IconAward,
+  IconZap,
+  IconPlay,
+  IconPause,
 } from "@/components/icons";
 import {
   getOrCreateSessionToken,
@@ -102,16 +107,6 @@ interface CustomTimeSlot {
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
 
-const WEEKDAYS = [
-  { id: 1, short: "Du", full: "Dushanba" },
-  { id: 2, short: "Se", full: "Seshanba" },
-  { id: 3, short: "Chor", full: "Chorshanba" },
-  { id: 4, short: "Pay", full: "Payshanba" },
-  { id: 5, short: "Jum", full: "Juma" },
-  { id: 6, short: "Shan", full: "Shanba" },
-  { id: 7, short: "Yak", full: "Yakshanba" },
-];
-
 interface Activity {
   id: string;
   title: string;
@@ -154,23 +149,55 @@ function playCompletionSound() {
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const now = ctx.currentTime;
-    const notes = [659.25, 830.61, 987.77];
+    // Luxury Ascending E-Maj9 shimmer chord (E5, G#5, B5, D#6)
+    const notes = [659.25, 830.61, 987.77, 1244.51];
     notes.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+      osc.frequency.setValueAtTime(freq, now + idx * 0.06);
 
-      gain.gain.setValueAtTime(0, now + idx * 0.08);
-      gain.gain.linearRampToValueAtTime(0.12, now + idx * 0.08 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
+      gain.gain.setValueAtTime(0, now + idx * 0.06);
+      gain.gain.linearRampToValueAtTime(0.14, now + idx * 0.06 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.45);
 
       osc.connect(gain);
       gain.connect(ctx.destination);
 
-      osc.start(now + idx * 0.08);
-      osc.stop(now + idx * 0.08 + 0.36);
+      osc.start(now + idx * 0.06);
+      osc.stop(now + idx * 0.06 + 0.46);
     });
+  } catch {
+    // Non-blocking fallback
+  }
+}
+
+function playIncrementSound(amount: number = 1) {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    // Pitch escalates harmonically based on count magnitude
+    const baseFreq = amount >= 10 ? 587.33 : amount >= 5 ? 493.88 : 392.0; // D5, B4, G4
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.15, now + 0.09);
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.09, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.14);
   } catch {
     // Non-blocking fallback
   }
@@ -187,6 +214,47 @@ function triggerHaptic(type: "light" | "medium" | "heavy" | "success" | "warning
   } catch {
     // Non-blocking fallback
   }
+}
+
+function getLocalizedNotification(
+  n: MyPlanNotification,
+  t: Record<string, string>
+): {
+  title: string;
+  message: string;
+  sender: string;
+  categoryLabel: string;
+} {
+  if (n.id === "notif-1" || n.category === "daily") {
+    return {
+      title: t.notif_daily_title || n.title,
+      message: t.notif_daily_msg || n.message,
+      sender: t.notif_sender_assistant || n.sender,
+      categoryLabel: t.notif_cat_daily || n.categoryLabel,
+    };
+  }
+  if (n.id === "notif-2" || n.category === "productivity") {
+    return {
+      title: t.notif_counter_title || n.title,
+      message: t.notif_counter_msg || n.message,
+      sender: t.notif_sender_monitor || n.sender,
+      categoryLabel: t.notif_cat_productivity || n.categoryLabel,
+    };
+  }
+  if (n.id === "notif-3" || n.category === "streak") {
+    return {
+      title: t.notif_welcome_title || n.title,
+      message: t.notif_welcome_msg || n.message,
+      sender: t.notif_sender_system || n.sender,
+      categoryLabel: t.notif_cat_growth || n.categoryLabel,
+    };
+  }
+  return {
+    title: n.title,
+    message: n.message,
+    sender: n.sender,
+    categoryLabel: n.categoryLabel,
+  };
 }
 
 export default function Home() {
@@ -353,6 +421,72 @@ export default function Home() {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const lastTapRef = useRef<{ id: string; time: number } | null>(null);
 
+  // Zen Focus Mode States
+  const [focusModalOpen, setFocusModalOpen] = useState(false);
+  const [focusActivity, setFocusActivity] = useState<Activity | null>(null);
+  const [focusModeType, setFocusModeType] = useState<"sprint" | "deep" | "pomodoro" | "count">("sprint");
+  const [focusTimerSeconds, setFocusTimerSeconds] = useState(300);
+  const [focusTimerInitial, setFocusTimerInitial] = useState(300);
+  const [isFocusTimerRunning, setIsFocusTimerRunning] = useState(false);
+  const [focusCelebration, setFocusCelebration] = useState(false);
+
+  // Focus Timer interval effect
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (isFocusTimerRunning && focusTimerSeconds > 0) {
+      interval = setInterval(() => {
+        setFocusTimerSeconds((prev) => {
+          if (prev <= 1) {
+            setIsFocusTimerRunning(false);
+            if (soundEnabled) playCompletionSound();
+            triggerHaptic("success");
+            setFocusCelebration(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isFocusTimerRunning, focusTimerSeconds, soundEnabled]);
+
+  const startFocusSession = (act: Activity) => {
+    setFocusActivity(act);
+    setFocusCelebration(false);
+    if (act.measurement_type === "count") {
+      setFocusModeType("count");
+    } else {
+      setFocusModeType("sprint");
+      setFocusTimerSeconds(300);
+      setFocusTimerInitial(300);
+    }
+    setIsFocusTimerRunning(false);
+    setFocusModalOpen(true);
+    triggerHaptic("medium");
+  };
+
+  const handleSelectFocusDuration = (seconds: number, mode: "sprint" | "deep" | "pomodoro" | "count") => {
+    setFocusModeType(mode);
+    setFocusTimerSeconds(seconds);
+    setFocusTimerInitial(seconds);
+    setIsFocusTimerRunning(false);
+    triggerHaptic("light");
+  };
+
+  const completeFocusSession = async () => {
+    if (!focusActivity) return;
+    triggerHaptic("success");
+    if (soundEnabled) playCompletionSound();
+    setFocusCelebration(true);
+    await toggleComplete(focusActivity);
+    setTimeout(() => {
+      setFocusModalOpen(false);
+      setFocusCelebration(false);
+    }, 1200);
+  };
+
   // Debounce task count target in modal (2 seconds)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -390,34 +524,43 @@ export default function Home() {
       }
       if (customDurationUnit === "kun") {
         if (val < 2) {
-          setDebouncedDurationError("Kun bo‘yicha muddat kamida 2 kun bo‘lishi lozim.");
+          setDebouncedDurationError(t.duration_error_min_days);
         } else if (val > 120) {
-          setDebouncedDurationError("Kun bo‘yicha muddat ko‘pi bilan 120 kundan oshmasligi lozim.");
+          setDebouncedDurationError(t.duration_error_max_days);
         } else {
           setDebouncedDurationError("");
         }
       } else if (customDurationUnit === "hafta") {
         if (val < 1 || val > 9) {
-          setDebouncedDurationError("Hafta bo‘yicha muddat 1 dan 9 haftagacha bo‘lishi mumkin.");
+          setDebouncedDurationError(t.duration_error_weeks);
         } else {
           setDebouncedDurationError("");
         }
       } else if (customDurationUnit === "oy") {
         if (val < 1 || val > 9) {
-          setDebouncedDurationError("Oy bo‘yicha muddat 1 dan 9 oygacha bo‘lishi mumkin.");
+          setDebouncedDurationError(t.duration_error_months);
         } else {
           setDebouncedDurationError("");
         }
       } else if (customDurationUnit === "yil") {
         if (val < 1 || val > 3) {
-          setDebouncedDurationError("Yil bo‘yicha muddat 1 dan 3 yilgacha bo‘lishi mumkin.");
+          setDebouncedDurationError(t.duration_error_years);
         } else {
           setDebouncedDurationError("");
         }
       }
     }, durationPreset !== "custom" || !customDurationValue ? 0 : 2000);
     return () => clearTimeout(timer);
-  }, [durationPreset, customDurationValue, customDurationUnit]);
+  }, [
+    durationPreset,
+    customDurationValue,
+    customDurationUnit,
+    t.duration_error_min_days,
+    t.duration_error_max_days,
+    t.duration_error_weeks,
+    t.duration_error_months,
+    t.duration_error_years,
+  ]);
 
   // Catalog Filters (Tab 2)
   const [catalogFilter, setCatalogFilter] = useState<"all" | "active" | "archived">("all");
@@ -635,7 +778,7 @@ export default function Home() {
         setAccountName(trimmedName);
         setUserAge(parsedAge || "");
         triggerHaptic("success");
-        setProfileActionMsg("✓ Ism va yosh muvaffaqiyatli saqlandi!");
+        setProfileActionMsg(t.profile_saved_success);
 
         // Update in accounts vault
         try {
@@ -651,8 +794,8 @@ export default function Home() {
         } catch {}
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Saqlashda xatolik yuz berdi";
-      setProfileActionMsg(`⚠️ ${msg}`);
+      const msg = err instanceof Error ? err.message : t.profile_save_error;
+      setProfileActionMsg(msg);
     } finally {
       setIsSavingProfile(false);
     }
@@ -685,12 +828,12 @@ export default function Home() {
       if (error) throw error;
 
       triggerHaptic("success");
-      setPasswordActionMsg("✓ Parol muvaffaqiyatli yangilandi!");
+      setPasswordActionMsg(t.password_updated_success);
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Parolni yangilashda xatolik yuz berdi";
-      setPasswordActionMsg(`⚠️ ${msg}`);
+      const msg = err instanceof Error ? err.message : t.password_update_error;
+      setPasswordActionMsg(msg);
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -1506,6 +1649,10 @@ export default function Home() {
       if (soundEnabled) {
         playCompletionSound();
       }
+    } else {
+      if (soundEnabled) {
+        playIncrementSound(actualAdd);
+      }
     }
 
     // Cloud persistence with offline fallback
@@ -2116,6 +2263,87 @@ export default function Home() {
     });
   }, [activities, catalogFilter, catalogSearch]);
 
+  // Next Priority Focus Recommendation
+  const recommendedFocusActivity = useMemo(() => {
+    const incompleteActs = activeActivities.filter((act) => {
+      const occ = occurrences.find((o) => o.activity_id === act.id);
+      return occ?.status !== "completed";
+    });
+    if (incompleteActs.length === 0) return null;
+    const hour = new Date().getHours();
+    const currentZone = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 18 ? "afternoon" : "evening";
+    const matchingZone = incompleteActs.find((act) => act.time_of_day === currentZone);
+    return matchingZone || incompleteActs[0];
+  }, [activeActivities, occurrences]);
+
+  // Discipline Momentum Index (Consistency rolling calculation)
+  const momentumScore = useMemo(() => {
+    if (activeActivities.length === 0) return 100;
+    const dailyRatio = Math.round((completedCount / activeActivities.length) * 100);
+    const streakBonus = Math.min(streakCount * 5, 25);
+    return Math.min(100, Math.max(35, Math.round(dailyRatio * 0.75 + streakBonus)));
+  }, [activeActivities.length, completedCount, streakCount]);
+
+  // Executive Keyboard Shortcuts (N: New, F: Focus, 1-5: Tabs, Esc: Close)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = (target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) {
+        if (e.key === "Escape") {
+          target?.blur();
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        setShowCreateModal(false);
+        setEditingActivity(null);
+        setFocusModalOpen(false);
+        setShowInstallGuideModal(false);
+        setShowCustomTimeModal(false);
+        setShowEveningReview(false);
+      } else if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        openCreateModal();
+      } else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (recommendedFocusActivity) {
+          e.preventDefault();
+          startFocusSession(recommendedFocusActivity);
+        }
+      } else if (e.key >= "1" && e.key <= "5" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tabs: TabType[] = ["today", "activities", "notifications", "analytics", "profile"];
+        const chosen = tabs[Number(e.key) - 1];
+        if (chosen) {
+          e.preventDefault();
+          setActiveTab(chosen);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [openCreateModal, recommendedFocusActivity]);
+
+  // Focus Modal Active Details
+  const focusOcc = useMemo(() => {
+    if (!focusActivity) return null;
+    return occurrences.find((o) => o.activity_id === focusActivity.id) || null;
+  }, [focusActivity, occurrences]);
+
+  const focusTarget = focusActivity?.target || 0;
+  const focusRawCount = taskCounts[focusOcc?.id || ""] ?? (focusOcc?.status === "completed" ? focusTarget : 0);
+  const focusCurrent = focusTarget > 0 ? Math.min(Math.max(0, focusRawCount), focusTarget) : Math.max(0, focusRawCount);
+  const isFocusDone = focusOcc?.status === "completed" || (focusTarget > 0 && focusCurrent >= focusTarget);
+
+  const focusMins = Math.floor(focusTimerSeconds / 60);
+  const focusSecs = focusTimerSeconds % 60;
+  const focusTimeFormatted = `${focusMins.toString().padStart(2, "0")}:${focusSecs.toString().padStart(2, "0")}`;
+  const focusTimerProgress = focusTimerInitial > 0 ? focusTimerSeconds / focusTimerInitial : 0;
+  const focusCircleRadius = 100;
+  const focusCircumference = 2 * Math.PI * focusCircleRadius;
+  const focusStrokeDashoffset = focusCircumference * (1 - focusTimerProgress);
+
   const isCustomDurationInvalid =
     durationPreset === "custom" &&
     (!customDurationValue.trim() ||
@@ -2165,27 +2393,202 @@ export default function Home() {
   return (
     <div className={`app-layout ${sidebarOpen ? "sidebar-expanded" : "sidebar-collapsed"}`}>
       {/* Floating In-App Realtime Toast */}
-      {activeToast && (
-        <aside className="floating-inapp-toast" role="alert" aria-live="polite">
-          <div className="toast-left-wrap">
-            <span className="toast-icon-badge">
-              <IconBell className="icon-xs" />
-            </span>
-            <div className="toast-text-block">
-              <span className="toast-title">{activeToast.title}</span>
-              <p className="toast-msg">{activeToast.message}</p>
+      {activeToast && (() => {
+        const locToast = getLocalizedNotification(activeToast, t);
+        return (
+          <aside className="floating-inapp-toast" role="alert" aria-live="polite">
+            <div className="toast-left-wrap">
+              <span className="toast-icon-badge">
+                <IconBell className="icon-xs" />
+              </span>
+              <div className="toast-text-block">
+                <span className="toast-title">{locToast.title}</span>
+                <p className="toast-msg">{locToast.message}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="toast-close-action"
+              onClick={() => setActiveToast(null)}
+              aria-label={t.focus_close || "Close"}
+            >
+              <IconClose className="icon-xs" />
+            </button>
+          </aside>
+        );
+      })()}
+      {/* EXECUTIVE ZEN FOCUS MODE MODAL */}
+      {focusModalOpen && focusActivity && (
+        <div
+          className="floating-modal-backdrop focus-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setFocusModalOpen(false);
+              setIsFocusTimerRunning(false);
+            }
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="floating-modal-box focus-modal-box">
+            <div className="modal-header">
+              <div>
+                <span className="modal-badge">
+                  <IconZap className="icon-xs" /> {t.focus_mode_title}
+                </span>
+                <h3 className="modal-title">{focusActivity.title}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => {
+                  setFocusModalOpen(false);
+                  setIsFocusTimerRunning(false);
+                }}
+                aria-label={t.focus_close}
+              >
+                <IconClose className="icon-sm" />
+              </button>
+            </div>
+
+            <div className="focus-modal-content">
+              <p className="focus-modal-desc">
+                {focusActivity.description || t.focus_mode_sub}
+              </p>
+
+              {/* Duration Mode Switcher */}
+              {focusActivity.measurement_type !== "count" && (
+                <div className="focus-mode-switcher">
+                  <button
+                    type="button"
+                    className={`focus-mode-chip ${focusModeType === "sprint" ? "active" : ""}`}
+                    onClick={() => handleSelectFocusDuration(300, "sprint")}
+                  >
+                    {t.focus_sprint_5m}
+                  </button>
+                  <button
+                    type="button"
+                    className={`focus-mode-chip ${focusModeType === "deep" ? "active" : ""}`}
+                    onClick={() => handleSelectFocusDuration(900, "deep")}
+                  >
+                    {t.focus_deep_15m}
+                  </button>
+                  <button
+                    type="button"
+                    className={`focus-mode-chip ${focusModeType === "pomodoro" ? "active" : ""}`}
+                    onClick={() => handleSelectFocusDuration(1500, "pomodoro")}
+                  >
+                    {t.focus_pomodoro_25m}
+                  </button>
+                </div>
+              )}
+
+              {/* Main Focus Ring or Count Hub */}
+              {focusActivity.measurement_type === "count" ? (
+                <div className="focus-counter-hub">
+                  <div className="focus-rep-display">
+                    <span className="focus-rep-current">{focusCurrent}</span>
+                    <span className="focus-rep-sep">/</span>
+                    <span className="focus-rep-target">{focusTarget}</span>
+                    <span className="focus-rep-unit">{focusActivity.unit || t.unit_marta}</span>
+                  </div>
+
+                  <div className="focus-counter-actions">
+                    {focusOcc && (
+                      <button
+                        type="button"
+                        className="btn-focus-big-tap"
+                        disabled={isFocusDone}
+                        onClick={() => {
+                          if (focusOcc) void incrementTaskCount(focusActivity, focusOcc, 1);
+                        }}
+                      >
+                        +1
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="focus-ring-container">
+                  <svg className="focus-svg-ring" width="240" height="240" viewBox="0 0 240 240">
+                    <circle
+                      className="focus-ring-bg"
+                      cx="120"
+                      cy="120"
+                      r={focusCircleRadius}
+                      strokeWidth="8"
+                    />
+                    <circle
+                      className="focus-ring-progress"
+                      cx="120"
+                      cy="120"
+                      r={focusCircleRadius}
+                      strokeWidth="8"
+                      strokeDasharray={focusCircumference}
+                      strokeDashoffset={focusStrokeDashoffset}
+                    />
+                  </svg>
+                  <div className="focus-timer-text-overlay">
+                    <span className="focus-digital-timer">{focusTimeFormatted}</span>
+                    <div className="focus-timer-controls">
+                      <button
+                        type="button"
+                        className="btn-focus-ctrl primary"
+                        onClick={() => {
+                          setIsFocusTimerRunning((r) => !r);
+                          triggerHaptic("medium");
+                        }}
+                      >
+                        {isFocusTimerRunning ? (
+                          <>
+                            <IconPause className="icon-xs" />
+                            <span>{t.focus_pause}</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconPlay className="icon-xs" />
+                            <span>{t.focus_resume}</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-focus-ctrl secondary"
+                        onClick={() => {
+                          setFocusTimerSeconds(focusTimerInitial);
+                          setIsFocusTimerRunning(false);
+                          triggerHaptic("light");
+                        }}
+                      >
+                        {t.focus_reset}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {focusCelebration && (
+                <div className="focus-celebration-toast">
+                  <IconAward className="icon-sm text-lime" />
+                  <span>{t.focus_done_celebration}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="focus-modal-footer">
+              <button
+                type="button"
+                className="btn-complete-focus-session"
+                onClick={() => void completeFocusSession()}
+              >
+                <IconCheck className="icon-sm" />
+                <span>{t.focus_complete_btn}</span>
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            className="toast-close-action"
-            onClick={() => setActiveToast(null)}
-            aria-label="Yopish"
-          >
-            <IconClose className="icon-xs" />
-          </button>
-        </aside>
+        </div>
       )}
+
       {/* Floating Modal for Task Creation & Editing (Popup Dialog) */}
       {showCreateModal && (
         <div
@@ -2304,7 +2707,7 @@ export default function Home() {
 
                   {debouncedCountError && (
                     <p className="count-validation-error" role="alert">
-                      ⚠️ {debouncedCountError}
+                      <IconAlertTriangle className="icon-xs inline-icon" /> {debouncedCountError}
                     </p>
                   )}
                   <p className="count-hint">{t.hint_count_limits}</p>
@@ -2504,7 +2907,7 @@ export default function Home() {
 
                     {debouncedDurationError && (
                       <p className="duration-validation-error" role="alert">
-                        ⚠️ {debouncedDurationError}
+                        <IconAlertTriangle className="icon-xs inline-icon" /> {debouncedDurationError}
                       </p>
                     )}
                   </div>
@@ -2576,7 +2979,7 @@ export default function Home() {
 
                 {selectedWeekdays.length === 0 && (
                   <p className="count-validation-error" role="alert">
-                    ⚠️ {t.error_min_weekday}
+                    <IconAlertTriangle className="icon-xs inline-icon" /> {t.error_min_weekday}
                   </p>
                 )}
               </div>
@@ -2672,7 +3075,7 @@ export default function Home() {
                 />
                 {customTimeError && (
                   <p className="count-validation-error" role="alert">
-                    ⚠️ {customTimeError}
+                    <IconAlertTriangle className="icon-xs inline-icon" /> {customTimeError}
                   </p>
                 )}
               </div>
@@ -3278,6 +3681,12 @@ export default function Home() {
                       <span className="streak-number">{streakCount}</span>
                       <span className="streak-days-text">{t.streak_days}</span>
                     </div>
+                    <div className="streak-shield-badge">
+                      <IconAward className="icon-xs" />
+                      <span>{t.streak_shield_label}: <strong>{t.streak_shield_active}</strong></span>
+                      <span className="dot-separator">•</span>
+                      <span>{t.momentum_index_label}: <strong>{momentumScore}%</strong></span>
+                    </div>
                     <p className="streak-status-hint">
                       {percent === 100
                         ? t.streak_100
@@ -3343,6 +3752,36 @@ export default function Home() {
                   <p className="stat-footer">{t.stat_success_desc}</p>
                 </article>
               </section>
+
+              {/* SMART NEXT PRIORITY FOCUS SPOTLIGHT BANNER */}
+              {recommendedFocusActivity && (
+                <section className="focus-spotlight-card" aria-label="Navbatdagi tavsiya">
+                  <div className="focus-spotlight-left">
+                    <div className="focus-spotlight-badge">
+                      <IconZap className="icon-xs" />
+                      <span>{t.focus_next_spotlight}</span>
+                    </div>
+                    <h3 className="focus-spotlight-title">{recommendedFocusActivity.title}</h3>
+                    {recommendedFocusActivity.description ? (
+                      <p className="focus-spotlight-desc">{recommendedFocusActivity.description}</p>
+                    ) : (
+                      <p className="focus-spotlight-desc">
+                        {recommendedFocusActivity.measurement_type === "count"
+                          ? `${recommendedFocusActivity.target} ${recommendedFocusActivity.unit || t.unit_marta} ${t.tab_countable.toLowerCase()}`
+                          : t.tab_single}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-focus-spotlight-start"
+                    onClick={() => startFocusSession(recommendedFocusActivity)}
+                  >
+                    <IconZap className="icon-xs" />
+                    <span>{t.focus_start_btn}</span>
+                  </button>
+                </section>
+              )}
 
               {/* Tasks Execution List */}
               <section className="tasks-section">
@@ -3427,23 +3866,23 @@ export default function Home() {
                 {loadingData ? (
                   <div className="empty-state-box">
                     <div className="loading-spinner" />
-                    <p>Ma’lumotlar yangilanmoqda…</p>
+                    <p>{t.loading_workspace || "Ma’lumotlar yuklanmoqda…"}</p>
                   </div>
                 ) : activeActivities.length === 0 ? (
                   <div className="empty-state-box">
                     <div className="empty-icon-wrap">
                       <IconCalendar className="icon-lg" />
                     </div>
-                    <h3>Bugun uchun faol vazifalar yo‘q</h3>
-                    <p>Yangi vazifa qo‘shish uchun chap paneldagi (yoki pastdagi) <strong>+</strong> tugmasidan foydalaning.</p>
+                    <h3>{t.no_tasks_today}</h3>
+                    <p>{t.no_tasks_sub}</p>
                   </div>
                 ) : displayedActivities.length === 0 ? (
                   <div className="empty-state-box">
                     <div className="empty-icon-wrap">
                       <IconCalendar className="icon-lg" />
                     </div>
-                    <h3>Bu vaqt qismi uchun vazifalar yo‘q</h3>
-                    <p>Boshqa bo‘limni tanlang yoki yangi vazifa qo‘shganda vaqt zonasini belgilang.</p>
+                    <h3>{t.no_tasks_filter}</h3>
+                    <p>{t.no_tasks_filter_sub}</p>
                   </div>
                 ) : (
                   <div className="task-items-list">
@@ -3475,7 +3914,7 @@ export default function Home() {
                             aria-hidden="true"
                           >
                             <IconCheck className="icon-md" />
-                            <span>Bajarildi</span>
+                            <span>{t.done}</span>
                           </div>
                           <div
                             className="swipe-bg swipe-bg-undo"
@@ -3483,7 +3922,7 @@ export default function Home() {
                             aria-hidden="true"
                           >
                             <IconUndo className="icon-md" />
-                            <span>Qaytarish</span>
+                            <span>{t.undo}</span>
                           </div>
 
                           <article
@@ -3496,7 +3935,7 @@ export default function Home() {
                             <button
                               type="button"
                               className="checkbox-btn"
-                              aria-label={isDone ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
+                              aria-label={isDone ? t.action_mark_pending : t.action_mark_complete}
                               onClick={() => void toggleComplete(activity)}
                             >
                               {isDone && <IconCheck className="checkbox-icon" />}
@@ -3513,10 +3952,10 @@ export default function Home() {
                                 <div className="task-count-progress-wrap">
                                   <div className="task-count-info-row">
                                     <span className="task-count-text">
-                                      <strong>{current}</strong> / {target} {activity.unit || "marta"}
+                                      <strong>{current}</strong> / {target} {activity.unit || t.unit_marta}
                                     </span>
                                     <span className="task-remaining-text">
-                                      {isDone ? "Bajarildi" : `${remaining} ta qoldi`}
+                                      {isDone ? t.done : `${remaining} ${t.stat_remaining_footer}`}
                                     </span>
                                   </div>
                                   <div className="task-mini-progress-track">
@@ -3547,7 +3986,7 @@ export default function Home() {
                                                     : "btn-hidden-hold-space"
                                                 }`}
                                                 onClick={() => void incrementTaskCount(activity, occ, step)}
-                                                title={`${step} ta qo‘shish`}
+                                                title={`+${step}`}
                                               >
                                                 +{step}
                                               </button>
@@ -3561,8 +4000,8 @@ export default function Home() {
                                           type="button"
                                           className="btn-counter-undo"
                                           onClick={() => void undoTaskCount(activity, occ)}
-                                          title={`Qaytarish (-${taskHistory[occ.id].slice(-1)[0]})`}
-                                          aria-label="Amalni qaytarish"
+                                          title={`${t.undo} (-${taskHistory[occ.id].slice(-1)[0]})`}
+                                          aria-label={t.undo}
                                         >
                                           <IconUndo className="icon-sm" />
                                         </button>
@@ -3680,8 +4119,8 @@ export default function Home() {
                     <div className="empty-icon-wrap">
                       <IconFilter className="icon-lg" />
                     </div>
-                    <h3>Mos faoliyatlar topilmadi</h3>
-                    <p>Qidiruv shartlarini o‘zgartirib ko‘ring yoki yangi faoliyat qo‘shing.</p>
+                    <h3>{t.catalog_empty_filter_title}</h3>
+                    <p>{t.catalog_empty_filter_sub}</p>
                   </div>
                 ) : (
                   <div className="catalog-cards-grid">
@@ -3689,9 +4128,9 @@ export default function Home() {
                       <article key={act.id} className={`catalog-card ${!act.is_active ? "is-archived" : ""}`}>
                         <div className="catalog-card-header">
                           <span className={`status-pill ${act.is_active ? "active" : "archived"}`}>
-                            {act.is_active ? "Faol" : "Arxivlangan"}
+                            {act.is_active ? t.status_active : t.status_archived}
                           </span>
-                          <span className="schedule-badge daily">HAR KUNI</span>
+                          <span className="schedule-badge daily">{t.badge_daily}</span>
                         </div>
 
                         <h3 className="catalog-card-title">{act.title}</h3>
@@ -3701,33 +4140,33 @@ export default function Home() {
 
                         <div className="catalog-card-details">
                           <div className="detail-row">
-                            <span className="detail-label">Turi:</span>
+                            <span className="detail-label">{t.detail_type_label}</span>
                             <span className="detail-value">
                               {act.measurement_type === "count"
-                                ? `Sanoqli (${act.target} ${act.unit || "marta"})`
-                                : "Oddiy belgilash"}
+                                ? `${t.tab_countable} (${act.target} ${act.unit || t.unit_marta})`
+                                : t.detail_single_check}
                             </span>
                           </div>
                           {act.schedule_rule?.duration_label && (
                             <div className="detail-row">
-                              <span className="detail-label">Muddat:</span>
+                              <span className="detail-label">{t.detail_duration_label}</span>
                               <span className="detail-value text-lime">{act.schedule_rule.duration_label}</span>
                             </div>
                           )}
                           {act.schedule_rule?.weekdays && act.schedule_rule.weekdays.length > 0 && (
                             <div className="detail-row">
-                              <span className="detail-label">Kunlar:</span>
+                              <span className="detail-label">{t.detail_days_label}</span>
                               <span className="detail-value text-lime">
                                 {act.schedule_rule.weekdays.length === 7
-                                  ? "Har kuni"
+                                  ? t.everyday_label
                                   : act.schedule_rule.weekdays
-                                      .map((id) => WEEKDAYS.find((w) => w.id === id)?.short || id)
+                                      .map((id) => weekdaysList.find((w) => w.id === id)?.short || id)
                                       .join(", ")}
                               </span>
                             </div>
                           )}
                           <div className="detail-row">
-                            <span className="detail-label">Boshlangan:</span>
+                            <span className="detail-label">{t.detail_started_label}</span>
                             <span className="detail-value">{act.starts_on}</span>
                           </div>
                         </div>
@@ -3780,31 +4219,33 @@ export default function Home() {
                 </div>
 
                 <div className="notifications-timeline">
-                  {notifications.map((notif) => (
-                    <article
-                      key={notif.id}
-                      className={`notification-card ${notif.isRead ? "is-read" : "is-unread"}`}
-                      onClick={() => markNotificationAsRead(notif.id)}
-                    >
-                      <div className="notification-card-header">
-                        <div className="notif-header-left">
-                          <span className="sender-avatar-badge">M</span>
-                          <span className="sender-name-text">{notif.sender}</span>
-                          <span className={`notification-category-tag ${notif.category}`}>
-                            {notif.categoryLabel}
+                  {notifications.map((notif) => {
+                    const loc = getLocalizedNotification(notif, t);
+                    return (
+                      <article
+                        key={notif.id}
+                        className={`notification-card ${notif.isRead ? "is-read" : "is-unread"}`}
+                        onClick={() => markNotificationAsRead(notif.id)}
+                      >
+                        <div className="notification-card-header">
+                          <div className="notif-header-left">
+                            <span className="sender-avatar-badge">M</span>
+                            <span className="sender-name-text">{loc.sender}</span>
+                            <span className={`notification-category-tag ${notif.category}`}>
+                              {loc.categoryLabel}
+                            </span>
+                          </div>
+                          <span className="notification-time-tag">
+                            {notif.timeLabel || t.time_just_now || "Yaqinda"}
                           </span>
                         </div>
-                        <span className="notification-time-tag">
-                          {notif.timeLabel || "Yaqinda"}
-                        </span>
-                      </div>
 
-                      <div className="notification-content">
-                        <h4 className="notification-item-title">{notif.title}</h4>
-                        <p className="notification-item-message">{notif.message}</p>
-                      </div>
+                        <div className="notification-content">
+                          <h4 className="notification-item-title">{loc.title}</h4>
+                          <p className="notification-item-message">{loc.message}</p>
+                        </div>
 
-                      <div className="notification-card-footer">
+                        <div className="notification-card-footer">
                         {!notif.isRead ? (
                           <span className="status-unread-pill">
                             <span className="pulse-dot-sm" /> {t.notif_status_new}
@@ -3816,7 +4257,8 @@ export default function Home() {
                         )}
                       </div>
                     </article>
-                  ))}
+                  );
+                })}
                 </div>
               </section>
             </div>
@@ -3828,15 +4270,15 @@ export default function Home() {
               <section className="analytics-view">
                 <div className="section-header-bar">
                   <div>
-                    <span className="section-sub">TARAQQIYOT KO‘ZGUSI</span>
-                    <h2 className="section-heading">Samaradorlik statistikasi</h2>
+                    <span className="section-sub">{t.analytics_section_sub}</span>
+                    <h2 className="section-heading">{t.analytics_section_title}</h2>
                   </div>
                 </div>
 
                 <div className="stats-grid">
                   <article className="stat-card progress-card">
                     <div className="stat-header">
-                      <span className="stat-tag">BUGUNGI UNUMDORLIK</span>
+                      <span className="stat-tag">{t.analytics_tag_today}</span>
                       <IconTarget className="stat-icon" />
                     </div>
                     <div className="stat-value-row">
@@ -3846,41 +4288,38 @@ export default function Home() {
                     <div className="progress-bar-track">
                       <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
                     </div>
-                    <p className="stat-footer">{completedCount} ta amal muvaffaqiyatli yakunlandi</p>
+                    <p className="stat-footer">{completedCount} {t.analytics_completed_footer}</p>
                   </article>
 
                   <article className="stat-card">
                     <div className="stat-header">
-                      <span className="stat-tag">JAMI FAOLIYATLAR</span>
+                      <span className="stat-tag">{t.analytics_tag_total}</span>
                       <IconList className="stat-icon" />
                     </div>
                     <div className="stat-value-row">
                       <span className="stat-value">{activities.length.toString().padStart(2, "0")}</span>
                     </div>
-                    <p className="stat-footer">Tizimga kiritilgan jami rejalar</p>
+                    <p className="stat-footer">{t.analytics_total_footer}</p>
                   </article>
 
                   <article className="stat-card">
                     <div className="stat-header">
-                      <span className="stat-tag">FAOL REJALAR</span>
+                      <span className="stat-tag">{t.analytics_tag_active}</span>
                       <IconTrendUp className="stat-icon text-lime" />
                     </div>
                     <div className="stat-value-row">
                       <span className="stat-value text-lime">{activeActivities.length.toString().padStart(2, "0")}</span>
                     </div>
-                    <p className="stat-footer">Hozirda ijro etilayotgan maqsadlar</p>
+                    <p className="stat-footer">{t.analytics_active_footer}</p>
                   </article>
                 </div>
 
                 <div className="analytics-insight-card">
                   <div className="insight-badge">
-                    <IconSparkles className="icon-xs" /> TAVSIYA
+                    <IconSparkles className="icon-xs" /> {t.insight_kicker}
                   </div>
-                  <h3>Barqarorlik — muvaffaqiyat kaliti</h3>
-                  <p>
-                    Rejalaringizni har kuni bir xil vaqtda bajarishga odatlaning. Hatto kichik 1% lik
-                    yutuq ham bir yil ichida 37 barobar kattaroq natijaga aylanadi.
-                  </p>
+                  <h3>{t.insight_title}</h3>
+                  <p>{t.insight_desc}</p>
                 </div>
               </section>
             </div>
@@ -4130,7 +4569,7 @@ export default function Home() {
                             <div className="account-row-actions">
                               {isCurrent ? (
                                 <span className="current-account-pill">
-                                  <IconCheck className="icon-xs" /> Faol profil
+                                  <IconCheck className="icon-xs" /> {t.status_active}
                                 </span>
                               ) : (
                                 <button
@@ -4138,7 +4577,7 @@ export default function Home() {
                                   className="btn-account-switch"
                                   onClick={() => switchAccount(acc)}
                                 >
-                                  O‘tish
+                                  {t.switch_account || "O‘tish"}
                                 </button>
                               )}
                             </div>
@@ -4153,7 +4592,7 @@ export default function Home() {
                           onClick={handleAddAccount}
                         >
                           <IconUserPlus className="icon-xs" />
-                          <span>Yangi hisob qo‘shish ({savedAccounts.length}/5)</span>
+                          <span>{t.add_account} ({savedAccounts.length}/5)</span>
                         </button>
                       )}
                     </div>
@@ -4416,7 +4855,7 @@ export default function Home() {
                               title={`+${step} qadamini o‘chirish`}
                               aria-label={`+${step} qadamini o‘chirish`}
                             >
-                              ✕
+                              <IconClose className="icon-xs" />
                             </button>
                           </div>
                         ))}
@@ -4469,12 +4908,12 @@ export default function Home() {
 
                       {newStepError && (
                         <p className="step-validation-error" role="alert">
-                          ⚠️ {newStepError}
+                          <IconAlertTriangle className="icon-xs inline-icon" /> {newStepError}
                         </p>
                       )}
                       {counterSteps.length >= 10 ? (
                         <p className="step-limit-notice">
-                          ✓ Maksimal 10 ta hisoblash qadami kiritildi. Yangi qo‘shish uchun mavjudlaridan birini o‘chiring.
+                          <IconCheck className="icon-xs inline-icon" /> Maksimal 10 ta hisoblash qadami kiritildi. Yangi qo‘shish uchun mavjudlaridan birini o‘chiring.
                         </p>
                       ) : (
                         <p className="step-hint">
