@@ -1,62 +1,75 @@
-// MyPlan High-Reliability Production Service Worker (Network-First)
-const CACHE_NAME = "myplan-v7-network-first";
+// MYplan service worker: offline shell + standards-based Web Push.
+const CACHE_NAME = "myplan-v9-edge-push";
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
-});
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    let payload = {};
+    try { payload = event.data ? event.data.json() : {}; } catch { payload = { body: event.data?.text() || "" }; }
+    const title = typeof payload.title === "string" ? payload.title : "MYplan";
+    const openClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const visibleClient = openClients.find((client) => client.visibilityState === "visible");
+    if (visibleClient) {
+      visibleClient.postMessage({ type: "MYPLAN_PUSH", payload });
+      return;
+    }
+    const options = {
+      body: typeof payload.body === "string" ? payload.body : "Senga yangi eslatma bor.",
+      icon: "/pwa-192.png",
+      badge: "/pwa-192.png",
+      tag: typeof payload.id === "string" ? `myplan-${payload.id}` : "myplan-notification",
+      renotify: false,
+      data: {
+        url: typeof payload.url === "string" && payload.url.startsWith("/") && !payload.url.startsWith("//") && !payload.url.includes("\\") ? payload.url : "/",
+        notificationId: typeof payload.id === "string" ? payload.id : null,
+      },
+    };
+    await self.registration.showNotification(title, options);
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const requestedTarget = new URL(event.notification.data?.url || "/", self.location.origin);
+  event.waitUntil((async () => {
+    const notificationId = event.notification.data?.notificationId;
+    if (typeof notificationId === "string") requestedTarget.searchParams.set("notification_read", notificationId);
+    const target = requestedTarget.origin === self.location.origin ? requestedTarget.href : new URL("/", self.location.origin).href;
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      if ("focus" in client) {
+        await client.focus();
+        if ("navigate" in client && client.url !== target) await client.navigate(target);
+        return;
+      }
+    }
+    if (self.clients.openWindow) await self.clients.openWindow(target);
+  })());
 });
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-
   const url = new URL(event.request.url);
-  // Bypass Supabase API or cross-origin requests
   if (url.origin !== self.location.origin) return;
-
-  // 1. Navigation requests (HTML) -> ALWAYS Network First
   if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return networkResponse;
-        })
-        .catch(() => caches.match(event.request).then((res) => res || caches.match("/")))
-    );
+    event.respondWith(fetch(event.request).then((response) => {
+      if (response?.status === 200) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+      return response;
+    }).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))));
     return;
   }
-
-  // 2. Static Assets (Network First with Cache fallback)
-  event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        if (
-          networkResponse &&
-          networkResponse.status === 200 &&
-          (url.pathname.startsWith("/_next/static/") ||
-            url.pathname.match(/\.(png|jpg|jpeg|svg|ico|css|js|woff2)$/))
-        ) {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return networkResponse;
-      })
-      .catch(() => caches.match(event.request))
-  );
+  event.respondWith(fetch(event.request).then((response) => {
+    if (response?.status === 200 && (url.pathname.startsWith("/_next/static/") || url.pathname.match(/\.(png|jpg|jpeg|svg|ico|css|js|woff2)$/))) {
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+    }
+    return response;
+  }).catch(() => caches.match(event.request)));
 });

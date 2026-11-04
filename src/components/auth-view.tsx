@@ -143,14 +143,16 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
   const handleInstallApp = async () => {
     if (!deferredPrompt) {
-      alert("Ilovani brauzeringiz menyusi orqali o‘rnatishingiz mumkin (Ulashish -> Bosh ekranga qo‘shish).");
+      alert("Bu brauzer MyPlan’ni bevosita o‘rnatish oynasini qo‘llab-quvvatlamaydi. Chrome yoki Edge’ning so‘nggi versiyasida ochib, manzil panelidagi o‘rnatish belgisidan foydalan.");
       return;
     }
-    await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    if (choice.outcome === "accepted") {
-      setIsAppInstalled(true);
+    try {
+      await deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      // Wait for the browser's appinstalled event before showing installed state.
       setDeferredPrompt(null);
+    } catch (error) {
+      console.error("MyPlan PWA installation failed:", error);
     }
   };
 

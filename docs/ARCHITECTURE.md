@@ -4,7 +4,7 @@
 
 - Next.js App Router with React and TypeScript.
 - Supabase Auth through `@supabase/ssr` and `@supabase/supabase-js`.
-- Vercel-hosted public Supabase configuration (`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). Local `.env*` files are intentionally not used.
+- Vercel-hosted public Supabase configuration (`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` is accepted as a fallback). The private `OLLAMA_KEY` belongs to Supabase Edge Function secrets and is not consumed from Vercel at runtime.
 
 ## Application boundaries
 
@@ -40,6 +40,6 @@ Run all 11 SQL scripts in numeric order as documented in `sql/README.md`. These 
 
 ## Operational constraints
 
-- Keep secrets out of source control and local `.env*` files. Configure public Supabase values in Vercel Environment Variables.
+- Keep private secrets out of source control and browser-exposed variables. Configure public Supabase values in Vercel Environment Variables and `OLLAMA_KEY` in Supabase Edge Function Secrets.
 - Use `vercel dev` for local development when Vercel environment values are needed.
 - Preserve existing auth and data contracts when adding dashboard features.

@@ -226,36 +226,30 @@ function getLocalizedNotification(
   sender: string;
   categoryLabel: string;
 } {
-  if (n.id === "notif-1" || n.category === "daily") {
-    return {
-      title: t.notif_daily_title || n.title,
-      message: t.notif_daily_msg || n.message,
-      sender: t.notif_sender_assistant || n.sender,
-      categoryLabel: t.notif_cat_daily || n.categoryLabel,
-    };
-  }
-  if (n.id === "notif-2" || n.category === "productivity") {
-    return {
-      title: t.notif_counter_title || n.title,
-      message: t.notif_counter_msg || n.message,
-      sender: t.notif_sender_monitor || n.sender,
-      categoryLabel: t.notif_cat_productivity || n.categoryLabel,
-    };
-  }
-  if (n.id === "notif-3" || n.category === "streak") {
-    return {
-      title: t.notif_welcome_title || n.title,
-      message: t.notif_welcome_msg || n.message,
-      sender: t.notif_sender_system || n.sender,
-      categoryLabel: t.notif_cat_growth || n.categoryLabel,
-    };
-  }
+  const labels: Record<MyPlanNotification["category"], string> = {
+    daily: t.notif_cat_daily || n.categoryLabel,
+    productivity: t.notif_cat_productivity || n.categoryLabel,
+    streak: t.notif_cat_growth || n.categoryLabel,
+    motivation: t.notif_cat_growth || n.categoryLabel,
+    evening: t.notif_cat_evening || t.notif_cat_daily || n.categoryLabel,
+  };
   return {
+    // Keep the AI-authored copy intact; only UI chrome is localized here.
     title: n.title,
     message: n.message,
-    sender: n.sender,
-    categoryLabel: n.categoryLabel,
+    sender: t.notif_sender_assistant || n.sender,
+    categoryLabel: labels[n.category],
   };
+}
+
+function getNotificationTimeLabel(timestamp: number, language: Language) {
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  const formatter = new Intl.RelativeTimeFormat(language === "en" ? "en" : language === "ru" ? "ru" : "uz", { numeric: "auto" });
+  if (diffMinutes < 1) return formatter.format(0, "second");
+  if (diffMinutes < 60) return formatter.format(-diffMinutes, "minute");
+  const hours = Math.floor(diffMinutes / 60);
+  if (hours < 24) return formatter.format(-hours, "hour");
+  return formatter.format(-Math.floor(hours / 24), "day");
 }
 
 export default function Home() {
@@ -288,9 +282,17 @@ export default function Home() {
   // App Data
   const [activities, setActivities] = useState<Activity[]>([]);
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const activitiesRef = useRef<Activity[]>([]);
+  const occurrencesRef = useRef<Occurrence[]>([]);
+  const offlineQueueProcessingRef = useRef(false);
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
   const [taskHistory, setTaskHistory] = useState<Record<string, number[]>>({});
   const [loadingData, setLoadingData] = useState(false);
+
+  useEffect(() => {
+    activitiesRef.current = activities;
+    occurrencesRef.current = occurrences;
+  }, [activities, occurrences]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -346,7 +348,10 @@ export default function Home() {
 
   // Notifications System (3-Day Read-Only History)
   const [notifications, setNotifications] = useState<MyPlanNotification[]>([]);
+  const notificationsRef = useRef<MyPlanNotification[]>([]);
+  const toastedNotificationIdsRef = useRef<Set<string>>(new Set());
   const [activeToast, setActiveToast] = useState<MyPlanNotification | null>(null);
+  useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   const [pushPermission, setPushPermission] = useState<NotificationPermission>("default");
 
   // PWA State
@@ -604,7 +609,8 @@ export default function Home() {
   }, []);
 
   const processOfflineQueue = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator.onLine) return;
+    if (typeof window === "undefined" || !navigator.onLine || offlineQueueProcessingRef.current) return;
+    offlineQueueProcessingRef.current = true;
     try {
       const raw = localStorage.getItem("myplan_offline_sync_queue");
       if (!raw) return;
@@ -612,35 +618,64 @@ export default function Home() {
       if (!Array.isArray(queue) || queue.length === 0) return;
 
       const supabase = createClient();
+      const processedQueueIds = new Set(queue.map((item) => item.id));
+      const remaining: typeof queue = [];
       for (const item of queue) {
-        if (item.type === "occurrence_status") {
-          await supabase
-            .from("occurrences")
-            .update({ status: item.payload.status })
-            .eq("id", item.payload.id)
-            .eq("user_id", item.payload.user_id);
-        } else if (item.type === "progress_event") {
-          await supabase.from("progress_events").insert({
-            user_id: item.payload.user_id,
-            occurrence_id: item.payload.occurrence_id,
-            amount: item.payload.amount,
-            note: item.payload.note,
-          });
-        } else if (item.type === "update_streak") {
-          await supabase
-            .from("profiles")
-            .update({
-              streak_count: item.payload.streak_count,
-              best_streak: item.payload.best_streak,
-              last_active_date: item.payload.last_active_date,
-            })
-            .eq("id", item.payload.user_id);
+        try {
+          let error = null;
+          if (item.type === "occurrence_status") {
+            const result = await supabase
+              .from("occurrences")
+              .update({ status: item.payload.status })
+              .eq("id", item.payload.id)
+              .eq("user_id", item.payload.user_id);
+            error = result.error;
+          } else if (item.type === "progress_event") {
+            const result = await supabase.from("progress_events").insert({
+              id: item.payload.id,
+              user_id: item.payload.user_id,
+              occurrence_id: item.payload.occurrence_id,
+              amount: item.payload.amount,
+              note: item.payload.note,
+            });
+            error = result.error;
+            // A retry after an ambiguous network response is safe: the same event ID
+            // means the original insert already reached PostgreSQL.
+            if (error?.code === "23505") error = null;
+          } else if (item.type === "update_streak") {
+            const result = await supabase
+              .from("profiles")
+              .update({
+                streak_count: item.payload.streak_count,
+                best_streak: item.payload.best_streak,
+                last_active_date: item.payload.last_active_date,
+              })
+              .eq("id", item.payload.user_id);
+            error = result.error;
+          }
+          if (error) remaining.push(item);
+        } catch {
+          remaining.push(item);
         }
       }
-      localStorage.removeItem("myplan_offline_sync_queue");
-      setPendingSyncCount(0);
+      // Preserve mutations enqueued while this batch was being uploaded.
+      const latestRaw = localStorage.getItem("myplan_offline_sync_queue");
+      const latestQueue = latestRaw ? JSON.parse(latestRaw) : [];
+      const newlyQueued = Array.isArray(latestQueue)
+        ? latestQueue.filter((item) => !processedQueueIds.has(item.id))
+        : [];
+      const pendingQueue = [...remaining, ...newlyQueued];
+      if (pendingQueue.length > 0) {
+        localStorage.setItem("myplan_offline_sync_queue", JSON.stringify(pendingQueue));
+        setPendingSyncCount(pendingQueue.length);
+      } else {
+        localStorage.removeItem("myplan_offline_sync_queue");
+        setPendingSyncCount(0);
+      }
     } catch {
-      // Retry on next sync
+      // Keep the queue intact and retry on the next online/reconnect event.
+    } finally {
+      offlineQueueProcessingRef.current = false;
     }
   }, []);
 
@@ -903,7 +938,12 @@ export default function Home() {
           setEditAge(profile.age);
         }
         if (profile.created_at) setUserCreatedAt(profile.created_at);
-        if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+        if (typeof profile.avatar_url === "string" && profile.avatar_url) {
+          setAvatarUrl(profile.avatar_url);
+        } else if (profile.avatar_url === null) {
+          setAvatarUrl(null);
+          localStorage.removeItem(`myplan_avatar_${id}`);
+        }
         if (typeof profile.streak_count === "number") setStreakCount(profile.streak_count);
         if (typeof profile.best_streak === "number") setBestStreak(profile.best_streak);
         if (profile.language && (profile.language === "uz" || profile.language === "en" || profile.language === "ru")) {
@@ -995,11 +1035,19 @@ export default function Home() {
       try {
         const occIds = existingOccs.map((o) => o.id);
         if (occIds.length > 0) {
-          const { data: pEvents } = await supabase
-            .from("progress_events")
-            .select("occurrence_id, amount")
-            .in("occurrence_id", occIds);
-          if (pEvents && pEvents.length > 0) {
+          const pEvents: { occurrence_id: string; amount: number }[] = [];
+          for (let offset = 0; ; offset += 1000) {
+            const { data, error } = await supabase
+              .from("progress_events")
+              .select("occurrence_id, amount")
+              .in("occurrence_id", occIds)
+              .range(offset, offset + 999);
+            if (error) throw error;
+            const batch = (data || []) as { occurrence_id: string; amount: number }[];
+            pEvents.push(...batch);
+            if (batch.length < 1000) break;
+          }
+          if (pEvents.length > 0) {
             const serverTotals: Record<string, number> = {};
             pEvents.forEach((pe) => {
               serverTotals[pe.occurrence_id] = (serverTotals[pe.occurrence_id] || 0) + Number(pe.amount);
@@ -1008,9 +1056,8 @@ export default function Home() {
               const occ = existingOccs.find((o) => o.id === occId);
               const act = activityRows?.find((a) => a.id === occ?.activity_id);
               const cap = act?.target ? act.target : Infinity;
-              const local = initialCounts[occId] || 0;
               const serverVal = Math.max(0, serverTotals[occId]);
-              initialCounts[occId] = Math.min(Math.max(local, serverVal), cap);
+              initialCounts[occId] = Math.min(serverVal, cap);
             });
           }
         }
@@ -1079,11 +1126,16 @@ export default function Home() {
 
     const supabase = createClient();
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    let activeRealtimeUid: string | null = null;
 
     const setupRealtime = (uid: string) => {
+      activeRealtimeUid = uid;
       if (realtimeChannel) {
-        realtimeChannel.unsubscribe();
+        void supabase.removeChannel(realtimeChannel);
+        realtimeChannel = null;
       }
+      let hasSubscribedBefore = false;
+      let needsResyncAfterReconnect = false;
       realtimeChannel = supabase
         .channel(`workspace-sync-${uid}`)
         .on(
@@ -1120,6 +1172,41 @@ export default function Home() {
         )
         .on(
           "postgres_changes",
+          { event: "INSERT", schema: "public", table: "progress_events", filter: `user_id=eq.${uid}` },
+          async (payload) => {
+            const event = payload.new as { occurrence_id?: string };
+            if (!event.occurrence_id) return;
+            const progressRows: { amount: number }[] = [];
+            for (let offset = 0; ; offset += 1000) {
+              const { data, error } = await supabase
+                .from("progress_events")
+                .select("amount")
+                .eq("user_id", uid)
+                .eq("occurrence_id", event.occurrence_id)
+                .range(offset, offset + 999);
+              if (error || !data) {
+                console.warn("Realtime progress reconciliation failed:", error);
+                return;
+              }
+              const batch = data as { amount: number }[];
+              progressRows.push(...batch);
+              if (batch.length < 1000) break;
+            }
+            const occurrence = occurrencesRef.current.find((item) => item.id === event.occurrence_id);
+            const activity = occurrence
+              ? activitiesRef.current.find((item) => item.id === occurrence.activity_id)
+              : undefined;
+            const total = progressRows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+            const cap = activity?.target && activity.target > 0 ? activity.target : Infinity;
+            const count = Math.min(Math.max(0, total), cap);
+            setTaskCounts((prev) => ({ ...prev, [event.occurrence_id!]: count }));
+            if (typeof window !== "undefined") {
+              localStorage.setItem(`myplan_count_${event.occurrence_id}`, String(count));
+            }
+          }
+        )
+        .on(
+          "postgres_changes",
           { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${uid}` },
           (payload) => {
             const p = payload.new as Record<string, unknown>;
@@ -1135,7 +1222,7 @@ export default function Home() {
               });
               setFormattedToday(dateFmt.format(new Date()));
             }
-            if (Array.isArray(p.counter_steps) && p.counter_steps.length > 0) {
+            if (Array.isArray(p.counter_steps)) {
               const steps = (p.counter_steps as number[])
                 .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
                 .sort((a, b) => b - a);
@@ -1144,17 +1231,31 @@ export default function Home() {
             }
             if (typeof p.streak_count === "number") setStreakCount(p.streak_count);
             if (typeof p.best_streak === "number") setBestStreak(p.best_streak);
-            if (typeof p.sound_enabled === "boolean") setSoundEnabled(p.sound_enabled);
-            if (typeof p.notifications_enabled === "boolean") setNotificationsEnabled(p.notifications_enabled);
+            if (typeof p.sound_enabled === "boolean") {
+              setSoundEnabled(p.sound_enabled);
+              localStorage.setItem("myplan_sound_enabled", String(p.sound_enabled));
+            }
+            if (typeof p.notifications_enabled === "boolean") {
+              setNotificationsEnabled(p.notifications_enabled);
+              localStorage.setItem("myplan_notifications_enabled", String(p.notifications_enabled));
+            }
+            if (typeof p.auto_archive_delay === "number") setAutoArchiveDelay(p.auto_archive_delay);
             if (typeof p.full_name === "string") {
               setAccountName(p.full_name);
               setEditFullName(p.full_name);
             }
-            if (typeof p.avatar_url === "string") setAvatarUrl(p.avatar_url);
-            if (typeof p.age === "number") {
-              setUserAge(p.age);
-              setEditAge(p.age);
+            if (typeof p.avatar_url === "string") {
+              setAvatarUrl(p.avatar_url);
+              localStorage.setItem(`myplan_avatar_${uid}`, p.avatar_url);
+            } else if (p.avatar_url === null) {
+              setAvatarUrl(null);
+              localStorage.removeItem(`myplan_avatar_${uid}`);
             }
+            if (typeof p.age === "number" || p.age === null) {
+              setUserAge(p.age ?? "");
+              setEditAge(p.age ?? "");
+            }
+            if (typeof p.username === "string") setAccountUsername(p.username);
           }
         )
         .on(
@@ -1181,7 +1282,71 @@ export default function Home() {
             void loadActiveDevices(uid);
           }
         )
-        .subscribe();
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` },
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              const row = payload.new as { id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null };
+              const item: MyPlanNotification = {
+                id: row.id,
+                sender: "MYplan shaxsiy yordamchisi",
+                category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+                categoryLabel: row.category.toUpperCase(),
+                title: row.title,
+                message: row.message,
+                createdAt: new Date(row.created_at).getTime(),
+                timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
+                isRead: Boolean(row.read_at),
+              };
+              setNotifications((prev) => prev.some((n) => n.id === item.id) ? prev : [item, ...prev].slice(0, 100));
+              if (document.visibilityState === "visible" && (!row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now()) && !toastedNotificationIdsRef.current.has(item.id)) {
+                toastedNotificationIdsRef.current.add(item.id);
+                setActiveToast(item);
+              }
+            } else if (payload.eventType === "UPDATE") {
+              const row = payload.new as { id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null };
+              const isDue = !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now();
+              const exists = notificationsRef.current.some((item) => item.id === row.id);
+              if (!exists && isDue) {
+                const item: MyPlanNotification = {
+                  id: row.id,
+                  sender: "MYplan shaxsiy yordamchisi",
+                  category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+                  categoryLabel: row.category.toUpperCase(),
+                  title: row.title,
+                  message: row.message,
+                  createdAt: new Date(row.created_at).getTime(),
+                  timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
+                  isRead: Boolean(row.read_at),
+                };
+                setNotifications((prev) => prev.some((current) => current.id === item.id) ? prev : [item, ...prev].slice(0, 100));
+                if (document.visibilityState === "visible" && !toastedNotificationIdsRef.current.has(item.id)) {
+                  toastedNotificationIdsRef.current.add(item.id);
+                  setActiveToast(item);
+                }
+              } else {
+                setNotifications((prev) => prev.map((item) => item.id === row.id ? { ...item, isRead: Boolean(row.read_at) } : item));
+              }
+            } else if (payload.eventType === "DELETE") {
+              const row = payload.old as { id: string };
+              setNotifications((prev) => prev.filter((item) => item.id !== row.id));
+            }
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            if (hasSubscribedBefore && needsResyncAfterReconnect) {
+              needsResyncAfterReconnect = false;
+              void loadWorkspace(uid);
+              void loadActiveDevices(uid);
+            }
+            hasSubscribedBefore = true;
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            if (hasSubscribedBefore) needsResyncAfterReconnect = true;
+            console.warn(`MYplan Realtime ${status}; waiting for automatic reconnect.`);
+          }
+        });
     };
 
     void supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -1313,11 +1478,45 @@ export default function Home() {
 
     const handleOnline = () => {
       setIsOnline(true);
-      void processOfflineQueue();
+      const uid = activeRealtimeUid;
+      void processOfflineQueue().finally(() => {
+        if (uid) void loadWorkspace(uid);
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && activeRealtimeUid) {
+        void loadWorkspace(activeRealtimeUid);
+        void loadActiveDevices(activeRealtimeUid);
+      }
     };
 
     const handleOffline = () => {
       setIsOnline(false);
+    };
+
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "MYPLAN_PUSH") return;
+      const payload = event.data.payload as { id?: string; title?: string; body?: string; category?: string };
+      if (!payload?.id || !payload.title || !payload.body) return;
+      const item: MyPlanNotification = {
+        id: payload.id,
+        sender: "MYplan shaxsiy yordamchisi",
+        category: (payload.category === "system" ? "daily" : payload.category || "daily") as MyPlanNotification["category"],
+        categoryLabel: (payload.category || "daily").toUpperCase(),
+        title: payload.title,
+        message: payload.body,
+        createdAt: Date.now(),
+        timeLabel: getNotificationTimeLabel(Date.now(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
+        isRead: false,
+      };
+      if (!notificationsRef.current.some((notification) => notification.id === item.id)) {
+        setNotifications((prev) => [item, ...prev].slice(0, 100));
+      }
+      if (!toastedNotificationIdsRef.current.has(item.id)) {
+        toastedNotificationIdsRef.current.add(item.id);
+        setActiveToast(item);
+      }
     };
 
     let colorSchemeMedia: MediaQueryList | null = null;
@@ -1382,85 +1581,42 @@ export default function Home() {
         }
       }
 
-      // Notification History (clean, fresh, natural tone, respecting account age & current language)
-      const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
-      const now = Date.now();
-      try {
-        const NOTIF_CLEAN_KEY = "myplan_notif_v6_uz_clean";
-        if (!localStorage.getItem(NOTIF_CLEAN_KEY)) {
-          localStorage.removeItem("myplan_notifications_history");
-          localStorage.setItem(NOTIF_CLEAN_KEY, "true");
-        }
-        const rawNotifs = localStorage.getItem("myplan_notifications_history");
-        let parsed: MyPlanNotification[] = rawNotifs ? JSON.parse(rawNotifs) : [];
-        parsed = parsed.filter((n) => now - n.createdAt <= THREE_DAYS_MS);
-
-        const curLang = (localStorage.getItem("myplan_lang") as Language) || "uz";
-        const initT = translations[curLang] || translations.uz;
-
-        if (parsed.length === 0) {
-          parsed = [
-            {
-              id: "notif-1",
-              sender: "MyPlan Shaxsiy Yordamchisi",
-              category: "daily",
-              categoryLabel: "KUNLIK MARRA",
-              title: initT.notif_daily_title || "Bugungi kuningiz barakali bo‘lsin!",
-              message:
-                initT.notif_daily_msg || "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
-              createdAt: now - 1000 * 60 * 10,
-              isRead: false,
-            },
-            {
-              id: "notif-2",
-              sender: "Intizom Kuzatuvchisi",
-              category: "productivity",
-              categoryLabel: "UNUMDORLIK",
-              title: initT.notif_counter_title || "Sanoqli vazifalaringiz monitoringi",
-              message:
-                initT.notif_counter_msg || "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
-              createdAt: now - 1000 * 60 * 30,
-              isRead: true,
-            },
-            {
-              id: "notif-3",
-              sender: "MyPlan Tizimi",
-              category: "streak",
-              categoryLabel: "SHAXSIY O‘SISH",
-              title: initT.notif_welcome_title || "Kuningizni rejalashtiring. Vaqtingiz egasi bo‘ling.",
-              message:
-                initT.notif_welcome_msg || "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
-              createdAt: now - 1000 * 60 * 55,
-              isRead: true,
-            },
-          ];
-        }
-
-        const withLabels = parsed.map((n) => {
-          const diffMinutes = Math.round((now - n.createdAt) / (1000 * 60));
-          const diffHours = Math.round((now - n.createdAt) / (1000 * 60 * 60));
-          let label = "Hozirgina";
-          if (diffMinutes < 60) {
-            label = diffMinutes <= 1 ? "Hozirgina" : `${diffMinutes} daqiqa oldin`;
-          } else if (diffHours < 24) {
-            label = `${diffHours} soat oldin`;
-          } else {
-            const diffDays = Math.max(1, Math.floor(diffHours / 24));
-            label = diffDays === 1 ? "Kecha" : `${diffDays} kun oldin`;
-          }
-          return { ...n, timeLabel: label };
-        });
-
-        localStorage.setItem("myplan_notifications_history", JSON.stringify(withLabels));
-        setTimeout(() => setNotifications(withLabels), 0);
-
-        const unread = withLabels.find((n) => !n.isRead);
-        if (unread) {
-          setTimeout(() => setActiveToast(unread), 2000);
-        }
-      } catch (err) {
-        console.error("Notif init error:", err);
+      // Notifications are loaded from Supabase; never synthesize fake history in the browser.
+      const notificationClient = createClient();
+      const notificationReadId = new URLSearchParams(window.location.search).get("notification_read");
+      if (notificationReadId) {
+        void notificationClient.functions.invoke("notifications", { body: { action: "mark-read", id: notificationReadId, read: true } })
+          .then(({ error }) => { if (error) console.warn("Could not mark push notification as read:", error); });
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete("notification_read");
+        window.history.replaceState({}, "", cleanUrl.toString());
       }
+      void notificationClient.functions.invoke("notifications", { body: { action: "list" } })
+        .then(({ data, error }) => {
+          if (error || !data) return;
+          const payload = data as { notifications?: Array<{ id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null }> };
+          const rows = (payload.notifications || []).filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now()).map((row) => ({
+            id: row.id,
+            sender: "MYplan shaxsiy yordamchisi",
+            category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+            categoryLabel: row.category.toUpperCase(),
+            title: row.title,
+            message: row.message,
+            createdAt: new Date(row.created_at).getTime(),
+            timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), savedLang),
+            isRead: Boolean(row.read_at),
+          } satisfies MyPlanNotification));
+          setNotifications((prev) => {
+            const byId = new Map(prev.map((item) => [item.id, item]));
+            const serverIds = new Set(rows.map((item) => item.id));
+            const merged = rows.map((item) => byId.get(item.id) ?? item);
+            for (const item of prev) {
+              if (!serverIds.has(item.id) && Date.now() - item.createdAt < 3 * 86400000) merged.push(item);
+            }
+            return merged.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
+          });
+        })
+        .catch((error) => console.warn("Notification history could not load:", error));
 
       if ("Notification" in window) {
         setTimeout(() => setPushPermission(Notification.permission), 0);
@@ -1469,6 +1625,8 @@ export default function Home() {
       // Online / Offline synchronization listeners
       window.addEventListener("online", handleOnline);
       window.addEventListener("offline", handleOffline);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
 
       setTimeout(() => {
         setIsOnline(navigator.onLine);
@@ -1494,14 +1652,17 @@ export default function Home() {
     return () => {
       listener.subscription.unsubscribe();
       if (realtimeChannel) {
-        realtimeChannel.unsubscribe();
+        void supabase.removeChannel(realtimeChannel);
       }
+      activeRealtimeUid = null;
       Object.values(activeTimers).forEach(clearTimeout);
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
         window.removeEventListener("appinstalled", handleAppInstalled);
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
         if (colorSchemeMedia && handleSystemThemeChange) {
           colorSchemeMedia.removeEventListener("change", handleSystemThemeChange);
         }
@@ -1629,16 +1790,18 @@ export default function Home() {
     if (promptEvent) {
       try {
         await promptEvent.prompt();
-        const choice = await promptEvent.userChoice;
-        if (choice.outcome === "accepted") {
-          setIsAppInstalled(true);
-          setDeferredPrompt(null);
-        }
+        await promptEvent.userChoice;
+        // The app is considered installed only after the browser confirms via appinstalled.
+        setDeferredPrompt(null);
+        (window as unknown as { __myplanInstallPrompt?: BeforeInstallPromptEvent }).__myplanInstallPrompt = undefined;
         return;
       } catch (e) {
         console.warn("PWA prompt error:", e);
       }
     }
+    // Browsers without the install-prompt API (notably iOS Safari) do not allow
+    // websites to trigger installation programmatically. Explain the limitation;
+    // Never show a manual shortcut workflow or pretend installation succeeded.
     setShowInstallGuideModal(true);
   };
 
@@ -1667,7 +1830,16 @@ export default function Home() {
 
     try {
       const supabase = createClient();
-      await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
+      const { error } = await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
+      if (error) throw error;
+      if (nextStatus === "completed") {
+        void supabase.functions.invoke("notification-compose", { body: {
+          category: "productivity",
+          dedupeKey: `task-completed:${occ.id}`,
+          context: { event: "task_completed", taskTitle: activity.title, taskType: activity.measurement_type },
+          url: "/",
+        } }).then(({ error }) => { if (error) console.warn("Completion companion notification failed:", error); });
+      }
     } catch (err) {
       console.warn("Occ status update queued offline:", err);
       enqueueOfflineMutation({
@@ -1726,27 +1898,38 @@ export default function Home() {
       }
     }
 
-    // Cloud persistence with offline fallback
+    // Cloud persistence with offline fallback. Keep one stable ID across retries.
+    const progressEvent = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      occurrence_id: occurrence.id,
+      amount: actualAdd,
+      note: `+${actualAdd}`,
+    };
     try {
       const supabase = createClient();
-      await supabase.from("progress_events").insert({
-        user_id: userId,
-        occurrence_id: occurrence.id,
-        amount: actualAdd,
-        note: `+${actualAdd}`,
-      });
+      const { error: progressError } = await supabase.from("progress_events").insert(progressEvent);
+      if (progressError) throw progressError;
       if (reachedTarget) {
-        await supabase
+        const { error: completionError } = await supabase
           .from("occurrences")
           .update({ status: "completed" })
           .eq("id", occurrence.id)
           .eq("user_id", userId);
+        if (completionError) throw completionError;
+        void supabase.functions.invoke("notification-compose", { body: {
+          category: "productivity",
+          dedupeKey: `task-completed:${occurrence.id}`,
+          context: { event: "task_completed", taskTitle: activity.title, taskType: "count", targetReached: true },
+          url: "/",
+        } }).then(({ error }) => { if (error) console.warn("Completion companion notification failed:", error); });
       }
     } catch (err) {
       console.warn("Background progress queued offline:", err);
       enqueueOfflineMutation({
         type: "progress_event",
         payload: {
+          id: progressEvent.id,
           user_id: userId,
           occurrence_id: occurrence.id,
           amount: actualAdd,
@@ -1795,14 +1978,17 @@ export default function Home() {
       );
     }
 
+    const progressEvent = {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      occurrence_id: occurrence.id,
+      amount: -lastAdd,
+      note: `Qaytarish (-${lastAdd})`,
+    };
     try {
       const supabase = createClient();
-      await supabase.from("progress_events").insert({
-        user_id: userId,
-        occurrence_id: occurrence.id,
-        amount: -lastAdd,
-        note: `Qaytarish (-${lastAdd})`,
-      });
+      const { error: progressError } = await supabase.from("progress_events").insert(progressEvent);
+      if (progressError) throw progressError;
       if (needsStatusRevert) {
         await supabase
           .from("occurrences")
@@ -1815,6 +2001,7 @@ export default function Home() {
       enqueueOfflineMutation({
         type: "progress_event",
         payload: {
+          id: progressEvent.id,
           user_id: userId,
           occurrence_id: occurrence.id,
           amount: -lastAdd,
@@ -1898,26 +2085,42 @@ export default function Home() {
   const markNotificationAsRead = (id: string) => {
     const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
     setNotifications(updated);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("myplan_notifications_history", JSON.stringify(updated));
-    }
-    if (activeToast?.id === id) {
-      setActiveToast(null);
-    }
+    void createClient().functions.invoke("notifications", { body: { action: "mark-read", id, read: true } })
+      .then(({ error }) => { if (error) console.warn("Could not sync notification read state:", error); });
+    if (activeToast?.id === id) setActiveToast(null);
   };
 
   const handleRequestPush = async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      alert("Qurilmangizda push bildirishnomalari qo‘llab-quvvatlanmaydi.");
+    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
+      alert("Bu brauzer Web Push bildirishnomalarini qo‘llab-quvvatlamaydi.");
       return;
     }
-    const perm = await Notification.requestPermission();
-    setPushPermission(perm);
-    if (perm === "granted") {
-      new Notification("MyPlan Bildirishnomalari", {
-        body: "Tabriklaymiz! Endi siz muhim eslatma va tavsiyalarni o‘z vaqtida qabul qilasiz.",
-        icon: "/icon.png",
+    if (!window.isSecureContext) {
+      alert("Push bildirishnomalari HTTPS orqali ishlaydi.");
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setPushPermission(permission);
+      if (permission !== "granted") return;
+      const supabase = createClient();
+      const { data: keyData, error: keyError } = await supabase.functions.invoke("notification-public-key", { body: {} });
+      if (keyError || !keyData?.publicKey) throw new Error("Push kaliti serverda sozlanmagan.");
+      const { publicKey } = keyData as { publicKey: string };
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing || await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: Uint8Array.from(atob(publicKey.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(publicKey.length / 4) * 4, "=")), (char) => char.charCodeAt(0)),
       });
+      const { error: saveError } = await supabase.functions.invoke("notification-subscribe", {
+        body: { ...subscription.toJSON(), userAgent: navigator.userAgent },
+      });
+      if (saveError) throw new Error("Qurilma obunasini saqlab bo‘lmadi.");
+      alert("Tayyor! Endi MYplan muhim eslatmalarni ushbu qurilmaga yubora oladi.");
+    } catch (error) {
+      console.error("Push subscription failed:", error);
+      alert(error instanceof Error ? error.message : "Push sozlashda xatolik yuz berdi.");
     }
   };
 
@@ -2201,26 +2404,6 @@ export default function Home() {
       month: "long",
     });
     setFormattedToday(dateFmt.format(new Date()));
-
-    const newT = translations[newLang] || translations.uz;
-    setNotifications((prev) => {
-      const updated = prev.map((n) => {
-        if (n.id === "notif-1") {
-          return { ...n, title: newT.notif_daily_title, message: newT.notif_daily_msg };
-        }
-        if (n.id === "notif-2") {
-          return { ...n, title: newT.notif_counter_title, message: newT.notif_counter_msg };
-        }
-        if (n.id === "notif-3") {
-          return { ...n, title: newT.notif_welcome_title, message: newT.notif_welcome_msg };
-        }
-        return n;
-      });
-      try {
-        localStorage.setItem("myplan_notifications_history", JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
 
     if (userId) {
       const supabase = createClient();
@@ -3223,7 +3406,7 @@ export default function Home() {
                 </div>
                 <div className="install-guide-info">
                   <h4>Chrome / Android</h4>
-                  <p>Brauzer menyusidan (3 nuqta) &laquo;Ilovani o‘rnatish&raquo; yoki &laquo;Bosh ekranga qo‘shish&raquo; tugmasini bosing.</p>
+                  <p>Agar o‘rnatish oynasi avtomatik ochilmasa, Chrome menyusidagi &laquo;Ilovani o‘rnatish&raquo; bandini tanla.</p>
                 </div>
               </div>
 
@@ -3233,7 +3416,7 @@ export default function Home() {
                 </div>
                 <div className="install-guide-info">
                   <h4>Safari / iOS (iPhone, iPad)</h4>
-                  <p>Pastdagi &laquo;Ulashish&raquo; (Share) tugmasini bosing va &laquo;Bosh ekranga qo‘shish&raquo; (Add to Home Screen) bandini tanlang.</p>
+                  <p>iOS Safari saytga PWA o‘rnatish oynasini ochishga ruxsat bermaydi. Shu sabab bu qurilmada tugma orqali bevosita o‘rnatish imkoni yo‘q.</p>
                 </div>
               </div>
 
