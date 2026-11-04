@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent, type ChangeEvent } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { translations, type Language } from "@/lib/translations";
@@ -571,6 +572,17 @@ export default function Home() {
   const counterTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [formattedToday, setFormattedToday] = useState("");
 
+  // Human-Centric Unit Formatter (Resolves localized display names)
+  const formatUnit = useCallback(
+    (unitStr?: string | null): string => {
+      if (!unitStr) return t.unit_marta;
+      const key = `unit_${unitStr}` as keyof typeof t;
+      if (t[key] && typeof t[key] === "string") return t[key] as string;
+      return unitStr;
+    },
+    [t]
+  );
+
   // Offline Sync Queue Helper
   const enqueueOfflineMutation = useCallback((mutation: { type: string; payload: Record<string, unknown> }) => {
     if (typeof window === "undefined") return;
@@ -935,6 +947,10 @@ export default function Home() {
       // Only generate occurrence for activities scheduled on today's weekday
       const missingActivities = acts.filter((a) => {
         if (!a.is_active) return false;
+        // One-time tasks get exactly one occurrence on their start date; never regenerate them daily.
+        if (a.schedule_type === "once") {
+          return a.starts_on === todayStr && !existingOccs.some((o) => o.activity_id === a.id);
+        }
         const weekdays = a.schedule_rule?.weekdays;
         if (weekdays && Array.isArray(weekdays) && weekdays.length > 0 && !weekdays.includes(todayDay)) {
           return false;
@@ -1169,6 +1185,43 @@ export default function Home() {
     };
 
     void supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // Clean Production Start Epoch (Purge legacy test sessions so returning test users cleanly log out)
+      const PROD_CLEAN_SLATE_EPOCH = "v3_production_clean_20261104";
+      if (typeof window !== "undefined") {
+        const storedEpoch = localStorage.getItem("myplan_production_epoch");
+        if (storedEpoch !== PROD_CLEAN_SLATE_EPOCH) {
+          try {
+            await supabase.auth.signOut();
+          } catch {}
+          const keysToPurge = [
+            "myplan_accounts_vault",
+            "myplan_active_account_id",
+            "myplan_device_session_token",
+            "myplan_offline_sync_queue",
+            "myplan_notifications_history",
+            "myplan_custom_time_slots",
+          ];
+          keysToPurge.forEach((k) => localStorage.removeItem(k));
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (
+              k &&
+              (k.startsWith("myplan_count_") ||
+                k.startsWith("myplan_avatar_") ||
+                k.startsWith("myplan_last_streak_") ||
+                k.startsWith("sb-"))
+            ) {
+              localStorage.removeItem(k);
+            }
+          }
+          localStorage.setItem("myplan_production_epoch", PROD_CLEAN_SLATE_EPOCH);
+          setUserId(null);
+          setAuthReady(true);
+          router.replace("/login");
+          return;
+        }
+      }
+
       if (session?.user) {
         // Instant check if this device was revoked remotely
         const sessionCheck = await checkDeviceSessionActive(supabase);
@@ -2515,7 +2568,7 @@ export default function Home() {
                     <span className="focus-rep-current">{focusCurrent}</span>
                     <span className="focus-rep-sep">/</span>
                     <span className="focus-rep-target">{focusTarget}</span>
-                    <span className="focus-rep-unit">{focusActivity.unit || t.unit_marta}</span>
+                    <span className="focus-rep-unit">{formatUnit(focusActivity.unit)}</span>
                   </div>
 
                   <div className="focus-counter-actions">
@@ -2709,18 +2762,32 @@ export default function Home() {
                       maxLength={5}
                       required
                     />
-                    <select
+                    <LifeSelect
                       className="count-unit-select"
                       value={countUnit}
-                      onChange={(e) => setCountUnit(e.target.value)}
-                      title={t.label_target_count}
-                    >
-                      <option value="marta">{t.unit_marta}</option>
-                      <option value="ta">{t.unit_ta}</option>
-                      <option value="bet">{t.unit_bet}</option>
-                      <option value="qadam">{t.unit_qadam}</option>
-                      <option value="daqiqa">{t.unit_daqiqa}</option>
-                    </select>
+                      onChange={setCountUnit}
+                      ariaLabel={t.label_target_count}
+                      options={[
+                        { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: "Mashq, odat va kundalik takrorlar", icon: "↻" },
+                        { value: "set", label: t.unit_set, group: t.group_fitness_health, detail: "Kuch mashqlari va trening setlari", icon: "🏋️" },
+                        { value: "qadam", label: t.unit_qadam, group: t.group_fitness_health, detail: "Yurish va kunlik faollik", icon: "👟" },
+                        { value: "km", label: t.unit_km, group: t.group_fitness_health, detail: "Yugurish, yurish va masofa", icon: "📍" },
+                        { value: "stakan", label: t.unit_stakan, group: t.group_fitness_health, detail: "Suv ichish odati", icon: "🥛" },
+                        { value: "litr", label: t.unit_litr, group: t.group_fitness_health, detail: "Suyuqlik miqdori", icon: "💧" },
+                        { value: "kkal", label: t.unit_kkal, group: t.group_fitness_health, detail: "Energiya va ovqatlanish", icon: "🔥" },
+                        { value: "bet", label: t.unit_bet, group: t.group_study_mind, detail: "Kitob o'qish va mutolaa", icon: "📖" },
+                        { value: "bob", label: t.unit_bob, group: t.group_study_mind, detail: "Kitob yoki kurs bo'limlari", icon: "📚" },
+                        { value: "dars", label: t.unit_dars, group: t.group_study_mind, detail: "Dars va o'quv mashg'ulotlari", icon: "🎓" },
+                        { value: "soz", label: t.unit_soz, group: t.group_study_mind, detail: "Til o'rganish va lug'at", icon: "💬" },
+                        { value: "daqiqa", label: t.unit_daqiqa, group: t.group_time_focus, detail: "Diqqat va odat uchun vaqt", icon: "⏱️" },
+                        { value: "soat", label: t.unit_soat, group: t.group_time_focus, detail: "Uzoq mashg'ulotlar", icon: "🕒" },
+                        { value: "pomodoro", label: t.unit_pomodoro, group: t.group_time_focus, detail: "Fokus sessiyalari", icon: "🍅" },
+                        { value: "ta", label: t.unit_ta, group: t.group_time_focus, detail: "Vazifa va yakunlangan ishlar", icon: "✓" },
+                        { value: "rakat", label: t.unit_rakat, group: t.group_spiritual, detail: "Ibodat va namoz", icon: "🌙" },
+                        { value: "oyat", label: t.unit_oyat, group: t.group_spiritual, detail: "Qur'on mutolaasi", icon: "☪" },
+                        { value: "tasbeh", label: t.unit_tasbeh, group: t.group_spiritual, detail: "Zikr va tasbeh", icon: "📿" },
+                      ] satisfies LifeSelectOption[]}
+                    />
                   </div>
 
                   {debouncedCountError && (
@@ -2899,11 +2966,11 @@ export default function Home() {
                         autoFocus
                       />
 
-                      <select
+                      <LifeSelect
                         className="custom-duration-unit-select"
                         value={customDurationUnit}
-                        onChange={(e) => {
-                          const newUnit = e.target.value as CustomDurationUnit;
+                        onChange={(value) => {
+                          const newUnit = value as CustomDurationUnit;
                           setCustomDurationUnit(newUnit);
                           if (newUnit === "hafta" || newUnit === "oy") {
                             setCustomDurationValue((prev) => prev.replace(/[^1-9]/g, "").slice(0, 1));
@@ -2911,13 +2978,14 @@ export default function Home() {
                             setCustomDurationValue((prev) => prev.replace(/[^1-3]/g, "").slice(0, 1));
                           }
                         }}
-                        title={t.label_duration}
-                      >
-                        <option value="kun">{t.unit_day}</option>
-                        <option value="hafta">{t.unit_week}</option>
-                        <option value="oy">{t.unit_month}</option>
-                        <option value="yil">{t.unit_year}</option>
-                      </select>
+                        ariaLabel={t.label_duration}
+                        options={[
+                          { value: "kun", label: t.unit_day, detail: "Qisqa muddatli reja", icon: "☀️" },
+                          { value: "hafta", label: t.unit_week, detail: "Bir necha haftalik maqsad", icon: "📅" },
+                          { value: "oy", label: t.unit_month, detail: "Oylik odat va marafon", icon: "🗓️" },
+                          { value: "yil", label: t.unit_year, detail: "Uzoq muddatli maqsad", icon: "🏁" },
+                        ] satisfies LifeSelectOption[]}
+                      />
                     </div>
 
                     {debouncedDurationError && (
@@ -3000,13 +3068,17 @@ export default function Home() {
 
               <div className="form-group">
                 <label htmlFor="modal-schedule">{t.label_recurrence}</label>
-                <select
+                <LifeSelect
                   id="modal-schedule"
+                  className="schedule-select"
                   value={newSchedule}
-                  onChange={(e) => setNewSchedule(e.target.value as "daily" | "once")}
-                >
-                  <option value="daily">{t.opt_repeat_daily}</option>
-                </select>
+                  onChange={(value) => setNewSchedule(value as "daily" | "once")}
+                  ariaLabel={t.label_recurrence}
+                  options={[
+                    { value: "daily", label: t.opt_repeat_daily, detail: "Har kuni bajariladigan odat", icon: "🔁" },
+                    { value: "once", label: t.opt_one_time, detail: "Bir marta bajariladigan vazifa", icon: "📌" },
+                  ]}
+                />
               </div>
             </div>
 
@@ -3775,7 +3847,7 @@ export default function Home() {
                     ) : (
                       <p className="focus-spotlight-desc">
                         {recommendedFocusActivity.measurement_type === "count"
-                          ? `${recommendedFocusActivity.target} ${recommendedFocusActivity.unit || t.unit_marta} ${t.tab_countable.toLowerCase()}`
+                          ? `${recommendedFocusActivity.target} ${formatUnit(recommendedFocusActivity.unit)} ${t.tab_countable.toLowerCase()}`
                           : t.tab_single}
                       </p>
                     )}
@@ -3960,7 +4032,7 @@ export default function Home() {
                                 <div className="task-count-progress-wrap">
                                   <div className="task-count-info-row">
                                     <span className="task-count-text">
-                                      <strong>{current}</strong> / {target} {activity.unit || t.unit_marta}
+                                      <strong>{current}</strong> / {target} {formatUnit(activity.unit)}
                                     </span>
                                     <span className="task-remaining-text">
                                       {isDone ? t.done : `${remaining} ${t.stat_remaining_footer}`}
@@ -4146,7 +4218,7 @@ export default function Home() {
                             <span className="detail-label">{t.detail_type_label}</span>
                             <span className="detail-value">
                               {act.measurement_type === "count"
-                                ? `${t.tab_countable} (${act.target} ${act.unit || t.unit_marta})`
+                                ? `${t.tab_countable} (${act.target} ${formatUnit(act.unit)})`
                                 : t.detail_single_check}
                             </span>
                           </div>

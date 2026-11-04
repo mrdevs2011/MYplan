@@ -1,16 +1,40 @@
-# MYPLAN database migrations
+# MYPLAN database deployment
 
-Run these files in **Supabase Dashboard → SQL Editor**, in numeric order, once per project:
+The SQL files in this directory are the canonical schema scripts. Apply them to the intended Supabase project in **Supabase Dashboard → SQL Editor**, in numeric order, and verify each script completes before proceeding. Take a database backup before applying schema changes to a project containing data.
 
-1. `001_profiles.sql` — profile table and automatic profile creation on Auth signup.
-2. `002_activities.sql` — personal activity definitions.
-3. `003_occurrences.sql` — scheduled activity periods.
+## Migration order
+
+1. `001_profiles.sql` — profiles and automatic profile creation on Auth signup.
+2. `002_activities.sql` — activity definitions, schedules, and ownership.
+3. `003_occurrences.sql` — scheduled activity occurrences.
 4. `004_progress_events.sql` — append-only progress history.
-5. `005_row_level_security.sql` — per-user access policies.
-6. `006_username_auth.sql` — unique profile usernames and the signup trigger update.
+5. `005_row_level_security.sql` — per-user RLS policies for core tables.
+6. `006_username_auth.sql` — unique usernames and username signup metadata.
+7. `007_profile_avatar_and_age.sql` — profile fields and `updated_at` triggers.
+8. `008_pocket_features.sql` — time-of-day, streak, and preference fields.
+9. `009_settings_and_realtime.sql` — settings columns and Realtime publication.
+10. `010_user_devices_and_security.sql` — device registry and device-session RLS.
+11. `011_custom_time_of_day.sql` — custom time-of-day values.
 
-Run each file as a whole and confirm it completes before moving to the next. These scripts are designed to be safely re-run for the initial schema. Do not run them against a production database containing important data without a backup.
+The scripts use `IF NOT EXISTS`/replace patterns where practical, but they are not a substitute for reviewing the target schema and backing up production data. Do not blindly replay modified scripts against a live database.
 
-## Auth setup required
+## Auth configuration
 
-SQL does **not** create a Supabase project or enable password authentication. In Supabase, enable Email provider under Authentication → Sign In / Providers. For username-only signup, disable Email confirmation: MYPLAN internally maps each username to a reserved non-deliverable address (`@users.myplan.invalid`) because Supabase password auth requires an email or phone identifier. No email is shown to or requested from the user. This means email delivery and email-based password recovery are not available for these accounts; add a verified recovery method before enabling recovery. Then set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` only in Vercel → Project → Settings → Environment Variables, then redeploy. Do not create local `.env` files; use `vercel dev` for local development.
+- Enable the Email provider under **Authentication → Sign In / Providers**.
+- The current username-only UI maps normalized usernames to a reserved non-deliverable address under `@users.myplan.invalid`, because Supabase password auth requires an email or phone identifier.
+- Disable email confirmation only if this username-only flow is intentionally retained. These addresses cannot receive email, so email-based password recovery is unavailable. Before production use, add and verify a real recovery method or change the identity flow.
+- Configure allowed redirect URLs and site URL for the real production domain.
+- Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the deployment environment. Never expose a service-role key in browser code or commit it.
+
+## Production verification checklist
+
+- Confirm all 11 scripts have been applied to the correct Supabase project.
+- Verify RLS is enabled on `profiles`, `activities`, `occurrences`, `progress_events`, and `user_devices`.
+- Test two separate accounts to confirm one user cannot read or mutate another user's rows.
+- Test signup, login, session refresh, logout, password update, and device revocation against a non-production project first.
+- Configure Auth rate limits, CAPTCHA/abuse protection, backup/PITR policy, database alerts, and Realtime only for tables that need it.
+- Do not delete Auth users or application rows until the target project and the intended data scope have been independently verified.
+
+## Important current limitations
+
+The client app currently depends on public Supabase access plus RLS. Administrative operations such as deleting Auth users require a trusted server-side service-role context; they must never be implemented using the browser publishable key. The username-only reserved-email flow also has no email recovery path.

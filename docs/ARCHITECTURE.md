@@ -22,7 +22,7 @@
 3. The browser auth listener mirrors the current session into the page state.
 4. The proxy calls `auth.getUser()` to refresh/validate the request session and forwards refreshed cookies.
 
-The current authenticated UI is a signed-in confirmation state. A protected dashboard and activity CRUD flows have not yet been implemented.
+The authenticated app currently provides a personal activity workspace with activity creation/editing, daily occurrences, progress events, profile preferences, analytics, notifications, and device-session controls. These features depend on the remote SQL schema being applied in the documented order.
 
 ## Username authentication
 
@@ -36,7 +36,7 @@ The UI accepts a username and password only. Since Supabase password auth requir
 - Occurrence writes must reference an activity owned by the same authenticated user.
 - Progress events are append-only for client roles (no UPDATE/DELETE policies).
 
-Run SQL migrations in numeric order as documented in `sql/README.md`. These files describe the intended schema; committing them does not apply them to the Supabase database.
+Run all 11 SQL scripts in numeric order as documented in `sql/README.md`. These files describe the intended schema; committing them does not apply them to the Supabase database. Verify remote schema and RLS behavior using separate test accounts before calling the project production-ready.
 
 ## Operational constraints
 

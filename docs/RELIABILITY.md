@@ -22,8 +22,10 @@ npm run build
 
 - There is no automated unit, integration, or end-to-end test suite yet. Lint/typecheck/build passing is not proof of runtime auth correctness.
 - Login, signup, email-confirmation, token-refresh, and sign-out flows still need integration tests against a non-production Supabase project.
-- The dashboard and activity lifecycle are not implemented yet.
-- SQL migrations have not been verified as applied to the remote Supabase database.
+- Automated unit, integration, and end-to-end coverage is still absent.
+- Remote Supabase migration state could not be verified from the current linked CLI identity (the API returned missing `database_write` permission).
+- The username-only reserved-email authentication flow has no email-based recovery path.
+- The current clean-slate client epoch logs out a browser on its next visit; it does not delete Auth users or revoke every user's server-side sessions immediately.
 
 ## Change policy
 
