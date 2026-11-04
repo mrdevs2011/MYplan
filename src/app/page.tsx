@@ -3104,20 +3104,20 @@ export default function Home() {
                                               </button>
                                             );
                                           })}
-
-                                        {/* Undo Button - Pure circle matching +10 +5 +1 */}
-                                        {(taskHistory[occ.id]?.length || 0) > 0 && (
-                                          <button
-                                            type="button"
-                                            className="btn-counter-undo"
-                                            onClick={() => void undoTaskCount(activity, occ)}
-                                            title={`Qaytarish (-${taskHistory[occ.id].slice(-1)[0]})`}
-                                            aria-label="Amalni qaytarish"
-                                          >
-                                            <IconUndo className="icon-sm" />
-                                          </button>
-                                        )}
                                       </div>
+
+                                      {/* Undo Button - ALWAYS ON THE RIGHT SIDE */}
+                                      {(taskHistory[occ.id]?.length || 0) > 0 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-undo"
+                                          onClick={() => void undoTaskCount(activity, occ)}
+                                          title={`Qaytarish (-${taskHistory[occ.id].slice(-1)[0]})`}
+                                          aria-label="Amalni qaytarish"
+                                        >
+                                          <IconUndo className="icon-sm" />
+                                        </button>
+                                      )}
                                     </div>
                                   )}
                                 </div>

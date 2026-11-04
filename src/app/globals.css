@@ -3262,6 +3262,7 @@ select:focus-visible {
   min-width: 44px;
   min-height: 44px;
   max-width: 44px;
+  margin-left: auto !important;
   padding: 0 !important;
   border-radius: 50% !important;
   background: rgba(245, 158, 11, 0.12);
