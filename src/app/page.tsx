@@ -316,7 +316,7 @@ export default function Home() {
     const supabase = createClient();
     try {
       const [{ data: profile }, { data: activityRows, error: activityError }] = await Promise.all([
-        supabase.from("profiles").select("username, full_name").eq("id", id).maybeSingle(),
+        supabase.from("profiles").select("username, full_name, age, avatar_url").eq("id", id).maybeSingle(),
         supabase
           .from("activities")
           .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on")
@@ -331,6 +331,8 @@ export default function Home() {
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
         setAccountUsername(profile.username || "");
+        if (profile.age) setUserAge(profile.age);
+        if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
       }
 
       // Load today's occurrences using correct PostgreSQL schema
@@ -953,6 +955,7 @@ export default function Home() {
           void supabase.auth.updateUser({
             data: { avatar_url: dataUrl },
           });
+          void supabase.from("profiles").update({ avatar_url: dataUrl }).eq("id", userId);
         }
       }
     };
