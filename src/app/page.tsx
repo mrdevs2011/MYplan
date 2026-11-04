@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { translations, type Language } from "@/lib/translations";
 import {
   IconCheck,
   IconPlus,
@@ -207,9 +208,13 @@ export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Settings states
-  const [language, setLanguage] = useState<"uz" | "en" | "ru">("uz");
-  const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
+  const [language, setLanguage] = useState<Language>("uz");
+  const [theme, setTheme] = useState<"dark" | "light" | "system">("system");
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [autoArchiveDelay, setAutoArchiveDelay] = useState(7);
+
+  const t = translations[language] || translations.uz;
 
   // Splash Screen States (Guaranteed 100% Logo Preload)
   const [splashReady, setSplashReady] = useState(false);
@@ -420,7 +425,7 @@ export default function Home() {
       const [{ data: profile }, { data: activityRows, error: activityError }] = await Promise.all([
         supabase
           .from("profiles")
-          .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date")
+          .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date, language, counter_steps, sound_enabled, notifications_enabled, auto_archive_delay, created_at")
           .eq("id", id)
           .maybeSingle(),
         supabase
@@ -441,6 +446,28 @@ export default function Home() {
         if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
         if (typeof profile.streak_count === "number") setStreakCount(profile.streak_count);
         if (typeof profile.best_streak === "number") setBestStreak(profile.best_streak);
+        if (profile.language && (profile.language === "uz" || profile.language === "en" || profile.language === "ru")) {
+          setLanguage(profile.language as Language);
+          localStorage.setItem("myplan_lang", profile.language);
+        }
+        if (Array.isArray(profile.counter_steps) && profile.counter_steps.length > 0) {
+          const validSteps = (profile.counter_steps as number[])
+            .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
+            .sort((a, b) => b - a);
+          setCounterSteps(validSteps);
+          localStorage.setItem("myplan_counter_steps", JSON.stringify(validSteps));
+        }
+        if (typeof profile.sound_enabled === "boolean") {
+          setSoundEnabled(profile.sound_enabled);
+          localStorage.setItem("myplan_sound_enabled", String(profile.sound_enabled));
+        }
+        if (typeof profile.notifications_enabled === "boolean") {
+          setNotificationsEnabled(profile.notifications_enabled);
+          localStorage.setItem("myplan_notifications_enabled", String(profile.notifications_enabled));
+        }
+        if (typeof profile.auto_archive_delay === "number") {
+          setAutoArchiveDelay(profile.auto_archive_delay);
+        }
       }
 
       // Load today's occurrences using correct PostgreSQL schema
@@ -533,7 +560,7 @@ export default function Home() {
     // 100% Guaranteed Splash Screen Preload
     if (typeof window !== "undefined") {
       const img = new window.Image();
-      img.src = "/myplan-logo.png";
+      img.src = "/myplan-logo-transparent.png";
       const minTimer = new Promise((resolve) => setTimeout(resolve, 850));
       const imgLoaded = img.complete
         ? Promise.resolve()
@@ -557,6 +584,74 @@ export default function Home() {
     }
 
     const supabase = createClient();
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const setupRealtime = (uid: string) => {
+      if (realtimeChannel) {
+        realtimeChannel.unsubscribe();
+      }
+      realtimeChannel = supabase
+        .channel(`workspace-sync-${uid}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "activities", filter: `user_id=eq.${uid}` },
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              const row = payload.new as Activity;
+              setActivities((prev) => (prev.some((a) => a.id === row.id) ? prev : [row, ...prev]));
+            } else if (payload.eventType === "UPDATE") {
+              const row = payload.new as Activity;
+              setActivities((prev) => prev.map((a) => (a.id === row.id ? row : a)));
+            } else if (payload.eventType === "DELETE") {
+              const row = payload.old as { id: string };
+              setActivities((prev) => prev.filter((a) => a.id !== row.id));
+            }
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "occurrences", filter: `user_id=eq.${uid}` },
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              const row = payload.new as Occurrence;
+              setOccurrences((prev) => (prev.some((o) => o.id === row.id) ? prev : [row, ...prev]));
+            } else if (payload.eventType === "UPDATE") {
+              const row = payload.new as Occurrence;
+              setOccurrences((prev) => prev.map((o) => (o.id === row.id ? row : o)));
+            } else if (payload.eventType === "DELETE") {
+              const row = payload.old as { id: string };
+              setOccurrences((prev) => prev.filter((o) => o.id !== row.id));
+            }
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${uid}` },
+          (payload) => {
+            const p = payload.new as Record<string, unknown>;
+            if (p.language && typeof p.language === "string") {
+              const l = p.language as Language;
+              setLanguage(l);
+              localStorage.setItem("myplan_lang", l);
+            }
+            if (Array.isArray(p.counter_steps) && p.counter_steps.length > 0) {
+              const steps = (p.counter_steps as number[])
+                .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
+                .sort((a, b) => b - a);
+              setCounterSteps(steps);
+              localStorage.setItem("myplan_counter_steps", JSON.stringify(steps));
+            }
+            if (typeof p.streak_count === "number") setStreakCount(p.streak_count);
+            if (typeof p.best_streak === "number") setBestStreak(p.best_streak);
+            if (typeof p.sound_enabled === "boolean") setSoundEnabled(p.sound_enabled);
+            if (typeof p.notifications_enabled === "boolean") setNotificationsEnabled(p.notifications_enabled);
+            if (typeof p.full_name === "string") setAccountName(p.full_name);
+            if (typeof p.avatar_url === "string") setAvatarUrl(p.avatar_url);
+          }
+        )
+        .subscribe();
+    };
+
     void supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         const currentId = session.user.id;
@@ -572,6 +667,7 @@ export default function Home() {
         setUserAge(currentAge);
         setAuthReady(true);
         void loadWorkspace(currentId);
+        setupRealtime(currentId);
 
         const savedAvatar = localStorage.getItem(`myplan_avatar_${currentId}`);
         if (savedAvatar) setAvatarUrl(savedAvatar);
@@ -613,6 +709,7 @@ export default function Home() {
       if (session?.user) {
         setUserId(session.user.id);
         void loadWorkspace(session.user.id);
+        setupRealtime(session.user.id);
       } else {
         setUserId(null);
         router.replace("/login");
@@ -639,6 +736,9 @@ export default function Home() {
       setIsOnline(false);
     };
 
+    let colorSchemeMedia: MediaQueryList | null = null;
+    let handleSystemThemeChange: ((e: MediaQueryListEvent) => void) | null = null;
+
     if (typeof window !== "undefined") {
       if (
         window.matchMedia("(display-mode: standalone)").matches ||
@@ -649,7 +749,7 @@ export default function Home() {
       window.addEventListener("beforeinstallprompt", handleBeforeInstall);
       window.addEventListener("appinstalled", handleAppInstalled);
 
-      const savedTheme = (localStorage.getItem("myplan_theme") as "dark" | "light" | "system") || "dark";
+      const savedTheme = (localStorage.getItem("myplan_theme") as "dark" | "light" | "system") || "system";
       setTimeout(() => {
         setTheme(savedTheme);
         if (savedTheme === "system") {
@@ -660,7 +760,16 @@ export default function Home() {
         }
       }, 0);
 
-      const savedLang = (localStorage.getItem("myplan_lang") as "uz" | "en" | "ru") || "uz";
+      colorSchemeMedia = window.matchMedia("(prefers-color-scheme: light)");
+      handleSystemThemeChange = (e: MediaQueryListEvent) => {
+        const cur = localStorage.getItem("myplan_theme") || "system";
+        if (cur === "system") {
+          document.documentElement.setAttribute("data-theme", e.matches ? "light" : "dark");
+        }
+      };
+      colorSchemeMedia.addEventListener("change", handleSystemThemeChange);
+
+      const savedLang = (localStorage.getItem("myplan_lang") as Language) || "uz";
       setTimeout(() => {
         setLanguage(savedLang);
         const locale = savedLang === "en" ? "en-US" : savedLang === "ru" ? "ru-RU" : "uz-UZ";
@@ -689,7 +798,7 @@ export default function Home() {
         }
       }
 
-      // Notification History (3 days strictly, natural tone)
+      // Notification History (clean, fresh, natural tone)
       const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
       const now = Date.now();
       try {
@@ -707,7 +816,7 @@ export default function Home() {
               title: "Bugungi kuningiz barakali bo‘lsin!",
               message:
                 "Har bir yangi kun — yangi imkoniyat. Rejalaringizni aniq belgilang va birinchi vazifangizni boshlang.",
-              createdAt: now - 1000 * 60 * 60 * 2,
+              createdAt: now - 1000 * 60 * 15,
               isRead: false,
             },
             {
@@ -717,41 +826,34 @@ export default function Home() {
               categoryLabel: "UNUMDORLIK",
               title: "Sanoqli vazifalaringiz monitoringi",
               message:
-                "Kuningizdagi takrorlanuvchi amallarni bajargach, +10, +5 yoki +1 tugmalari orqali natijani qayd etishni unutmang.",
-              createdAt: now - 1000 * 60 * 60 * 6,
+                "Kuningizdagi takrorlanuvchi amallarni bajargach, hisoblash tugmalari orqali natijani qayd etishni unutmang.",
+              createdAt: now - 1000 * 60 * 45,
               isRead: true,
             },
             {
               id: "notif-3",
-              sender: "MyPlan Murabbiyi",
-              category: "evening",
-              categoryLabel: "KECHKI TAHLIL",
-              title: "Kechagi unumdorlik xulosasi",
-              message:
-                "Kechagi barcha harakatlaringiz tizimda muhrlandi. Barqarorlik — eng katta yutuq kalitidir.",
-              createdAt: now - 1000 * 60 * 60 * 26,
-              isRead: true,
-            },
-            {
-              id: "notif-4",
               sender: "MyPlan Tizimi",
               category: "streak",
               categoryLabel: "SHAXSIY O‘SISH",
               title: "Plan your day. Own your time.",
               message:
                 "MyPlan platformasiga xush kelibsiz! Maqsadlaringiz sari intizomli qadam tashlayotganingizdan mamnunmiz.",
-              createdAt: now - 1000 * 60 * 60 * 50,
+              createdAt: now - 1000 * 60 * 60 * 2,
               isRead: true,
             },
           ];
         }
 
         const withLabels = parsed.map((n) => {
+          const diffMinutes = Math.round((now - n.createdAt) / (1000 * 60));
           const diffHours = Math.round((now - n.createdAt) / (1000 * 60 * 60));
           let label = "Hozirgina";
-          if (diffHours >= 1 && diffHours < 24) label = `${diffHours} soat oldin`;
-          else if (diffHours >= 24) {
-            const diffDays = Math.round(diffHours / 24);
+          if (diffMinutes < 60) {
+            label = diffMinutes <= 1 ? "Hozirgina" : `${diffMinutes} daqiqa oldin`;
+          } else if (diffHours < 24) {
+            label = `${diffHours} soat oldin`;
+          } else {
+            const diffDays = Math.max(1, Math.floor(diffHours / 24));
             label = diffDays === 1 ? "Kecha" : `${diffDays} kun oldin`;
           }
           return { ...n, timeLabel: label };
@@ -799,12 +901,18 @@ export default function Home() {
     const activeTimers = counterTimersRef.current;
     return () => {
       listener.subscription.unsubscribe();
+      if (realtimeChannel) {
+        realtimeChannel.unsubscribe();
+      }
       Object.values(activeTimers).forEach(clearTimeout);
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
         window.removeEventListener("appinstalled", handleAppInstalled);
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
+        if (colorSchemeMedia && handleSystemThemeChange) {
+          colorSchemeMedia.removeEventListener("change", handleSystemThemeChange);
+        }
       }
     };
   }, [loadWorkspace, router, processOfflineQueue]);
@@ -1171,6 +1279,10 @@ export default function Home() {
     setCounterSteps(updated);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
     setNewStepInput("");
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ counter_steps: updated }).eq("id", userId);
+    }
   };
 
   const handleRemoveCounterStep = (stepToRemove: number) => {
@@ -1182,6 +1294,10 @@ export default function Home() {
     setCounterSteps(updated);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
     setNewStepError("");
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ counter_steps: updated }).eq("id", userId);
+    }
   };
 
   const handleResetCounterSteps = () => {
@@ -1189,6 +1305,10 @@ export default function Home() {
     setCounterSteps(defaults);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(defaults));
     setNewStepError("");
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ counter_steps: defaults }).eq("id", userId);
+    }
   };
 
   // Pocket Touch Gestures (Swipe to Complete & Quick Actions)
@@ -1339,7 +1459,7 @@ export default function Home() {
   };
 
   // Language change
-  const handleLanguageChange = (newLang: "uz" | "en" | "ru") => {
+  const handleLanguageChange = (newLang: Language) => {
     setLanguage(newLang);
     localStorage.setItem("myplan_lang", newLang);
     const locale = newLang === "en" ? "en-US" : newLang === "ru" ? "ru-RU" : "uz-UZ";
@@ -1349,6 +1469,30 @@ export default function Home() {
       month: "long",
     });
     setFormattedToday(dateFmt.format(new Date()));
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ language: newLang }).eq("id", userId);
+    }
+  };
+
+  // Sound toggle
+  const handleSoundToggle = (enabled: boolean) => {
+    setSoundEnabled(enabled);
+    localStorage.setItem("myplan_sound_enabled", String(enabled));
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ sound_enabled: enabled }).eq("id", userId);
+    }
+  };
+
+  // Notifications toggle
+  const handleNotificationsToggle = (enabled: boolean) => {
+    setNotificationsEnabled(enabled);
+    localStorage.setItem("myplan_notifications_enabled", String(enabled));
+    if (userId) {
+      const supabase = createClient();
+      void supabase.from("profiles").update({ notifications_enabled: enabled }).eq("id", userId);
+    }
   };
 
   // Calculations for Today's Execution (only tasks scheduled for today's weekday)
@@ -2102,7 +2246,7 @@ export default function Home() {
               }}
             >
               <IconCalendar className="nav-icon" />
-              <span className="nav-label">Bugungi reja</span>
+              <span className="nav-label">{t.tab_today}</span>
               {activeTab === "today" && <span className="active-indicator" />}
             </button>
 
@@ -2116,7 +2260,7 @@ export default function Home() {
               }}
             >
               <IconList className="nav-icon" />
-              <span className="nav-label">Faoliyatlarim</span>
+              <span className="nav-label">{t.tab_activities}</span>
               {activeTab === "activities" && <span className="active-indicator" />}
             </button>
 
@@ -2130,7 +2274,7 @@ export default function Home() {
               }}
             >
               <IconBell className="nav-icon" />
-              <span className="nav-label">Bildirishnomalar</span>
+              <span className="nav-label">{t.tab_notifications}</span>
               {unreadNotifsCount > 0 && <span className="nav-unread-pill">{unreadNotifsCount}</span>}
               {activeTab === "notifications" && <span className="active-indicator" />}
             </button>
@@ -2145,7 +2289,7 @@ export default function Home() {
               }}
             >
               <IconBarChart className="nav-icon" />
-              <span className="nav-label">Statistika</span>
+              <span className="nav-label">{t.tab_analytics}</span>
               {activeTab === "analytics" && <span className="active-indicator" />}
             </button>
 
@@ -2159,7 +2303,7 @@ export default function Home() {
               }}
             >
               <IconUser className="nav-icon" />
-              <span className="nav-label">Profilim</span>
+              <span className="nav-label">{t.tab_profile}</span>
               {activeTab === "profile" && <span className="active-indicator" />}
             </button>
 
@@ -2173,7 +2317,7 @@ export default function Home() {
               }}
             >
               <IconSettings className="nav-icon" />
-              <span className="nav-label">Sozlamalar</span>
+              <span className="nav-label">{t.tab_settings}</span>
               {activeTab === "settings" && <span className="active-indicator" />}
             </button>
           </nav>
@@ -2232,10 +2376,10 @@ export default function Home() {
               e.stopPropagation();
               void handleSignOut();
             }}
-            title="Tizimdan chiqish"
+            title={t.logout}
           >
             <IconLogOut className="icon-sm" />
-            <span className="logout-text">Chiqish</span>
+            <span className="logout-text">{t.logout}</span>
           </button>
         </div>
       </aside>
@@ -2267,16 +2411,16 @@ export default function Home() {
 
           <div className="mobile-topbar-actions">
             {!isOnline && (
-              <span className="offline-status-pill compact" title="Oflayn rejim — amallar mahalliy saqlanadi">
+              <span className="offline-status-pill compact" title={t.offline_pill_desc}>
                 <IconWifiOff className="icon-xs" />
-                <span>Oflayn</span>
+                <span>{t.offline_pill}</span>
               </span>
             )}
             <button
               type="button"
               className="mobile-avatar-btn"
               onClick={() => setActiveTab("profile")}
-              title="Profil"
+              title={t.tab_profile}
             >
               <div className="mobile-user-avatar">
                 {avatarUrl ? (
@@ -2297,63 +2441,63 @@ export default function Home() {
               {activeTab === "today" && (
                 <>
                   <span className="page-kicker">
-                    <IconSparkles className="icon-xs" /> KUNLIK AMALLAR
+                    <IconSparkles className="icon-xs" /> {t.today_kicker}
                   </span>
-                  <h1 className="page-title">Bugungi reja</h1>
-                  <p className="page-subtitle">Bugungi rejalaringiz monitoringi{formattedToday ? ` · ${formattedToday}` : ""}</p>
+                  <h1 className="page-title">{t.today_title}</h1>
+                  <p className="page-subtitle">{t.today_sub}{formattedToday ? ` · ${formattedToday}` : ""}</p>
                 </>
               )}
               {activeTab === "activities" && (
                 <>
                   <span className="page-kicker">
-                    <IconList className="icon-xs" /> TIZIMLI BOSHQARUV
+                    <IconList className="icon-xs" /> {t.catalog_kicker}
                   </span>
-                  <h1 className="page-title">Faoliyatlar katalogi</h1>
-                  <p className="page-subtitle">Barcha rejalashtirilgan odatlar va faoliyatlaringiz ro‘yxati</p>
+                  <h1 className="page-title">{t.catalog_title}</h1>
+                  <p className="page-subtitle">{t.catalog_sub}</p>
                 </>
               )}
               {activeTab === "notifications" && (
                 <>
                   <span className="page-kicker">
-                    <IconBell className="icon-xs" /> BILDIRISHNOMALAR MARKAZI
+                    <IconBell className="icon-xs" /> {t.notif_kicker}
                   </span>
-                  <h1 className="page-title">Xabarlar va Eslatmalar</h1>
-                  <p className="page-subtitle">So‘nggi 3 kunlik faoliyat xulosalari va tizim maslahatlari</p>
+                  <h1 className="page-title">{t.notif_title}</h1>
+                  <p className="page-subtitle">{t.notif_sub}</p>
                 </>
               )}
               {activeTab === "analytics" && (
                 <>
                   <span className="page-kicker">
-                    <IconBarChart className="icon-xs" /> TARAQQIYOT KO‘ZGUSI
+                    <IconBarChart className="icon-xs" /> {t.analytics_kicker}
                   </span>
-                  <h1 className="page-title">Samaradorlik statistikasi</h1>
-                  <p className="page-subtitle">Ko‘rsatkichlaringiz tahlili va shaxsiy unumdorlik dinamikasi</p>
+                  <h1 className="page-title">{t.analytics_title}</h1>
+                  <p className="page-subtitle">{t.analytics_sub}</p>
                 </>
               )}
               {activeTab === "profile" && (
                 <>
                   <span className="page-kicker">
-                    <IconUser className="icon-xs" /> SHAXSIY HISOB
+                    <IconUser className="icon-xs" /> {t.profile_kicker}
                   </span>
-                  <h1 className="page-title">Foydalanuvchi profili</h1>
-                  <p className="page-subtitle">Shaxsiy hisob ma’lumotlari va xavfsizlik holati</p>
+                  <h1 className="page-title">{t.profile_title}</h1>
+                  <p className="page-subtitle">{t.profile_sub}</p>
                 </>
               )}
               {activeTab === "settings" && (
                 <>
                   <span className="page-kicker">
-                    <IconSettings className="icon-xs" /> TIZIM PARAMETRLARI
+                    <IconSettings className="icon-xs" /> {t.settings_kicker}
                   </span>
-                  <h1 className="page-title">Ilova sozlamalari</h1>
-                  <p className="page-subtitle">Interfeys tili, vizual mavzu va qulaylik parametrlarini boshqaring</p>
+                  <h1 className="page-title">{t.settings_title}</h1>
+                  <p className="page-subtitle">{t.settings_sub}</p>
                 </>
               )}
             </div>
 
             {!isOnline && (
-              <div className="offline-status-pill desktop" title="Internet aloqasi yo‘q. Barcha amallar mahalliy navbatga olinadi va aloqa tiklangach avtomatik sinxronlanadi">
+              <div className="offline-status-pill desktop" title={t.offline_pill_desc}>
                 <IconWifiOff className="icon-xs" />
-                <span>Oflayn rejim ({pendingSyncCount} ta saqlangan)</span>
+                <span>{t.offline_pill} ({pendingSyncCount})</span>
               </div>
             )}
           </header>
@@ -2384,21 +2528,21 @@ export default function Home() {
                   </div>
                   <div className="streak-info">
                     <div className="streak-title-row">
-                      <span className="streak-label">KUNLIK SERIYA (STREAK)</span>
+                      <span className="streak-label">{t.streak_label}</span>
                       {bestStreak > 0 && (
-                        <span className="best-streak-tag">Rekord: {bestStreak} kun</span>
+                        <span className="best-streak-tag">{t.best_record}: {bestStreak} kun</span>
                       )}
                     </div>
                     <div className="streak-number-row">
                       <span className="streak-number">{streakCount}</span>
-                      <span className="streak-days-text">kun ketma-ket intizom</span>
+                      <span className="streak-days-text">{t.streak_days}</span>
                     </div>
                     <p className="streak-status-hint">
                       {percent === 100
-                        ? "🎉 Bugungi barcha vazifalar to‘liq bajarildi! Seriyangiz mustahkamlandi."
+                        ? t.streak_100
                         : streakCount > 0
-                        ? "Bugun 100% bajaring va seriyangizni oshiring!"
-                        : "Bugun barcha rejalarni yakunlab yangi seriyangizni boshlang!"}
+                        ? t.streak_keep
+                        : t.streak_start}
                     </p>
                   </div>
                 </div>
@@ -2410,17 +2554,17 @@ export default function Home() {
                     triggerHaptic("medium");
                     setShowEveningReview(true);
                   }}
-                  title="Kechki hisobotni ko‘rish"
+                  title={t.evening_review_btn}
                 >
                   <IconSparkles className="icon-xs" />
-                  <span>Kechki hisobot</span>
+                  <span>{t.evening_review_btn}</span>
                 </button>
               </section>
 
               <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
                 <article className="stat-card progress-card">
                   <div className="stat-header">
-                    <span className="stat-tag">BUGUNGI NATIJA</span>
+                    <span className="stat-tag">{t.stat_result}</span>
                     <IconTarget className="stat-icon" />
                   </div>
                   <div className="stat-value-row">
@@ -2431,31 +2575,31 @@ export default function Home() {
                     <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
                   </div>
                   <p className="stat-footer">
-                    <strong className="text-lime">{completedCount}</strong> ta bajarildi ·{" "}
-                    <strong>{Math.max(activeActivities.length - completedCount, 0)}</strong> ta qoldi
+                    <strong className="text-lime">{completedCount}</strong> {t.completed} ·{" "}
+                    <strong>{Math.max(activeActivities.length - completedCount, 0)}</strong> {t.left}
                   </p>
                 </article>
 
                 <article className="stat-card">
                   <div className="stat-header">
-                    <span className="stat-tag">FAOL REJALAR</span>
+                    <span className="stat-tag">{t.stat_active}</span>
                     <IconList className="stat-icon" />
                   </div>
                   <div className="stat-value-row">
                     <span className="stat-value">{activeActivities.length.toString().padStart(2, "0")}</span>
                   </div>
-                  <p className="stat-footer">Bugun uchun belgilangan amallar</p>
+                  <p className="stat-footer">{t.stat_plans_desc}</p>
                 </article>
 
                 <article className="stat-card">
                   <div className="stat-header">
-                    <span className="stat-tag">YAKUNLANDI</span>
+                    <span className="stat-tag">{t.stat_completed}</span>
                     <IconTrendUp className="stat-icon text-lime" />
                   </div>
                   <div className="stat-value-row">
                     <span className="stat-value text-lime">{completedCount.toString().padStart(2, "0")}</span>
                   </div>
-                  <p className="stat-footer">Muvaffaqiyatli yakunlangan amallar</p>
+                  <p className="stat-footer">{t.stat_success_desc}</p>
                 </article>
               </section>
 
@@ -2463,8 +2607,8 @@ export default function Home() {
               <section className="tasks-section">
                 <div className="section-header-bar">
                   <div>
-                    <span className="section-sub">KUNLIK VAZIFALAR</span>
-                    <h2 className="section-heading">Amallar ijrosi</h2>
+                    <span className="section-sub">{t.today_kicker}</span>
+                    <h2 className="section-heading">{t.tasks_execution}</h2>
                   </div>
                 </div>
 
@@ -2478,7 +2622,7 @@ export default function Home() {
                       setActiveTimeFilter("all");
                     }}
                   >
-                    <span>Barchasi</span>
+                    <span>{t.filter_all}</span>
                     <span className="chip-count">{timeCounts.all}</span>
                   </button>
                   <button
@@ -2490,7 +2634,7 @@ export default function Home() {
                     }}
                   >
                     <IconSunrise className="icon-xs" />
-                    <span>Tong</span>
+                    <span>{t.filter_morning}</span>
                     <span className="chip-count">{timeCounts.morning}</span>
                   </button>
                   <button
@@ -2502,7 +2646,7 @@ export default function Home() {
                     }}
                   >
                     <IconSun className="icon-xs" />
-                    <span>Kunduz</span>
+                    <span>{t.filter_afternoon}</span>
                     <span className="chip-count">{timeCounts.afternoon}</span>
                   </button>
                   <button
@@ -2514,7 +2658,7 @@ export default function Home() {
                     }}
                   >
                     <IconMoon className="icon-xs" />
-                    <span>Kechqurun</span>
+                    <span>{t.filter_evening}</span>
                     <span className="chip-count">{timeCounts.evening}</span>
                   </button>
                 </div>
@@ -2628,7 +2772,7 @@ export default function Home() {
                                           .slice()
                                           .sort((a, b) => b - a)
                                           .map((step) => {
-                                            const isVisible = remaining >= step && !isDone;
+                                            const isVisible = (current === 0 || remaining >= step) && !isDone;
                                             return (
                                               <button
                                                 key={step}
@@ -3122,8 +3266,8 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconGlobe className="icon-sm text-lime" />
                       <div>
-                        <h3>Interfeys tili</h3>
-                        <p>Ilova interfeysi va barcha ko‘rsatkichlar tili</p>
+                        <h3>{t.setting_language}</h3>
+                        <p>{t.setting_language_sub}</p>
                       </div>
                     </div>
                     <div className="settings-options-grid">
@@ -3159,18 +3303,27 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconMoon className="icon-sm text-lime" />
                       <div>
-                        <h3>Interfeys mavzusi</h3>
-                        <p>Ko‘zga qulay ranglar palitrasi</p>
+                        <h3>{t.setting_appearance}</h3>
+                        <p>{t.setting_appearance_sub}</p>
                       </div>
                     </div>
                     <div className="settings-options-grid">
+                      <button
+                        type="button"
+                        className={`setting-choice-btn ${theme === "system" ? "active" : ""}`}
+                        onClick={() => handleThemeChange("system")}
+                      >
+                        <IconSettings className="icon-xs" />
+                        <span>{t.theme_system}</span>
+                        {theme === "system" && <IconCheck className="icon-xs text-lime" />}
+                      </button>
                       <button
                         type="button"
                         className={`setting-choice-btn ${theme === "dark" ? "active" : ""}`}
                         onClick={() => handleThemeChange("dark")}
                       >
                         <IconMoon className="icon-xs" />
-                        <span>Qorong‘i rejim</span>
+                        <span>{t.theme_dark}</span>
                         {theme === "dark" && <IconCheck className="icon-xs text-lime" />}
                       </button>
                       <button
@@ -3179,17 +3332,8 @@ export default function Home() {
                         onClick={() => handleThemeChange("light")}
                       >
                         <IconSun className="icon-xs" />
-                        <span>Yorug‘ rejim</span>
+                        <span>{t.theme_light}</span>
                         {theme === "light" && <IconCheck className="icon-xs text-lime" />}
-                      </button>
-                      <button
-                        type="button"
-                        className={`setting-choice-btn ${theme === "system" ? "active" : ""}`}
-                        onClick={() => handleThemeChange("system")}
-                      >
-                        <IconSettings className="icon-xs" />
-                        <span>Tizim sozlamasi</span>
-                        {theme === "system" && <IconCheck className="icon-xs text-lime" />}
                       </button>
                     </div>
                   </div>
@@ -3199,16 +3343,16 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconSparkles className="icon-sm text-lime" />
                       <div>
-                        <h3>Bildirishnomalar va ovoz</h3>
-                        <p>Amallarni bajarishdagi tovushli eslatmalar</p>
+                        <h3>{t.setting_sounds}</h3>
+                        <p>{t.setting_sounds_sub}</p>
                       </div>
                     </div>
                     <div className="settings-toggle-row">
-                      <span>Vazifa bajarilganda tovushli signal</span>
+                      <span>{t.setting_sounds_sub}</span>
                       <button
                         type="button"
                         className={`toggle-switch-btn ${soundEnabled ? "on" : "off"}`}
-                        onClick={() => setSoundEnabled((prev) => !prev)}
+                        onClick={() => handleSoundToggle(!soundEnabled)}
                         aria-label="Tovushni yoqish yoki o‘chirish"
                       >
                         <span className="toggle-slider" />
@@ -3221,9 +3365,20 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconBell className="icon-sm text-lime" />
                       <div>
-                        <h3>Push bildirishnomalar</h3>
-                        <p>Qurilmangiz ekraniga muhim eslatma va tavsiyalar yetkazish</p>
+                        <h3>{t.setting_notifs}</h3>
+                        <p>{t.setting_notifs_sub}</p>
                       </div>
+                    </div>
+                    <div className="settings-toggle-row">
+                      <span>{t.setting_notifs_sub}</span>
+                      <button
+                        type="button"
+                        className={`toggle-switch-btn ${notificationsEnabled ? "on" : "off"}`}
+                        onClick={() => handleNotificationsToggle(!notificationsEnabled)}
+                        aria-label="Bildirishnomalarni yoqish yoki o‘chirish"
+                      >
+                        <span className="toggle-slider" />
+                      </button>
                     </div>
                     <div className="settings-toggle-row">
                       <span>Brauzer bildirishnomalari</span>
@@ -3243,8 +3398,8 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconHash className="icon-sm text-lime" />
                       <div>
-                        <h3>Sanoqli hisoblagich bosqichlari</h3>
-                        <p>Kunlik sanoqli vazifalardagi tezkor hisoblash tugmalari (+10, +5, +1...)</p>
+                        <h3>{t.setting_counter}</h3>
+                        <p>{t.setting_counter_sub}</p>
                       </div>
                     </div>
 
@@ -3299,7 +3454,7 @@ export default function Home() {
                           onClick={handleAddCounterStep}
                         >
                           <IconPlus className="icon-xs" />
-                          <span>Qo‘shish</span>
+                          <span>{t.btn_add}</span>
                         </button>
                         <button
                           type="button"
@@ -3307,7 +3462,7 @@ export default function Home() {
                           onClick={handleResetCounterSteps}
                           title="Standart (+10, +5, +1) qadamlarni tiklash"
                         >
-                          Standartga qaytarish
+                          {t.btn_reset}
                         </button>
                       </div>
 
@@ -3317,8 +3472,19 @@ export default function Home() {
                         </p>
                       )}
                       <p className="step-hint">
-                        Maksimal qadam qiymati: 99. Har bir qadam takrorlanmas va 1 dan 99 gacha bo‘lishi lozim.
+                        {t.step_hint}
                       </p>
+                    </div>
+                  </div>
+
+                  {/* Auto-archive setting */}
+                  <div className="settings-card">
+                    <div className="settings-card-header">
+                      <IconArchive className="icon-sm text-lime" />
+                      <div>
+                        <h3>Arxivlash tartibi</h3>
+                        <p>Tugallangan rejalarni avtomatik arxivlash ({autoArchiveDelay} kun)</p>
+                      </div>
                     </div>
                   </div>
 
@@ -3378,7 +3544,7 @@ export default function Home() {
             onClick={() => setActiveTab("today")}
           >
             <IconCalendar className="bottom-nav-icon" />
-            <span>Bugun</span>
+            <span>{t.tab_today}</span>
           </button>
 
           <button
@@ -3387,7 +3553,7 @@ export default function Home() {
             onClick={() => setActiveTab("activities")}
           >
             <IconList className="bottom-nav-icon" />
-            <span>Katalog</span>
+            <span>{t.tab_activities}</span>
           </button>
 
           {/* Center Floating Plus Button */}
@@ -3407,7 +3573,7 @@ export default function Home() {
             onClick={() => setActiveTab("notifications")}
           >
             <IconBell className="bottom-nav-icon" />
-            <span>Xabarlar</span>
+            <span>{t.tab_notifications}</span>
             {unreadNotifsCount > 0 && <span className="mobile-unread-dot" />}
           </button>
 
@@ -3417,7 +3583,7 @@ export default function Home() {
             onClick={() => setActiveTab("profile")}
           >
             <IconUser className="bottom-nav-icon" />
-            <span>Profil</span>
+            <span>{t.tab_profile}</span>
           </button>
         </nav>
       </div>
