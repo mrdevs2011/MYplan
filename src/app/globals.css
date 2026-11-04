@@ -3660,19 +3660,19 @@ select:focus-visible {
    TAB 2: FAOLIYATLAR KATALOGI (CATALOG ONLY — NO EXECUTION)
    ========================================================================== */
 .catalog-filters-bar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  padding: 4px;
-  border-radius: 12px;
+  padding: 6px;
+  border-radius: 9999px !important;
 }
 
 .catalog-filter-btn {
-  padding: 8px 14px;
-  border-radius: 9px;
-  font-size: 12px;
+  padding: 10px 18px;
+  border-radius: 9999px !important;
+  font-size: 13px;
   font-weight: 650;
   color: var(--text-secondary);
   background: transparent;
@@ -3701,19 +3701,25 @@ select:focus-visible {
 
 .catalog-search-wrap .search-icon {
   position: absolute;
-  left: 16px;
+  left: 20px;
   color: var(--text-muted);
   pointer-events: none;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
 }
 
 .catalog-search-input {
   width: 100%;
-  padding: 13px 44px 13px 44px;
-  border-radius: 14px;
+  padding-left: 54px !important;
+  padding-right: 50px !important;
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+  border-radius: 9999px !important;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px !important;
   transition: all var(--dur-fast);
 }
 
@@ -7409,6 +7415,7 @@ select:focus-visible {
 .btn-add-account-action,
 .setting-choice-btn,
 .time-filter-chip,
+.catalog-filters-bar,
 .catalog-filter-btn,
 .weekday-preset-chip,
 .duration-preset-btn,
@@ -7431,11 +7438,10 @@ select:focus-visible {
   border-radius: 9999px !important;
 }
 
-/* 3. Inputs, Selects & Search Bars: Stadium Pill with Generous Sizing */
+/* 3. Inputs, Selects: Stadium Pill with Generous Sizing */
 .modal-form input:not([type="checkbox"]):not([type="radio"]),
 .modal-form select,
 .profile-input,
-.catalog-search-input,
 .custom-duration-input-row input,
 .custom-duration-input-row select,
 .count-input-row input,
@@ -7446,6 +7452,36 @@ select:focus-visible {
   border-radius: 9999px !important;
   padding: 12px 22px !important;
   font-size: 15px !important;
+}
+
+/* Dedicated Search Input & Icon: Icon positioned cleanly, generous padding-left avoids any text overlap */
+.catalog-search-wrap .search-icon {
+  position: absolute !important;
+  left: 20px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 18px !important;
+  height: 18px !important;
+  z-index: 2 !important;
+  pointer-events: none !important;
+}
+
+.catalog-search-input {
+  min-height: 54px !important;
+  border-radius: 9999px !important;
+  padding-left: 54px !important;
+  padding-right: 50px !important;
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+  font-size: 15px !important;
+}
+
+/* Outer Filter Container: Pure Stadium Pill (No sharp corners on outer box) */
+.catalog-filters-bar {
+  display: inline-flex !important;
+  align-items: center !important;
+  border-radius: 9999px !important;
+  padding: 6px !important;
 }
 
 textarea.profile-input,
@@ -7574,6 +7610,13 @@ textarea.modal-input {
 [data-theme="light"] .floating-modal-box {
   border-radius: 32px !important;
   box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05) !important;
+}
+
+[data-theme="light"] .catalog-filters-bar {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  border-radius: 9999px !important;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04) !important;
 }
 
 [data-theme="light"] .setting-choice-btn.active,
