@@ -2590,23 +2590,50 @@ select:focus-visible {
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  display: grid;
-  place-items: center;
-  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: fadeIn 0.2s ease;
 }
 
 .floating-modal-box {
   width: 100%;
-  max-width: 520px;
+  max-width: 530px;
+  max-height: min(88vh, 800px);
+  margin: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
   background: var(--bg-surface);
   border: 1px solid var(--border-active);
   border-radius: 22px;
-  padding: 30px;
+  padding: 28px 24px;
   box-shadow: 0 25px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(180, 240, 76, 0.15) inset;
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
+}
+
+.floating-modal-box::-webkit-scrollbar {
+  width: 6px;
+}
+
+.floating-modal-box::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.floating-modal-box::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 6px;
+}
+
+.floating-modal-box::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-lime);
 }
 
 @keyframes modalPop {
@@ -3783,7 +3810,39 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 4px;
+}
+
+.btn-catalog-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(180, 240, 76, 0.08);
+  border: 1px solid rgba(180, 240, 76, 0.25);
+  color: var(--accent-lime);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.btn-catalog-edit:hover {
+  background: rgba(180, 240, 76, 0.18);
+  border-color: var(--accent-lime);
+}
+
+[data-theme="light"] .btn-catalog-edit {
+  background: rgba(101, 163, 13, 0.1);
+  border-color: rgba(101, 163, 13, 0.28);
+  color: #4d7c0f;
+}
+
+[data-theme="light"] .btn-catalog-edit:hover {
+  background: rgba(101, 163, 13, 0.18);
+  border-color: #65a30d;
 }
 
 .btn-catalog-archive {
@@ -6110,6 +6169,11 @@ select:focus-visible {
   border: 1px solid rgba(15, 23, 42, 0.12) !important;
   box-shadow: 0 25px 70px rgba(15, 23, 42, 0.18) !important;
   color: #0f172a !important;
+  scrollbar-color: rgba(15, 23, 42, 0.2) transparent !important;
+}
+
+[data-theme="light"] .floating-modal-box::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.2) !important;
 }
 
 [data-theme="light"] .modal-header h3 {

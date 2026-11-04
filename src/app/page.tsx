@@ -277,8 +277,9 @@ export default function Home() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
 
-  // Floating Modal for Task Creation
+  // Floating Modal for Task Creation & Editing
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [createTaskKind, setCreateTaskKind] = useState<"check" | "count">("check");
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
@@ -462,10 +463,23 @@ export default function Home() {
     }
   }, []);
 
-  // Timer to keep session countdowns and timestamps reactive
+  // Timer to keep session countdowns and timestamps reactive (RAM & CPU optimized: only on profile/settings)
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 30000);
-    return () => clearInterval(timer);
+    if (activeTab !== "profile" && activeTab !== "settings") return;
+    const initTimer = setTimeout(() => setCurrentTime(Date.now()), 0);
+    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+    return () => {
+      clearTimeout(initTimer);
+      clearInterval(timer);
+    };
+  }, [activeTab]);
+
+  // Clean up counter collapse timers on unmount to prevent leaks
+  useEffect(() => {
+    const timers = counterTimersRef.current;
+    return () => {
+      Object.values(timers).forEach((timer) => clearTimeout(timer));
+    };
   }, []);
 
   const formatRemainingTime = useCallback((ms: number): string => {
@@ -759,12 +773,15 @@ export default function Home() {
         setOccurrences(existingOccs);
       }
 
-      // Restore saved counts from local storage & cloud progress events
+      // Restore saved counts from local storage & cloud progress events with strict target boundary clamping
       const initialCounts: Record<string, number> = {};
       existingOccs.forEach((occ) => {
+        const act = activityRows?.find((a) => a.id === occ.activity_id);
+        const target = act?.target || 0;
         const saved = localStorage.getItem(`myplan_count_${occ.id}`);
         if (saved !== null) {
-          initialCounts[occ.id] = parseInt(saved, 10) || 0;
+          const parsed = parseInt(saved, 10) || 0;
+          initialCounts[occ.id] = target > 0 ? Math.min(Math.max(0, parsed), target) : Math.max(0, parsed);
         }
       });
 
@@ -782,8 +799,12 @@ export default function Home() {
               serverTotals[pe.occurrence_id] = (serverTotals[pe.occurrence_id] || 0) + Number(pe.amount);
             });
             Object.keys(serverTotals).forEach((occId) => {
+              const occ = existingOccs.find((o) => o.id === occId);
+              const act = activityRows?.find((a) => a.id === occ?.activity_id);
+              const cap = act?.target ? act.target : Infinity;
               const local = initialCounts[occId] || 0;
-              initialCounts[occId] = Math.max(local, Math.max(0, serverTotals[occId]));
+              const serverVal = Math.max(0, serverTotals[occId]);
+              initialCounts[occId] = Math.min(Math.max(local, serverVal), cap);
             });
           }
         }
@@ -1252,16 +1273,55 @@ export default function Home() {
     };
   }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices]);
 
+  const resetModalState = useCallback(() => {
+    setEditingActivity(null);
+    setNewTitle("");
+    setNewDescription("");
+    setCountTarget("");
+    setCountUnit("marta");
+    setDurationPreset("1_month");
+    setCustomDurationValue("");
+    setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
+    setNewTimeOfDay("anytime");
+    setDebouncedDurationError("");
+    setDebouncedCountError("");
+    setCreateTaskKind("check");
+    setShowCreateModal(false);
+  }, []);
+
+  const openCreateModal = useCallback(() => {
+    resetModalState();
+    setShowCreateModal(true);
+  }, [resetModalState]);
+
+  const openEditModal = useCallback((act: Activity) => {
+    setEditingActivity(act);
+    setNewTitle(act.title);
+    setNewDescription(act.description || "");
+    setCreateTaskKind(act.measurement_type);
+    setCountTarget(act.target ? String(act.target) : "");
+    setCountUnit(act.unit || "marta");
+    setNewTimeOfDay(act.time_of_day || "anytime");
+    if (act.schedule_rule?.duration_preset) {
+      setDurationPreset(act.schedule_rule.duration_preset as DurationPreset);
+    }
+    if (act.schedule_rule?.weekdays && Array.isArray(act.schedule_rule.weekdays)) {
+      setSelectedWeekdays(act.schedule_rule.weekdays);
+    }
+    setNewSchedule(act.schedule_type || "daily");
+    setShowCreateModal(true);
+  }, []);
+
   // Close modal on Escape
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && showCreateModal) {
-        setShowCreateModal(false);
+        resetModalState();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showCreateModal]);
+  }, [showCreateModal, resetModalState]);
 
   // PWA Install handler
   const handleInstallApp = async () => {
@@ -1315,12 +1375,12 @@ export default function Home() {
   // Counter Increment (+1, +5, +10...) with 10-Second Inactivity Collapse Logic
   async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
     if (!userId) return;
-    const current = taskCounts[occurrence.id] || 0;
     const target = activity.target || 0;
-    const actualAdd = Math.min(amount, target - current);
+    const current = Math.min(taskCounts[occurrence.id] || 0, target > 0 ? target : Infinity);
+    const actualAdd = target > 0 ? Math.min(amount, Math.max(0, target - current)) : amount;
     if (actualAdd <= 0) return;
 
-    const next = current + actualAdd;
+    const next = target > 0 ? Math.min(current + actualAdd, target) : current + actualAdd;
 
     // Reset collapsed state so hidden buttons retain their space
     setCollapsedCounters((prev) => ({ ...prev, [occurrence.id]: false }));
@@ -1402,7 +1462,8 @@ export default function Home() {
     triggerHaptic("warning");
     const lastAdd = history[history.length - 1];
     const newHistory = history.slice(0, -1);
-    const current = taskCounts[occurrence.id] || 0;
+    const target = activity.target || 0;
+    const current = Math.min(taskCounts[occurrence.id] || 0, target > 0 ? target : Infinity);
     const next = Math.max(0, current - lastAdd);
 
     // Cancel 10s timer and un-collapse space immediately on undo
@@ -1748,35 +1809,52 @@ export default function Home() {
     setMessage("");
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("activities").insert({
-        user_id: userId,
-        title: newTitle.trim(),
-        description: newDescription.trim(),
-        schedule_type: newSchedule,
-        time_of_day: newTimeOfDay,
-        schedule_rule: {
-          duration_label: durationLabel,
-          duration_days: durationDays,
-          duration_preset: durationPreset,
-          weekdays: selectedWeekdays,
-        },
-        measurement_type: createTaskKind,
-        target: targetValue,
-        unit: unitValue,
-        starts_on: today(),
-        ends_on: endsOnStr,
-      });
-      if (error) throw error;
-      setNewTitle("");
-      setNewDescription("");
-      setCountTarget("");
-      setDurationPreset("1_month");
-      setCustomDurationValue("");
-      setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
-      setNewTimeOfDay("anytime");
-      setDebouncedDurationError("");
-      setCreateTaskKind("check");
-      setShowCreateModal(false);
+      if (editingActivity) {
+        const { error } = await supabase
+          .from("activities")
+          .update({
+            title: newTitle.trim(),
+            description: newDescription.trim(),
+            schedule_type: newSchedule,
+            time_of_day: newTimeOfDay,
+            schedule_rule: {
+              ...(editingActivity.schedule_rule || {}),
+              duration_label: durationLabel,
+              duration_days: durationDays,
+              duration_preset: durationPreset,
+              weekdays: selectedWeekdays,
+            },
+            measurement_type: createTaskKind,
+            target: targetValue,
+            unit: unitValue,
+            ends_on: endsOnStr,
+          })
+          .eq("id", editingActivity.id)
+          .eq("user_id", userId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("activities").insert({
+          user_id: userId,
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+          schedule_type: newSchedule,
+          time_of_day: newTimeOfDay,
+          schedule_rule: {
+            duration_label: durationLabel,
+            duration_days: durationDays,
+            duration_preset: durationPreset,
+            weekdays: selectedWeekdays,
+          },
+          measurement_type: createTaskKind,
+          target: targetValue,
+          unit: unitValue,
+          starts_on: today(),
+          ends_on: endsOnStr,
+        });
+        if (error) throw error;
+      }
+
+      resetModalState();
       await loadWorkspace(userId);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Faoliyatni saqlashda xatolik yuz berdi.");
@@ -2011,13 +2089,13 @@ export default function Home() {
           </button>
         </aside>
       )}
-      {/* Floating Modal for Task Creation (Popup Dialog) */}
+      {/* Floating Modal for Task Creation & Editing (Popup Dialog) */}
       {showCreateModal && (
         <div
           className="floating-modal-backdrop"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setShowCreateModal(false);
+              resetModalState();
             }
           }}
           role="dialog"
@@ -2028,14 +2106,14 @@ export default function Home() {
             <div className="modal-header">
               <div>
                 <span className="modal-badge">
-                  <IconPlus className="icon-xs" /> {t.modal_kicker}
+                  {editingActivity ? <IconEdit className="icon-xs" /> : <IconPlus className="icon-xs" />} {editingActivity ? t.edit_activity_kicker : t.modal_kicker}
                 </span>
-                <h3 id="modal-title">{t.modal_title}</h3>
+                <h3 id="modal-title">{editingActivity ? t.edit_activity_title : t.modal_title}</h3>
               </div>
               <button
                 type="button"
                 className="modal-close-btn"
-                onClick={() => setShowCreateModal(false)}
+                onClick={resetModalState}
                 aria-label={t.btn_cancel}
                 title={`${t.btn_cancel} (Esc)`}
               >
@@ -2365,7 +2443,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="btn-modal-cancel"
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={resetModalState}
                 >
                   {t.btn_cancel}
                 </button>
@@ -2374,7 +2452,7 @@ export default function Home() {
                   className="btn-modal-submit"
                   disabled={isSaveDisabled}
                 >
-                  {busy ? t.btn_saving : t.btn_save_activity}
+                  {busy ? t.btn_saving : editingActivity ? t.btn_save_changes : t.btn_save_activity}
                 </button>
               </div>
             </form>
@@ -2566,7 +2644,7 @@ export default function Home() {
             className="sidebar-add-task-btn"
             onClick={(e) => {
               e.stopPropagation();
-              setShowCreateModal(true);
+              openCreateModal();
               setMobileMenuOpen(false);
             }}
             aria-label={t.btn_new_plan}
@@ -3035,7 +3113,8 @@ export default function Home() {
                       const occ = occurrences.find((o) => o.activity_id === activity.id);
                       const isDone = occ?.status === "completed";
                       const target = activity.target || 0;
-                      const current = taskCounts[occ?.id || ""] ?? (isDone ? target : 0);
+                      const rawCount = taskCounts[occ?.id || ""] ?? (isDone ? target : 0);
+                      const current = target > 0 ? Math.min(Math.max(0, rawCount), target) : Math.max(0, rawCount);
                       const remaining = Math.max(target - current, 0);
 
                       // 10s inactivity collapse state
@@ -3310,6 +3389,14 @@ export default function Home() {
                         </div>
 
                         <div className="catalog-card-actions">
+                          <button
+                            type="button"
+                            className="btn-catalog-edit"
+                            onClick={() => openEditModal(act)}
+                          >
+                            <IconEdit className="icon-xs" />
+                            <span>{t.btn_edit}</span>
+                          </button>
                           <button
                             type="button"
                             className={`btn-catalog-archive ${!act.is_active ? "unarchive" : ""}`}
@@ -4136,7 +4223,7 @@ export default function Home() {
           <button
             type="button"
             className="bottom-nav-create"
-            onClick={() => setShowCreateModal(true)}
+            onClick={openCreateModal}
             aria-label="Vazifa qo‘shish"
             title="Vazifa qo‘shish"
           >

@@ -150,6 +150,7 @@ export const translations = {
     opt_repeat_daily: "Har kuni takrorlansin",
     btn_cancel: "Bekor qilish",
     btn_save_activity: "Rejani saqlash",
+    btn_save_changes: "O‘zgarishlarni saqlash",
     btn_saving: "Saqlanmoqda…",
 
     // Task Item & Cards
@@ -198,6 +199,9 @@ export const translations = {
     catalog_search_placeholder: "Faoliyatlarni qidirish…",
     tab_active_plans: "Faol rejalar",
     tab_archived_plans: "Arxivlangan",
+    btn_edit: "Tahrirlash",
+    edit_activity_kicker: "TAHRIRLASH",
+    edit_activity_title: "Faoliyatni tahrirlash",
     btn_archive: "Arxivlash",
     btn_restore: "Tiklash",
     btn_delete: "O‘chirish",
@@ -372,6 +376,7 @@ export const translations = {
     opt_repeat_daily: "Repeat every day",
     btn_cancel: "Cancel",
     btn_save_activity: "Save Activity",
+    btn_save_changes: "Save Changes",
     btn_saving: "Saving…",
 
     // Task Item & Cards
@@ -420,6 +425,9 @@ export const translations = {
     catalog_search_placeholder: "Search activities…",
     tab_active_plans: "Active Plans",
     tab_archived_plans: "Archived",
+    btn_edit: "Edit",
+    edit_activity_kicker: "EDIT",
+    edit_activity_title: "Edit Activity",
     btn_archive: "Archive",
     btn_restore: "Restore",
     btn_delete: "Delete",
@@ -594,6 +602,7 @@ export const translations = {
     opt_repeat_daily: "Повторять каждый день",
     btn_cancel: "Отмена",
     btn_save_activity: "Сохранить цель",
+    btn_save_changes: "Сохранить изменения",
     btn_saving: "Сохранение…",
 
     // Task Item & Cards
@@ -642,6 +651,9 @@ export const translations = {
     catalog_search_placeholder: "Поиск привычек…",
     tab_active_plans: "Активные планы",
     tab_archived_plans: "В архиве",
+    btn_edit: "Редактировать",
+    edit_activity_kicker: "РЕДАКТИРОВАНИЕ",
+    edit_activity_title: "Редактировать привычку",
     btn_archive: "В архив",
     btn_restore: "Восстановить",
     btn_delete: "Удалить",
