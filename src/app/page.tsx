@@ -34,6 +34,9 @@ import {
   IconSparkles,
   IconBell,
   IconUserPlus,
+  IconFlame,
+  IconSunrise,
+  IconWifiOff,
 } from "@/components/icons";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -106,6 +109,7 @@ interface Activity {
   title: string;
   description: string | null;
   schedule_type: "daily" | "once";
+  time_of_day?: "morning" | "afternoon" | "evening" | "anytime";
   schedule_rule?: {
     duration_label?: string;
     duration_days?: number;
@@ -159,6 +163,19 @@ function playCompletionSound() {
       osc.start(now + idx * 0.08);
       osc.stop(now + idx * 0.08 + 0.36);
     });
+  } catch {
+    // Non-blocking fallback
+  }
+}
+
+function triggerHaptic(type: "light" | "medium" | "heavy" | "success" | "warning" = "light") {
+  if (typeof window === "undefined" || !("vibrate" in navigator)) return;
+  try {
+    if (type === "light") navigator.vibrate(10);
+    else if (type === "medium") navigator.vibrate(20);
+    else if (type === "heavy") navigator.vibrate(35);
+    else if (type === "success") navigator.vibrate([20, 50, 40]);
+    else if (type === "warning") navigator.vibrate([30, 40, 20]);
   } catch {
     // Non-blocking fallback
   }
@@ -235,6 +252,30 @@ export default function Home() {
   const [newStepInput, setNewStepInput] = useState("");
   const [newStepError, setNewStepError] = useState("");
 
+  // Pocket Companion: Streak & Momentum Engine
+  const [streakCount, setStreakCount] = useState<number>(0);
+  const [bestStreak, setBestStreak] = useState<number>(0);
+
+  // Pocket Companion: Vaqt Zonalari (Morning, Afternoon, Evening, Anytime)
+  const [activeTimeFilter, setActiveTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening">("all");
+  const [newTimeOfDay, setNewTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "anytime">("anytime");
+
+  // Pocket Companion: Offline-First Sync Queue
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+
+  // Pocket Companion: Kechki 2-daqiqalik xulosa (Daily Wrap-up)
+  const [showEveningReview, setShowEveningReview] = useState<boolean>(false);
+
+  // Pocket Companion: Touch Gestures (Swipe to complete/undo)
+  const [swipeState, setSwipeState] = useState<{ id: string | null; offset: number; action: "complete" | "undo" | null }>({
+    id: null,
+    offset: 0,
+    action: null,
+  });
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lastTapRef = useRef<{ id: string; time: number } | null>(null);
+
   // Debounce task count target in modal (2 seconds)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -310,16 +351,81 @@ export default function Home() {
   const counterTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [formattedToday, setFormattedToday] = useState("");
 
+  // Offline Sync Queue Helper
+  const enqueueOfflineMutation = useCallback((mutation: { type: string; payload: Record<string, unknown> }) => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem("myplan_offline_sync_queue");
+      const queue = raw ? JSON.parse(raw) : [];
+      queue.push({
+        ...mutation,
+        id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        createdAt: Date.now(),
+      });
+      localStorage.setItem("myplan_offline_sync_queue", JSON.stringify(queue));
+      setTimeout(() => {
+        setPendingSyncCount(queue.length);
+      }, 0);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const processOfflineQueue = useCallback(async () => {
+    if (typeof window === "undefined" || !navigator.onLine) return;
+    try {
+      const raw = localStorage.getItem("myplan_offline_sync_queue");
+      if (!raw) return;
+      const queue = JSON.parse(raw);
+      if (!Array.isArray(queue) || queue.length === 0) return;
+
+      const supabase = createClient();
+      for (const item of queue) {
+        if (item.type === "occurrence_status") {
+          await supabase
+            .from("occurrences")
+            .update({ status: item.payload.status })
+            .eq("id", item.payload.id)
+            .eq("user_id", item.payload.user_id);
+        } else if (item.type === "progress_event") {
+          await supabase.from("progress_events").insert({
+            user_id: item.payload.user_id,
+            occurrence_id: item.payload.occurrence_id,
+            amount: item.payload.amount,
+            note: item.payload.note,
+          });
+        } else if (item.type === "update_streak") {
+          await supabase
+            .from("profiles")
+            .update({
+              streak_count: item.payload.streak_count,
+              best_streak: item.payload.best_streak,
+              last_active_date: item.payload.last_active_date,
+            })
+            .eq("id", item.payload.user_id);
+        }
+      }
+      localStorage.removeItem("myplan_offline_sync_queue");
+      setPendingSyncCount(0);
+    } catch {
+      // Retry on next sync
+    }
+  }, []);
+
   // Load Workspace Data
   const loadWorkspace = useCallback(async (id: string) => {
     setLoadingData(true);
     const supabase = createClient();
     try {
       const [{ data: profile }, { data: activityRows, error: activityError }] = await Promise.all([
-        supabase.from("profiles").select("username, full_name, age, avatar_url").eq("id", id).maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date")
+          .eq("id", id)
+          .maybeSingle(),
         supabase
           .from("activities")
-          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on")
+          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on,time_of_day")
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
       ]);
@@ -333,6 +439,8 @@ export default function Home() {
         setAccountUsername(profile.username || "");
         if (profile.age) setUserAge(profile.age);
         if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+        if (typeof profile.streak_count === "number") setStreakCount(profile.streak_count);
+        if (typeof profile.best_streak === "number") setBestStreak(profile.best_streak);
       }
 
       // Load today's occurrences using correct PostgreSQL schema
@@ -522,6 +630,15 @@ export default function Home() {
       setDeferredPrompt(null);
     };
 
+    const handleOnline = () => {
+      setIsOnline(true);
+      void processOfflineQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
     if (typeof window !== "undefined") {
       if (
         window.matchMedia("(display-mode: standalone)").matches ||
@@ -655,6 +772,24 @@ export default function Home() {
         setTimeout(() => setPushPermission(Notification.permission), 0);
       }
 
+      // Online / Offline synchronization listeners
+      window.addEventListener("online", handleOnline);
+      window.addEventListener("offline", handleOffline);
+
+      setTimeout(() => {
+        setIsOnline(navigator.onLine);
+        const rawQ = localStorage.getItem("myplan_offline_sync_queue");
+        if (rawQ) {
+          try {
+            const q = JSON.parse(rawQ);
+            setPendingSyncCount(Array.isArray(q) ? q.length : 0);
+          } catch {
+            // ignore
+          }
+        }
+        void processOfflineQueue();
+      }, 0);
+
       // High-performance PWA service worker registration
       if (typeof window !== "undefined" && "serviceWorker" in navigator && process.env.NODE_ENV === "production") {
         navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -668,9 +803,11 @@ export default function Home() {
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
         window.removeEventListener("appinstalled", handleAppInstalled);
+        window.removeEventListener("online", handleOnline);
+        window.removeEventListener("offline", handleOffline);
       }
     };
-  }, [loadWorkspace, router]);
+  }, [loadWorkspace, router, processOfflineQueue]);
 
   // Close modal on Escape
   useEffect(() => {
@@ -704,6 +841,8 @@ export default function Home() {
     if (!occ) return;
 
     const nextStatus = occ.status === "completed" ? "pending" : "completed";
+    triggerHaptic(nextStatus === "completed" ? "success" : "medium");
+
     setOccurrences((curr) =>
       curr.map((item) => (item.id === occ.id ? { ...item, status: nextStatus } : item))
     );
@@ -722,7 +861,11 @@ export default function Home() {
       const supabase = createClient();
       await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
     } catch (err) {
-      console.warn("Occ status update failed:", err);
+      console.warn("Occ status update queued offline:", err);
+      enqueueOfflineMutation({
+        type: "occurrence_status",
+        payload: { id: occ.id, user_id: userId, status: nextStatus },
+      });
     }
   }
 
@@ -760,6 +903,8 @@ export default function Home() {
 
     // Auto complete when target is reached
     const reachedTarget = next >= target && occurrence.status !== "completed";
+    triggerHaptic(reachedTarget ? "success" : "light");
+
     if (reachedTarget) {
       setOccurrences((curr) =>
         curr.map((item) => (item.id === occurrence.id ? { ...item, status: "completed" } : item))
@@ -769,7 +914,7 @@ export default function Home() {
       }
     }
 
-    // Cloud persistence for progress event and status
+    // Cloud persistence with offline fallback
     try {
       const supabase = createClient();
       await supabase.from("progress_events").insert({
@@ -786,7 +931,22 @@ export default function Home() {
           .eq("user_id", userId);
       }
     } catch (err) {
-      console.warn("Background progress insert error:", err);
+      console.warn("Background progress queued offline:", err);
+      enqueueOfflineMutation({
+        type: "progress_event",
+        payload: {
+          user_id: userId,
+          occurrence_id: occurrence.id,
+          amount: actualAdd,
+          note: `+${actualAdd}`,
+        },
+      });
+      if (reachedTarget) {
+        enqueueOfflineMutation({
+          type: "occurrence_status",
+          payload: { id: occurrence.id, user_id: userId, status: "completed" },
+        });
+      }
     }
   }
 
@@ -796,6 +956,7 @@ export default function Home() {
     const history = taskHistory[occurrence.id] || [];
     if (history.length === 0) return;
 
+    triggerHaptic("warning");
     const lastAdd = history[history.length - 1];
     const newHistory = history.slice(0, -1);
     const current = taskCounts[occurrence.id] || 0;
@@ -837,7 +998,22 @@ export default function Home() {
           .eq("user_id", userId);
       }
     } catch (err) {
-      console.warn("Background undo progress insert error:", err);
+      console.warn("Background undo queued offline:", err);
+      enqueueOfflineMutation({
+        type: "progress_event",
+        payload: {
+          user_id: userId,
+          occurrence_id: occurrence.id,
+          amount: -lastAdd,
+          note: `Qaytarish (-${lastAdd})`,
+        },
+      });
+      if (needsStatusRevert) {
+        enqueueOfflineMutation({
+          type: "occurrence_status",
+          payload: { id: occurrence.id, user_id: userId, status: "pending" },
+        });
+      }
     }
   }
 
@@ -1015,6 +1191,55 @@ export default function Home() {
     setNewStepError("");
   };
 
+  // Pocket Touch Gestures (Swipe to Complete & Quick Actions)
+  const handleTouchStart = (taskId: string, e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    setSwipeState({ id: taskId, offset: 0, action: null });
+  };
+
+  const handleTouchMove = (taskId: string, e: React.TouchEvent) => {
+    if (!touchStartRef.current || swipeState.id !== taskId) return;
+    const touch = e.touches[0];
+    const diffX = touch.clientX - touchStartRef.current.x;
+    const diffY = touch.clientY - touchStartRef.current.y;
+
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 12) {
+      const clamped = Math.max(-90, Math.min(90, diffX));
+      const action = clamped > 45 ? "complete" : clamped < -45 ? "undo" : null;
+      setSwipeState({ id: taskId, offset: clamped, action });
+    }
+  };
+
+  const handleTouchEnd = (activity: Activity, occ: Occurrence | undefined) => {
+    if (swipeState.id === activity.id && occ) {
+      if (swipeState.action === "complete") {
+        void toggleComplete(activity);
+      } else if (swipeState.action === "undo" && activity.measurement_type === "count") {
+        void undoTaskCount(activity, occ);
+      }
+    }
+    setSwipeState({ id: null, offset: 0, action: null });
+    touchStartRef.current = null;
+  };
+
+  const handleCardDoubleTap = useCallback(
+    (activity: Activity, occ: Occurrence | undefined) => {
+      if (activity.measurement_type !== "count" || !occ) return;
+      const now = typeof performance !== "undefined" ? performance.now() : 0;
+      if (lastTapRef.current && lastTapRef.current.id === activity.id && now - lastTapRef.current.time < 350) {
+        const step = counterSteps[0] || 1;
+        triggerHaptic("light");
+        void incrementTaskCount(activity, occ, step);
+        lastTapRef.current = null;
+      } else {
+        lastTapRef.current = { id: activity.id, time: now };
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [counterSteps]
+  );
+
   // Create new activity
   async function createActivity(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1069,6 +1294,7 @@ export default function Home() {
         title: newTitle.trim(),
         description: newDescription.trim(),
         schedule_type: newSchedule,
+        time_of_day: newTimeOfDay,
         schedule_rule: {
           duration_label: durationLabel,
           duration_days: durationDays,
@@ -1088,6 +1314,7 @@ export default function Home() {
       setDurationPreset("1_month");
       setCustomDurationValue("");
       setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
+      setNewTimeOfDay("anytime");
       setDebouncedDurationError("");
       setCreateTaskKind("check");
       setShowCreateModal(false);
@@ -1140,6 +1367,60 @@ export default function Home() {
     [occurrences]
   );
   const percent = activeActivities.length ? Math.round((completedCount / activeActivities.length) * 100) : 0;
+
+  const timeCounts = useMemo(() => {
+    return {
+      all: activeActivities.length,
+      morning: activeActivities.filter((a) => a.time_of_day === "morning").length,
+      afternoon: activeActivities.filter((a) => a.time_of_day === "afternoon").length,
+      evening: activeActivities.filter((a) => a.time_of_day === "evening").length,
+    };
+  }, [activeActivities]);
+
+  const displayedActivities = useMemo(() => {
+    if (activeTimeFilter === "all") return activeActivities;
+    return activeActivities.filter((a) => a.time_of_day === activeTimeFilter);
+  }, [activeActivities, activeTimeFilter]);
+
+  // Streak Verification: When all today's plans are completed, strengthen the chain!
+  useEffect(() => {
+    if (!userId || activeActivities.length === 0 || percent < 100) return;
+    const todayStr = today();
+    const storedDate = typeof window !== "undefined" ? localStorage.getItem(`myplan_last_streak_date_${userId}`) : null;
+    if (storedDate === todayStr) return;
+
+    const newStreak = streakCount + 1;
+    const newBest = Math.max(bestStreak, newStreak);
+
+    const timer = setTimeout(() => {
+      setStreakCount(newStreak);
+      setBestStreak(newBest);
+    }, 0);
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`myplan_last_streak_date_${userId}`, todayStr);
+    }
+    triggerHaptic("success");
+
+    try {
+      const supabase = createClient();
+      void supabase
+        .from("profiles")
+        .update({
+          streak_count: newStreak,
+          best_streak: newBest,
+          last_active_date: todayStr,
+        })
+        .eq("id", userId);
+    } catch {
+      enqueueOfflineMutation({
+        type: "update_streak",
+        payload: { user_id: userId, streak_count: newStreak, best_streak: newBest, last_active_date: todayStr },
+      });
+    }
+
+    return () => clearTimeout(timer);
+  }, [userId, percent, activeActivities.length, streakCount, bestStreak, enqueueOfflineMutation]);
 
   // Filtered Activities for Management Catalog (Tab 2)
   const filteredCatalogActivities = useMemo(() => {
@@ -1352,6 +1633,60 @@ export default function Home() {
                 />
               </div>
 
+              {/* Kunning vaqt zonasi (Time of Day) */}
+              <div className="form-group time-of-day-picker-group">
+                <div className="field-label-row">
+                  <span>Kunning qaysi vaqti uchun?</span>
+                  <span className="field-sub-hint">Intizom va tartib uchun</span>
+                </div>
+                <div className="time-of-day-grid" role="radiogroup" aria-label="Kunning vaqti">
+                  <button
+                    type="button"
+                    className={`time-choice-btn ${newTimeOfDay === "morning" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setNewTimeOfDay("morning");
+                    }}
+                  >
+                    <IconSunrise className="icon-xs" />
+                    <span>Tong (05:00 - 12:00)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-choice-btn ${newTimeOfDay === "afternoon" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setNewTimeOfDay("afternoon");
+                    }}
+                  >
+                    <IconSun className="icon-xs" />
+                    <span>Kunduz (12:00 - 18:00)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-choice-btn ${newTimeOfDay === "evening" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setNewTimeOfDay("evening");
+                    }}
+                  >
+                    <IconMoon className="icon-xs" />
+                    <span>Kechqurun (18:00 - 23:00)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-choice-btn ${newTimeOfDay === "anytime" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setNewTimeOfDay("anytime");
+                    }}
+                  >
+                    <IconCalendar className="icon-xs" />
+                    <span>Kun davomida</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Muddat (Davomiylik) Tanlovi */}
               <div className="form-group duration-picker-group">
                 <label className="field-label-row">
@@ -1554,6 +1889,97 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Kechki xulosa (Evening Review Modal) */}
+      {showEveningReview && (
+        <div
+          className="floating-modal-backdrop"
+          onClick={() => setShowEveningReview(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="evening-review-title"
+        >
+          <div
+            className="floating-modal-box evening-review-modal-box"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="modal-badge">
+                  <IconMoon className="icon-xs" /> KECHKI SARHISOB
+                </span>
+                <h3 id="evening-review-title">Bugungi kun xulosasi</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowEveningReview(false)}
+                aria-label="Yopish"
+              >
+                <IconClose className="icon-xs" />
+              </button>
+            </div>
+
+            <div className="evening-review-body">
+              <div className="evening-banner-visual">
+                <div className={`streak-flame-icon-wrap large ${streakCount > 0 ? "active-fire" : ""}`}>
+                  <IconFlame className="icon-fire" />
+                </div>
+                <div className="evening-banner-text">
+                  <h4>{percent === 100 ? "Kunlik marra 100% zabt etildi!" : `${percent}% reja bajarildi`}</h4>
+                  <p>
+                    {percent === 100
+                      ? "Ajoyib natija! Bugungi barcha rejalaringizni muvaffaqiyatli yakunladingiz."
+                      : percent >= 70
+                      ? "Juda yaxshi taraqqiyot! Asosiy vazifalaringiz bajarildi."
+                      : "Har bir qadam muhim. Ertangi kunga yanada qat’iyat bilan qadam qo‘ying."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="evening-stats-grid">
+                <div className="evening-stat-item">
+                  <span className="stat-sub">Jami reja</span>
+                  <span className="stat-num">{activeActivities.length}</span>
+                </div>
+                <div className="evening-stat-item highlight">
+                  <span className="stat-sub">Bajarildi</span>
+                  <span className="stat-num">{completedCount}</span>
+                </div>
+                <div className="evening-stat-item">
+                  <span className="stat-sub">Qoldi</span>
+                  <span className="stat-num">{Math.max(activeActivities.length - completedCount, 0)}</span>
+                </div>
+                <div className="evening-stat-item flame">
+                  <span className="stat-sub">Seriya</span>
+                  <span className="stat-num">{streakCount} kun</span>
+                </div>
+              </div>
+
+              <div className="evening-quote-card">
+                <IconSparkles className="icon-xs" />
+                <span>
+                  &ldquo;Muvaffaqiyat — bu har kuni takrorlanadigan kichik intizomlar yig‘indisidir.&rdquo;
+                </span>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-modal-submit w-full"
+                onClick={() => {
+                  triggerHaptic("success");
+                  setShowEveningReview(false);
+                  setMessage("Bugungi kun xulosasi saqlandi. Ertangi kuningiz barakali bo‘lsin!");
+                }}
+              >
+                Ertangi kunga tayyorman
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1839,21 +2265,29 @@ export default function Home() {
             <span>MyPlan</span>
           </button>
 
-          <button
-            type="button"
-            className="mobile-avatar-btn"
-            onClick={() => setActiveTab("profile")}
-            title="Profil"
-          >
-            <div className="mobile-user-avatar">
-              {avatarUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={avatarUrl} alt="Avatar" className="avatar-img" />
-              ) : (
-                (accountName || "M").slice(0, 1).toUpperCase()
-              )}
-            </div>
-          </button>
+          <div className="mobile-topbar-actions">
+            {!isOnline && (
+              <span className="offline-status-pill compact" title="Oflayn rejim — amallar mahalliy saqlanadi">
+                <IconWifiOff className="icon-xs" />
+                <span>Oflayn</span>
+              </span>
+            )}
+            <button
+              type="button"
+              className="mobile-avatar-btn"
+              onClick={() => setActiveTab("profile")}
+              title="Profil"
+            >
+              <div className="mobile-user-avatar">
+                {avatarUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={avatarUrl} alt="Avatar" className="avatar-img" />
+                ) : (
+                  (accountName || "M").slice(0, 1).toUpperCase()
+                )}
+              </div>
+            </button>
+          </div>
         </header>
 
         <main className="content-container">
@@ -1915,6 +2349,13 @@ export default function Home() {
                 </>
               )}
             </div>
+
+            {!isOnline && (
+              <div className="offline-status-pill desktop" title="Internet aloqasi yo‘q. Barcha amallar mahalliy navbatga olinadi va aloqa tiklangach avtomatik sinxronlanadi">
+                <IconWifiOff className="icon-xs" />
+                <span>Oflayn rejim ({pendingSyncCount} ta saqlangan)</span>
+              </div>
+            )}
           </header>
 
           {/* Toast Notification */}
@@ -1935,6 +2376,47 @@ export default function Home() {
           {/* TAB 1: BUGUNGI REJA (EXECUTION ONLY) */}
           {activeTab === "today" && (
             <div key="tab-today" className="tab-pane-container">
+              {/* POCKET STREAK & MOMENTUM ENGINE BANNER */}
+              <section className="pocket-streak-banner" aria-label="Ketma-ketlik seriyasi">
+                <div className="streak-left">
+                  <div className={`streak-flame-icon-wrap ${streakCount > 0 ? "active-fire" : ""}`}>
+                    <IconFlame className="icon-fire" />
+                  </div>
+                  <div className="streak-info">
+                    <div className="streak-title-row">
+                      <span className="streak-label">KUNLIK SERIYA (STREAK)</span>
+                      {bestStreak > 0 && (
+                        <span className="best-streak-tag">Rekord: {bestStreak} kun</span>
+                      )}
+                    </div>
+                    <div className="streak-number-row">
+                      <span className="streak-number">{streakCount}</span>
+                      <span className="streak-days-text">kun ketma-ket intizom</span>
+                    </div>
+                    <p className="streak-status-hint">
+                      {percent === 100
+                        ? "🎉 Bugungi barcha vazifalar to‘liq bajarildi! Seriyangiz mustahkamlandi."
+                        : streakCount > 0
+                        ? "Bugun 100% bajaring va seriyangizni oshiring!"
+                        : "Bugun barcha rejalarni yakunlab yangi seriyangizni boshlang!"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-evening-review-trigger"
+                  onClick={() => {
+                    triggerHaptic("medium");
+                    setShowEveningReview(true);
+                  }}
+                  title="Kechki hisobotni ko‘rish"
+                >
+                  <IconSparkles className="icon-xs" />
+                  <span>Kechki hisobot</span>
+                </button>
+              </section>
+
               <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
                 <article className="stat-card progress-card">
                   <div className="stat-header">
@@ -1986,6 +2468,57 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Time of Day Filter Bar (Pocket Zone Navigation) */}
+                <div className="time-of-day-filter-bar" role="tablist" aria-label="Kun qismlari bo‘yicha saralash">
+                  <button
+                    type="button"
+                    className={`time-filter-chip ${activeTimeFilter === "all" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setActiveTimeFilter("all");
+                    }}
+                  >
+                    <span>Barchasi</span>
+                    <span className="chip-count">{timeCounts.all}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-filter-chip ${activeTimeFilter === "morning" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setActiveTimeFilter("morning");
+                    }}
+                  >
+                    <IconSunrise className="icon-xs" />
+                    <span>Tong</span>
+                    <span className="chip-count">{timeCounts.morning}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-filter-chip ${activeTimeFilter === "afternoon" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setActiveTimeFilter("afternoon");
+                    }}
+                  >
+                    <IconSun className="icon-xs" />
+                    <span>Kunduz</span>
+                    <span className="chip-count">{timeCounts.afternoon}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`time-filter-chip ${activeTimeFilter === "evening" ? "active" : ""}`}
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setActiveTimeFilter("evening");
+                    }}
+                  >
+                    <IconMoon className="icon-xs" />
+                    <span>Kechqurun</span>
+                    <span className="chip-count">{timeCounts.evening}</span>
+                  </button>
+                </div>
+
                 {loadingData ? (
                   <div className="empty-state-box">
                     <div className="loading-spinner" />
@@ -1999,9 +2532,17 @@ export default function Home() {
                     <h3>Bugun uchun faol vazifalar yo‘q</h3>
                     <p>Yangi vazifa qo‘shish uchun chap paneldagi (yoki pastdagi) <strong>+</strong> tugmasidan foydalaning.</p>
                   </div>
+                ) : displayedActivities.length === 0 ? (
+                  <div className="empty-state-box">
+                    <div className="empty-icon-wrap">
+                      <IconCalendar className="icon-lg" />
+                    </div>
+                    <h3>Bu vaqt qismi uchun vazifalar yo‘q</h3>
+                    <p>Boshqa bo‘limni tanlang yoki yangi vazifa qo‘shganda vaqt zonasini belgilang.</p>
+                  </div>
                 ) : (
                   <div className="task-items-list">
-                    {activeActivities.map((activity) => {
+                    {displayedActivities.map((activity) => {
                       const occ = occurrences.find((o) => o.activity_id === activity.id);
                       const isDone = occ?.status === "completed";
                       const target = activity.target || 0;
@@ -2010,106 +2551,152 @@ export default function Home() {
 
                       // 10s inactivity collapse state
                       const isSpaceCollapsed = Boolean(collapsedCounters[occ?.id || ""]);
+                      const offset = swipeState?.id === activity.id ? swipeState.offset : 0;
 
                       return (
-                        <article
+                        <div
                           key={activity.id}
-                          className={`task-card ${isDone ? "is-completed" : ""}`}
+                          className="task-card-swipe-wrap"
+                          onTouchStart={(e) => handleTouchStart(activity.id, e)}
+                          onTouchMove={(e) => handleTouchMove(activity.id, e)}
+                          onTouchEnd={() => handleTouchEnd(activity, occ)}
+                          onDoubleClick={() => handleCardDoubleTap(activity, occ)}
                         >
-                          <button
-                            type="button"
-                            className="checkbox-btn"
-                            aria-label={isDone ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
-                            onClick={() => void toggleComplete(activity)}
+                          {/* Swipe background action reveal */}
+                          <div
+                            className="swipe-bg swipe-bg-complete"
+                            style={{ opacity: Math.min(Math.max(offset, 0) / 50, 1) }}
+                            aria-hidden="true"
                           >
-                            {isDone && <IconCheck className="checkbox-icon" />}
-                          </button>
+                            <IconCheck className="icon-md" />
+                            <span>Bajarildi</span>
+                          </div>
+                          <div
+                            className="swipe-bg swipe-bg-undo"
+                            style={{ opacity: Math.min(Math.max(-offset, 0) / 50, 1) }}
+                            aria-hidden="true"
+                          >
+                            <IconUndo className="icon-md" />
+                            <span>Qaytarish</span>
+                          </div>
 
-                          <div className="task-content">
-                            <h4 className="task-title">{activity.title}</h4>
-                            {activity.description && (
-                              <p className="task-description">{activity.description}</p>
-                            )}
+                          <article
+                            className={`task-card ${isDone ? "is-completed" : ""}`}
+                            style={{
+                              transform: offset !== 0 ? `translateX(${offset}px)` : undefined,
+                              transition: offset === 0 ? "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)" : "none",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="checkbox-btn"
+                              aria-label={isDone ? "Bajarilmadi deb belgilash" : "Bajarildi deb belgilash"}
+                              onClick={() => void toggleComplete(activity)}
+                            >
+                              {isDone && <IconCheck className="checkbox-icon" />}
+                            </button>
 
-                            {/* Sanoqli progress & Fading Increment Buttons with 10s inactivity collapse */}
-                            {activity.measurement_type === "count" && target > 0 && (
-                              <div className="task-count-progress-wrap">
-                                <div className="task-count-info-row">
-                                  <span className="task-count-text">
-                                    <strong>{current}</strong> / {target} {activity.unit || "marta"}
-                                  </span>
-                                  <span className="task-remaining-text">
-                                    {isDone ? "Bajarildi" : `${remaining} ta qoldi`}
-                                  </span>
-                                </div>
-                                <div className="task-mini-progress-track">
-                                  <div
-                                    className="task-mini-progress-fill"
-                                    style={{ width: `${Math.min((current / target) * 100, 100)}%` }}
-                                  />
-                                </div>
+                            <div className="task-content">
+                              <h4 className="task-title">{activity.title}</h4>
+                              {activity.description && (
+                                <p className="task-description">{activity.description}</p>
+                              )}
 
-                                {/* Increment buttons (+10, +5, +1) + Undo */}
-                                {occ && (
-                                  <div className="count-actions-row">
-                                    <div className="count-buttons-cluster">
-                                      {counterSteps
-                                        .slice()
-                                        .sort((a, b) => b - a)
-                                        .map((step) => {
-                                          const isVisible = remaining >= step && !isDone;
-                                          return (
-                                            <button
-                                              key={step}
-                                              type="button"
-                                              className={`btn-counter-inc ${step === 1 ? "primary" : ""} ${
-                                                isVisible
-                                                  ? "btn-visible"
-                                                  : isSpaceCollapsed
-                                                  ? "btn-hidden-collapsed"
-                                                  : "btn-hidden-hold-space"
-                                              }`}
-                                              onClick={() => void incrementTaskCount(activity, occ, step)}
-                                              title={`${step} ta qo‘shish`}
-                                            >
-                                              +{step}
-                                            </button>
-                                          );
-                                        })}
-                                    </div>
-
-                                    {/* Undo Button */}
-                                    {(taskHistory[occ.id]?.length || 0) > 0 && (
-                                      <button
-                                        type="button"
-                                        className="btn-counter-undo"
-                                        onClick={() => void undoTaskCount(activity, occ)}
-                                        title="Oxirgi amalni qaytarish"
-                                      >
-                                        <IconUndo className="icon-xs" />
-                                        <span>Qaytarish (-{taskHistory[occ.id].slice(-1)[0]})</span>
-                                      </button>
-                                    )}
+                              {/* Sanoqli progress & Fading Increment Buttons with 10s inactivity collapse */}
+                              {activity.measurement_type === "count" && target > 0 && (
+                                <div className="task-count-progress-wrap">
+                                  <div className="task-count-info-row">
+                                    <span className="task-count-text">
+                                      <strong>{current}</strong> / {target} {activity.unit || "marta"}
+                                    </span>
+                                    <span className="task-remaining-text">
+                                      {isDone ? "Bajarildi" : `${remaining} ta qoldi`}
+                                    </span>
                                   </div>
+                                  <div className="task-mini-progress-track">
+                                    <div
+                                      className="task-mini-progress-fill"
+                                      style={{ width: `${Math.min((current / target) * 100, 100)}%` }}
+                                    />
+                                  </div>
+
+                                  {/* Increment buttons (+10, +5, +1) + Undo */}
+                                  {occ && (
+                                    <div className="count-actions-row">
+                                      <div className="count-buttons-cluster">
+                                        {counterSteps
+                                          .slice()
+                                          .sort((a, b) => b - a)
+                                          .map((step) => {
+                                            const isVisible = remaining >= step && !isDone;
+                                            return (
+                                              <button
+                                                key={step}
+                                                type="button"
+                                                className={`btn-counter-inc ${step === 1 ? "primary" : ""} ${
+                                                  isVisible
+                                                    ? "btn-visible"
+                                                    : isSpaceCollapsed
+                                                    ? "btn-hidden-collapsed"
+                                                    : "btn-hidden-hold-space"
+                                                }`}
+                                                onClick={() => void incrementTaskCount(activity, occ, step)}
+                                                title={`${step} ta qo‘shish`}
+                                              >
+                                                +{step}
+                                              </button>
+                                            );
+                                          })}
+                                      </div>
+
+                                      {/* Undo Button */}
+                                      {(taskHistory[occ.id]?.length || 0) > 0 && (
+                                        <button
+                                          type="button"
+                                          className="btn-counter-undo"
+                                          onClick={() => void undoTaskCount(activity, occ)}
+                                          title="Oxirgi amalni qaytarish"
+                                        >
+                                          <IconUndo className="icon-xs" />
+                                          <span>Qaytarish (-{taskHistory[occ.id].slice(-1)[0]})</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="task-meta">
+                                <span className="schedule-badge daily">HAR KUNI</span>
+                                {activity.time_of_day === "morning" && (
+                                  <span className="schedule-badge time-badge morning">
+                                    <IconSunrise className="icon-xs" /> Tong
+                                  </span>
+                                )}
+                                {activity.time_of_day === "afternoon" && (
+                                  <span className="schedule-badge time-badge afternoon">
+                                    <IconSun className="icon-xs" /> Kunduz
+                                  </span>
+                                )}
+                                {activity.time_of_day === "evening" && (
+                                  <span className="schedule-badge time-badge evening">
+                                    <IconMoon className="icon-xs" /> Kechqurun
+                                  </span>
+                                )}
+                                {activity.schedule_rule?.duration_label && (
+                                  <span className="schedule-badge duration">
+                                    {activity.schedule_rule.duration_label.toUpperCase()}
+                                  </span>
+                                )}
+                                {activity.measurement_type === "count" && (
+                                  <span className="task-kind-badge">
+                                    <IconHash className="icon-xs" /> Sanoqli
+                                  </span>
                                 )}
                               </div>
-                            )}
-
-                            <div className="task-meta">
-                              <span className="schedule-badge daily">HAR KUNI</span>
-                              {activity.schedule_rule?.duration_label && (
-                                <span className="schedule-badge duration">
-                                  {activity.schedule_rule.duration_label.toUpperCase()}
-                                </span>
-                              )}
-                              {activity.measurement_type === "count" && (
-                                <span className="task-kind-badge">
-                                  <IconHash className="icon-xs" /> Sanoqli
-                                </span>
-                              )}
                             </div>
-                          </div>
-                        </article>
+                          </article>
+                        </div>
                       );
                     })}
                   </div>
