@@ -19,5 +19,17 @@ schema_paths = []
 enabled = false
 sql_paths = []
 
+[functions.notification-compose]
+verify_jwt = false
+
 [functions.notification-dispatch]
+verify_jwt = false
+
+[functions.notification-public-key]
+verify_jwt = false
+
+[functions.notification-subscribe]
+verify_jwt = false
+
+[functions.notifications]
 verify_jwt = false

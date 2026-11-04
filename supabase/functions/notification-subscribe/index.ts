@@ -7,14 +7,19 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "Unauthorized" }, 401);
   const body = await req.json().catch(() => null);
   if (!body || typeof body.endpoint !== "string" || body.endpoint.length > 4096) return json({ error: "Invalid endpoint" }, 400);
+  const isUnsubscribe = req.method === "DELETE" || body.action === "unsubscribe";
   const admin = adminClient();
   const { data: existingSubscription, error: lookupError } = await admin.from("push_subscriptions").select("id,user_id").eq("endpoint", body.endpoint).maybeSingle();
   if (lookupError) return json({ error: "Could not verify existing subscription" }, 500);
-  if (existingSubscription && existingSubscription.user_id !== user.id) return json({ error: "Subscription belongs to another account" }, 409);
-  if (req.method === "DELETE") {
+  if (existingSubscription && existingSubscription.user_id !== user.id) {
+    if (isUnsubscribe) return json({ ok: true, localOnly: true });
+    return json({ error: "Subscription belongs to another account" }, 409);
+  }
+  if (isUnsubscribe) {
     const { error } = await admin.from("push_subscriptions").delete().eq("user_id", user.id).eq("endpoint", body.endpoint);
     if (error) return json({ error: "Could not remove subscription" }, 500);
-    const { count: remaining } = await admin.from("push_subscriptions").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("is_active", true);
+    const { count: remaining, error: countError } = await admin.from("push_subscriptions").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("is_active", true);
+    if (countError) return json({ error: "Subscription removed but remaining devices could not be checked" }, 500);
     if ((remaining ?? 0) === 0) {
       const { error: prefError } = await admin.from("notification_preferences").upsert({ user_id: user.id, push_enabled: false, updated_at: new Date().toISOString() });
       if (prefError) return json({ error: "Subscription removed but preferences failed" }, 500);

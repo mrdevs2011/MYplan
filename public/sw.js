@@ -19,7 +19,6 @@ self.addEventListener("push", (event) => {
     const visibleClient = openClients.find((client) => client.visibilityState === "visible");
     if (visibleClient) {
       visibleClient.postMessage({ type: "MYPLAN_PUSH", payload });
-      return;
     }
     const options = {
       body: typeof payload.body === "string" ? payload.body : "Senga yangi eslatma bor.",

@@ -353,6 +353,8 @@ export default function Home() {
   const [activeToast, setActiveToast] = useState<MyPlanNotification | null>(null);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   const [pushPermission, setPushPermission] = useState<NotificationPermission>("default");
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
 
   // PWA State
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -1644,7 +1646,10 @@ export default function Home() {
 
       // High-performance PWA service worker registration
       if (typeof window !== "undefined" && "serviceWorker" in navigator && process.env.NODE_ENV === "production") {
-        navigator.serviceWorker.register("/sw.js").catch(() => {});
+        void navigator.serviceWorker.register("/sw.js").then(async (registration) => {
+          const subscription = await registration.pushManager.getSubscription();
+          setPushSubscribed(Boolean(subscription));
+        }).catch((error) => console.warn("Service worker registration failed:", error));
       }
     }
 
@@ -2099,28 +2104,49 @@ export default function Home() {
       alert("Push bildirishnomalari HTTPS orqali ishlaydi.");
       return;
     }
+    if (pushBusy) return;
+    setPushBusy(true);
     try {
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const supabase = createClient();
+
+      if (existing) {
+        const { error } = await supabase.functions.invoke("notification-subscribe", {
+          body: { action: "unsubscribe", endpoint: existing.endpoint },
+        });
+        if (error) throw new Error("Obunani serverdan bekor qilib bo‘lmadi. Qayta urinib ko‘r.");
+        const removed = await existing.unsubscribe();
+        if (!removed) throw new Error("Brauzer obunasini bekor qilib bo‘lmadi.");
+        setPushSubscribed(false);
+        alert("Brauzer bildirishnomalari ushbu qurilma uchun o‘chirildi.");
+        return;
+      }
+
       const permission = await Notification.requestPermission();
       setPushPermission(permission);
       if (permission !== "granted") return;
-      const supabase = createClient();
       const { data: keyData, error: keyError } = await supabase.functions.invoke("notification-public-key", { body: {} });
       if (keyError || !keyData?.publicKey) throw new Error("Push kaliti serverda sozlanmagan.");
       const { publicKey } = keyData as { publicKey: string };
-      const registration = await navigator.serviceWorker.ready;
-      const existing = await registration.pushManager.getSubscription();
-      const subscription = existing || await registration.pushManager.subscribe({
+      const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: Uint8Array.from(atob(publicKey.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(publicKey.length / 4) * 4, "=")), (char) => char.charCodeAt(0)),
       });
       const { error: saveError } = await supabase.functions.invoke("notification-subscribe", {
         body: { ...subscription.toJSON(), userAgent: navigator.userAgent },
       });
-      if (saveError) throw new Error("Qurilma obunasini saqlab bo‘lmadi.");
+      if (saveError) {
+        await subscription.unsubscribe().catch(() => false);
+        throw new Error(saveError.message || "Qurilma obunasini saqlab bo‘lmadi.");
+      }
+      setPushSubscribed(true);
       alert("Tayyor! Endi MYplan muhim eslatmalarni ushbu qurilmaga yubora oladi.");
     } catch (error) {
       console.error("Push subscription failed:", error);
       alert(error instanceof Error ? error.message : "Push sozlashda xatolik yuz berdi.");
+    } finally {
+      setPushBusy(false);
     }
   };
 
@@ -4963,11 +4989,12 @@ export default function Home() {
                       <span>Brauzer bildirishnomalari</span>
                       <button
                         type="button"
-                        className={`setting-choice-btn ${pushPermission === "granted" ? "active" : ""}`}
+                        className={`setting-choice-btn ${pushSubscribed ? "active" : ""}`}
                         onClick={() => void handleRequestPush()}
+                        disabled={pushBusy}
                         style={{ width: "auto", padding: "8px 16px" }}
                       >
-                        {pushPermission === "granted" ? "Ruxsat berilgan" : "Ruxsat berish"}
+                        {pushBusy ? "Kutilmoqda…" : pushSubscribed ? "O‘chirish" : pushPermission === "granted" ? "Yoqish" : "Ruxsat berish"}
                       </button>
                     </div>
                   </div>
