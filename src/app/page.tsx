@@ -2673,7 +2673,8 @@ export default function Home() {
             )}
 
             <form className="modal-form" onSubmit={createActivity}>
-              <div className="form-group">
+              <div className="modal-form-scrollable">
+                <div className="form-group">
                 <label htmlFor="modal-task-title">{t.label_task_name}</label>
                 <input
                   id="modal-task-title"
@@ -3007,8 +3008,9 @@ export default function Home() {
                   <option value="daily">{t.opt_repeat_daily}</option>
                 </select>
               </div>
+            </div>
 
-              <div className="modal-actions">
+            <div className="modal-actions">
                 <button
                   type="button"
                   className="btn-modal-cancel"
