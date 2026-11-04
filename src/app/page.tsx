@@ -788,20 +788,21 @@ export default function Home() {
     // Expose build info & banner in browser console
     if (typeof window !== "undefined") {
       (window as unknown as { myplanVersion: unknown }).myplanVersion = {
-        version: "2.4.0",
-        commit: "e08dc52",
-        updatedAt: "2026-11-04 08:09",
+        version: "2.5.0",
+        commit: "126d92d",
+        updatedAt: "2026-11-04 08:52",
         features: [
-          "Profile editing (Name & Age 3h cooldown, Password 24h cooldown)",
-          "Connected devices with instant 0ms realtime revocation and <3ms boot check",
-          "Exact circle 44px undo button matching +10 +5 +1",
-          "Max 10 counter steps with responsive line wrap",
-          "Vertically centered collapsed sidebar",
+          "Transparent logo everywhere (no black background in light mode)",
+          "Pure light mode ecosystem (all dark cards & toasts converted to clean light theme)",
+          "Notification pill moved further right without overlapping active indicator",
+          "Notification dates realistic (no 2-3 day lag for newly created users)",
+          "Zero-latency Supabase settings sync (language, steps, sound, notifs)",
+          "Network-First PWA Service Worker (prevents stale cache lock)",
         ],
         status: "LATEST_VERSION_ACTIVE",
       };
       console.log(
-        "%c MYPLAN ACTIVE %c v2.4.0 (commit: e08dc52) %c Eng so‘nggi versiya ishlamoqda ",
+        "%c MYPLAN ACTIVE %c v2.5.0 (LATEST) %c Yangi versiya muvaffaqiyatli ishga tushdi ",
         "background: #b4f04c; color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px 0 0 4px;",
         "background: #1e293b; color: #38bdf8; font-weight: 700; padding: 4px 8px;",
         "background: #0f172a; color: #a3e635; font-weight: 600; padding: 4px 8px; border-radius: 0 4px 4px 0;"
