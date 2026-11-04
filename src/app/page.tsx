@@ -44,6 +44,7 @@ import {
   IconLock,
   IconKey,
   IconEdit,
+  IconClock,
 } from "@/components/icons";
 import {
   getOrCreateSessionToken,
@@ -82,6 +83,7 @@ interface MyPlanNotification {
 }
 
 type DurationPreset =
+  | "unlimited"
   | "3_days"
   | "1_week"
   | "2_weeks"
@@ -92,6 +94,11 @@ type DurationPreset =
   | "6_months"
   | "1_year"
   | "custom";
+
+interface CustomTimeSlot {
+  id: string;
+  label: string;
+}
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
 
@@ -110,10 +117,10 @@ interface Activity {
   title: string;
   description: string | null;
   schedule_type: "daily" | "once";
-  time_of_day?: "morning" | "afternoon" | "evening" | "anytime";
+  time_of_day?: string;
   schedule_rule?: {
     duration_label?: string;
-    duration_days?: number;
+    duration_days?: number | null;
     duration_preset?: string;
     weekdays?: number[];
   } | null;
@@ -234,7 +241,7 @@ export default function Home() {
 
   const durationPresets = useMemo(
     () => [
-      { id: "3_days" as const, label: t.preset_3d, days: 3 },
+      { id: "unlimited" as const, label: `∞ ${t.preset_unlimited}`, days: null },
       { id: "1_week" as const, label: t.preset_1w, days: 7 },
       { id: "2_weeks" as const, label: t.preset_2w, days: 14 },
       { id: "3_weeks" as const, label: t.preset_3w, days: 21 },
@@ -276,6 +283,7 @@ export default function Home() {
   // PWA State
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isAppInstalled, setIsAppInstalled] = useState(false);
+  const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
 
   // Floating Modal for Task Creation & Editing
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -288,11 +296,29 @@ export default function Home() {
   const [countUnit, setCountUnit] = useState("marta");
   const [debouncedCountError, setDebouncedCountError] = useState("");
 
-  // Muddat (Davomiylik) sozlamalari
-  const [durationPreset, setDurationPreset] = useState<DurationPreset>("1_month");
+  // Muddat (Davomiylik) sozlamalari — default: "unlimited" (Cheksiz)
+  const [durationPreset, setDurationPreset] = useState<DurationPreset>("unlimited");
   const [customDurationValue, setCustomDurationValue] = useState("");
   const [customDurationUnit, setCustomDurationUnit] = useState<CustomDurationUnit>("kun");
   const [debouncedDurationError, setDebouncedDurationError] = useState("");
+
+  // Custom Time Slots
+  const [customTimeSlots, setCustomTimeSlots] = useState<CustomTimeSlot[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem("myplan_custom_time_slots");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+  const [showCustomTimeModal, setShowCustomTimeModal] = useState<boolean>(false);
+  const [customTimeInput, setCustomTimeInput] = useState<string>("");
+  const [customTimeError, setCustomTimeError] = useState<string>("");
 
   // Hafta kunlari sozlamasi (New modal)
   const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
@@ -307,9 +333,9 @@ export default function Home() {
   const [streakCount, setStreakCount] = useState<number>(0);
   const [bestStreak, setBestStreak] = useState<number>(0);
 
-  // Pocket Companion: Vaqt Zonalari (Morning, Afternoon, Evening, Anytime)
-  const [activeTimeFilter, setActiveTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening">("all");
-  const [newTimeOfDay, setNewTimeOfDay] = useState<"morning" | "afternoon" | "evening" | "anytime">("anytime");
+  // Pocket Companion: Vaqt Zonalari (Morning, Afternoon, Evening, Anytime, Custom)
+  const [activeTimeFilter, setActiveTimeFilter] = useState<string>("all");
+  const [newTimeOfDay, setNewTimeOfDay] = useState<string>("anytime");
 
   // Pocket Companion: Offline-First Sync Queue
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -691,6 +717,27 @@ export default function Home() {
       if (activityError) throw activityError;
       const acts = (activityRows || []) as Activity[];
       setActivities(acts);
+
+      if (acts && acts.length > 0) {
+        setCustomTimeSlots((prev) => {
+          const map = new Map<string, string>(prev.map((s) => [s.id, s.label]));
+          let changed = false;
+          acts.forEach((a) => {
+            if (a.time_of_day && !["morning", "afternoon", "evening", "anytime"].includes(a.time_of_day)) {
+              if (!map.has(a.time_of_day)) {
+                map.set(a.time_of_day, a.time_of_day.replace(/^custom_/, ""));
+                changed = true;
+              }
+            }
+          });
+          if (!changed) return prev;
+          const updated = Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+          if (typeof window !== "undefined") {
+            localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+          }
+          return updated;
+        });
+      }
 
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
@@ -1273,13 +1320,47 @@ export default function Home() {
     };
   }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices]);
 
+  const handleAddCustomTimeSlot = useCallback(() => {
+    const trimmed = customTimeInput.trim();
+    if (!trimmed) {
+      setCustomTimeError(t.field_required || "Vaqt nomini kiriting");
+      return;
+    }
+    const id = `custom_${Date.now()}`;
+    const newSlot: CustomTimeSlot = { id, label: trimmed };
+    setCustomTimeSlots((prev) => {
+      const updated = [...prev, newSlot];
+      if (typeof window !== "undefined") {
+        localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+      }
+      return updated;
+    });
+    setNewTimeOfDay(id);
+    setCustomTimeInput("");
+    setCustomTimeError("");
+    setShowCustomTimeModal(false);
+    triggerHaptic("medium");
+  }, [customTimeInput, t.field_required]);
+
+  const handleDeleteCustomTimeSlot = useCallback((id: string) => {
+    setCustomTimeSlots((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+      }
+      return updated;
+    });
+    setNewTimeOfDay((prev) => (prev === id ? "anytime" : prev));
+    setActiveTimeFilter((prev) => (prev === id ? "all" : prev));
+  }, []);
+
   const resetModalState = useCallback(() => {
     setEditingActivity(null);
     setNewTitle("");
     setNewDescription("");
     setCountTarget("");
     setCountUnit("marta");
-    setDurationPreset("1_month");
+    setDurationPreset("unlimited");
     setCustomDurationValue("");
     setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
     setNewTimeOfDay("anytime");
@@ -1323,18 +1404,28 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showCreateModal, resetModalState]);
 
-  // PWA Install handler
+  // PWA Install handler with full fallback guide modal
   const handleInstallApp = async () => {
-    if (!deferredPrompt) {
-      alert("Ilovani brauzer menyusi orqali o‘rnatishingiz mumkin (Ulashish -> Bosh ekranga qo‘shish).");
-      return;
+    const promptEvent =
+      deferredPrompt ||
+      (typeof window !== "undefined"
+        ? (window as unknown as { __myplanInstallPrompt?: BeforeInstallPromptEvent }).__myplanInstallPrompt
+        : null);
+
+    if (promptEvent) {
+      try {
+        await promptEvent.prompt();
+        const choice = await promptEvent.userChoice;
+        if (choice.outcome === "accepted") {
+          setIsAppInstalled(true);
+          setDeferredPrompt(null);
+        }
+        return;
+      } catch (e) {
+        console.warn("PWA prompt error:", e);
+      }
     }
-    await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    if (choice.outcome === "accepted") {
-      setIsAppInstalled(true);
-      setDeferredPrompt(null);
-    }
+    setShowInstallGuideModal(true);
   };
 
   // Toggle complete for normal checklist tasks (Tab 1 ONLY)
@@ -1782,8 +1873,8 @@ export default function Home() {
       unitValue = countUnit.trim() || "marta";
     }
 
-    let durationDays = 30;
-    let durationLabel = "1 oy";
+    let durationDays: number | null = null;
+    let durationLabel: string = t.preset_unlimited;
 
     if (durationPreset === "custom") {
       const val = parseInt(customDurationValue, 10) || 1;
@@ -1792,18 +1883,24 @@ export default function Home() {
       else if (customDurationUnit === "hafta") durationDays = val * 7;
       else if (customDurationUnit === "oy") durationDays = val * 30;
       else if (customDurationUnit === "yil") durationDays = val * 365;
+    } else if (durationPreset === "unlimited") {
+      durationDays = null;
+      durationLabel = t.preset_unlimited;
     } else {
       const matched = durationPresets.find((p) => p.id === durationPreset);
-      if (matched) {
+      if (matched && matched.days !== null) {
         durationDays = matched.days;
         durationLabel = matched.label;
       }
     }
 
-    const startDate = new Date();
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + durationDays);
-    const endsOnStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+    let endsOnStr: string | null = null;
+    if (durationDays !== null) {
+      const startDate = new Date();
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + durationDays);
+      endsOnStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+    }
 
     setBusy(true);
     setMessage("");
@@ -1824,7 +1921,7 @@ export default function Home() {
               duration_preset: durationPreset,
               weekdays: selectedWeekdays,
             },
-            measurement_type: createTaskKind,
+            measurement_type: editingActivity.measurement_type,
             target: targetValue,
             unit: unitValue,
             ends_on: endsOnStr,
@@ -2121,29 +2218,39 @@ export default function Home() {
               </button>
             </div>
 
-            {/* 2 Tabs: Bir martalik vs Sanoqli */}
-            <div className="modal-tab-switch" role="tablist" aria-label={t.modal_title}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={createTaskKind === "check"}
-                className={`modal-tab-btn ${createTaskKind === "check" ? "active" : ""}`}
-                onClick={() => setCreateTaskKind("check")}
-              >
-                <IconCheck className="icon-sm" />
-                <span>{t.tab_single}</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={createTaskKind === "count"}
-                className={`modal-tab-btn ${createTaskKind === "count" ? "active" : ""}`}
-                onClick={() => setCreateTaskKind("count")}
-              >
-                <IconHash className="icon-sm" />
-                <span>{t.tab_countable}</span>
-              </button>
-            </div>
+            {/* 2 Tabs: Bir martalik vs Sanoqli — ONLY show when creating new task. In edit mode, activity kind is fixed */}
+            {!editingActivity ? (
+              <div className="modal-tab-switch" role="tablist" aria-label={t.modal_title}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={createTaskKind === "check"}
+                  className={`modal-tab-btn ${createTaskKind === "check" ? "active" : ""}`}
+                  onClick={() => setCreateTaskKind("check")}
+                >
+                  <IconCheck className="icon-sm" />
+                  <span>{t.tab_single}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={createTaskKind === "count"}
+                  className={`modal-tab-btn ${createTaskKind === "count" ? "active" : ""}`}
+                  onClick={() => setCreateTaskKind("count")}
+                >
+                  <IconHash className="icon-sm" />
+                  <span>{t.tab_countable}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="modal-edit-locked-banner">
+                <span className="locked-kind-pill">
+                  {editingActivity.measurement_type === "count" ? <IconHash className="icon-xs" /> : <IconCheck className="icon-xs" />}
+                  {editingActivity.measurement_type === "count" ? t.tab_countable : t.tab_single}
+                </span>
+                <span className="locked-kind-hint">{t.edit_kind_locked_hint}</span>
+              </div>
+            )}
 
             <form className="modal-form" onSubmit={createActivity}>
               <div className="form-group">
@@ -2265,6 +2372,52 @@ export default function Home() {
                   >
                     <IconCalendar className="icon-xs" />
                     <span>{t.time_opt_anytime}</span>
+                  </button>
+
+                  {/* Foydalanuvchi yaratgan custom vaqt zonalari */}
+                  {customTimeSlots.map((slot) => (
+                    <div key={slot.id} className="custom-slot-chip-wrap">
+                      <button
+                        type="button"
+                        className={`time-choice-btn custom-time-choice ${newTimeOfDay === slot.id ? "active" : ""}`}
+                        onClick={() => {
+                          triggerHaptic("light");
+                          setNewTimeOfDay(slot.id);
+                        }}
+                        title={slot.label}
+                      >
+                        <IconClock className="icon-xs" />
+                        <span className="truncate">{slot.label}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="custom-slot-del-icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (typeof window !== "undefined" && window.confirm(t.time_custom_delete_confirm)) {
+                            handleDeleteCustomTimeSlot(slot.id);
+                          }
+                        }}
+                        title={t.btn_delete || "O‘chirish"}
+                        aria-label={t.btn_delete || "O‘chirish"}
+                      >
+                        <IconClose className="icon-xs" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* + Custom tugmasi (eng oxirida) */}
+                  <button
+                    type="button"
+                    className="time-choice-btn add-custom-time-btn"
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setShowCustomTimeModal(true);
+                    }}
+                    title={t.time_opt_custom}
+                  >
+                    <IconPlus className="icon-xs" />
+                    <span>{t.time_opt_custom}</span>
                   </button>
                 </div>
               </div>
@@ -2456,6 +2609,171 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Time Slot Dialog */}
+      {showCustomTimeModal && (
+        <div
+          className="floating-modal-backdrop sub-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowCustomTimeModal(false);
+              setCustomTimeInput("");
+              setCustomTimeError("");
+            }
+          }}
+        >
+          <div className="floating-modal-box custom-time-dialog-box" role="dialog" aria-modal="true" aria-labelledby="custom-time-title">
+            <div className="modal-header">
+              <div>
+                <span className="modal-badge">
+                  <IconClock className="icon-xs" /> {t.time_opt_custom}
+                </span>
+                <h3 id="custom-time-title">{t.custom_time_modal_title}</h3>
+                <p className="page-subtitle" style={{ marginTop: 4 }}>
+                  {t.custom_time_modal_sub}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => {
+                  setShowCustomTimeModal(false);
+                  setCustomTimeInput("");
+                  setCustomTimeError("");
+                }}
+                aria-label={t.btn_cancel}
+              >
+                <IconClose className="icon-sm" />
+              </button>
+            </div>
+
+            <div className="modal-form">
+              <div className="form-group">
+                <label htmlFor="custom-time-name-input">{t.custom_time_modal_title}</label>
+                <input
+                  id="custom-time-name-input"
+                  value={customTimeInput}
+                  onChange={(e) => {
+                    setCustomTimeInput(e.target.value);
+                    if (customTimeError) setCustomTimeError("");
+                  }}
+                  placeholder={t.custom_time_input_placeholder}
+                  maxLength={50}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddCustomTimeSlot();
+                    }
+                  }}
+                />
+                {customTimeError && (
+                  <p className="count-validation-error" role="alert">
+                    ⚠️ {customTimeError}
+                  </p>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn-modal-cancel"
+                  onClick={() => {
+                    setShowCustomTimeModal(false);
+                    setCustomTimeInput("");
+                    setCustomTimeError("");
+                  }}
+                >
+                  {t.btn_cancel}
+                </button>
+                <button
+                  type="button"
+                  className="btn-modal-submit"
+                  onClick={handleAddCustomTimeSlot}
+                  disabled={!customTimeInput.trim()}
+                >
+                  <IconPlus className="icon-xs" />
+                  <span>{t.custom_time_modal_add}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Install Guide Modal */}
+      {showInstallGuideModal && (
+        <div
+          className="floating-modal-backdrop sub-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowInstallGuideModal(false);
+          }}
+        >
+          <div className="floating-modal-box install-guide-modal-box" role="dialog" aria-modal="true" aria-labelledby="pwa-guide-title">
+            <div className="modal-header">
+              <div>
+                <span className="modal-badge">
+                  <IconDownload className="icon-xs" /> PWA
+                </span>
+                <h3 id="pwa-guide-title">{t.setting_pwa_title}</h3>
+                <p className="page-subtitle" style={{ marginTop: 4 }}>
+                  {t.setting_pwa_sub}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowInstallGuideModal(false)}
+                aria-label={t.btn_cancel}
+              >
+                <IconClose className="icon-sm" />
+              </button>
+            </div>
+
+            <div className="install-guide-list">
+              <div className="install-guide-item">
+                <div className="install-guide-icon">
+                  <IconSmartphone className="icon-md" />
+                </div>
+                <div className="install-guide-info">
+                  <h4>Chrome / Android</h4>
+                  <p>Brauzer menyusidan (3 nuqta) &laquo;Ilovani o‘rnatish&raquo; yoki &laquo;Bosh ekranga qo‘shish&raquo; tugmasini bosing.</p>
+                </div>
+              </div>
+
+              <div className="install-guide-item">
+                <div className="install-guide-icon">
+                  <IconTablet className="icon-md" />
+                </div>
+                <div className="install-guide-info">
+                  <h4>Safari / iOS (iPhone, iPad)</h4>
+                  <p>Pastdagi &laquo;Ulashish&raquo; (Share) tugmasini bosing va &laquo;Bosh ekranga qo‘shish&raquo; (Add to Home Screen) bandini tanlang.</p>
+                </div>
+              </div>
+
+              <div className="install-guide-item">
+                <div className="install-guide-icon">
+                  <IconLaptop className="icon-md" />
+                </div>
+                <div className="install-guide-info">
+                  <h4>Kompyuter (Chrome, Edge)</h4>
+                  <p>Manzil satri o‘ng tomonidagi &laquo;O‘rnatish&raquo; (Install) belgisini bosing.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-modal-submit w-full"
+                onClick={() => setShowInstallGuideModal(false)}
+              >
+                {t.btn_got_it}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3084,6 +3402,26 @@ export default function Home() {
                     <span>{t.filter_evening}</span>
                     <span className="chip-count">{timeCounts.evening}</span>
                   </button>
+
+                  {/* Custom time slots in filter bar */}
+                  {customTimeSlots.map((slot) => {
+                    const count = activeActivities.filter((a) => a.time_of_day === slot.id).length;
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        className={`time-filter-chip ${activeTimeFilter === slot.id ? "active" : ""}`}
+                        onClick={() => {
+                          triggerHaptic("light");
+                          setActiveTimeFilter(slot.id);
+                        }}
+                      >
+                        <IconClock className="icon-xs" />
+                        <span>{slot.label}</span>
+                        <span className="chip-count">{count}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {loadingData ? (
@@ -3235,20 +3573,26 @@ export default function Home() {
                               )}
 
                               <div className="task-meta">
-                                <span className="schedule-badge daily">HAR KUNI</span>
+                                <span className="schedule-badge daily">{t.badge_daily}</span>
                                 {activity.time_of_day === "morning" && (
                                   <span className="schedule-badge time-badge morning">
-                                    <IconSunrise className="icon-xs" /> Tong
+                                    <IconSunrise className="icon-xs" /> {t.filter_morning}
                                   </span>
                                 )}
                                 {activity.time_of_day === "afternoon" && (
                                   <span className="schedule-badge time-badge afternoon">
-                                    <IconSun className="icon-xs" /> Kunduz
+                                    <IconSun className="icon-xs" /> {t.filter_afternoon}
                                   </span>
                                 )}
                                 {activity.time_of_day === "evening" && (
                                   <span className="schedule-badge time-badge evening">
-                                    <IconMoon className="icon-xs" /> Kechqurun
+                                    <IconMoon className="icon-xs" /> {t.filter_evening}
+                                  </span>
+                                )}
+                                {activity.time_of_day && !["morning", "afternoon", "evening", "anytime"].includes(activity.time_of_day) && (
+                                  <span className="schedule-badge time-badge custom">
+                                    <IconClock className="icon-xs" />{" "}
+                                    {customTimeSlots.find((s) => s.id === activity.time_of_day)?.label || activity.time_of_day}
                                   </span>
                                 )}
                                 {activity.schedule_rule?.duration_label && (
@@ -3258,7 +3602,7 @@ export default function Home() {
                                 )}
                                 {activity.measurement_type === "count" && (
                                   <span className="task-kind-badge">
-                                    <IconHash className="icon-xs" /> Sanoqli
+                                    <IconHash className="icon-xs" /> {t.tab_countable}
                                   </span>
                                 )}
                               </div>

@@ -8,3 +8,4 @@ node_modules/
 demo/frames/
 .vercel
 supabase/.temp/
+*.tsbuildinfo

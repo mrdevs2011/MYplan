@@ -42,6 +42,13 @@ export default function RootLayout({
                   var isLight = t === "light" || (t === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
                   document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
                 } catch(e) {}
+                try {
+                  window.__myplanInstallPrompt = null;
+                  window.addEventListener('beforeinstallprompt', function(e) {
+                    e.preventDefault();
+                    window.__myplanInstallPrompt = e;
+                  });
+                } catch(e) {}
               })();
             `,
           }}
