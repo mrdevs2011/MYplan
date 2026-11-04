@@ -806,16 +806,16 @@ export default function Home() {
     setPasswordActionMsg("");
     if (!canChangePassword) {
       setPasswordActionMsg(
-        `Parolni o‘zgartirish uchun tizimga kirilganiga kamida 24 soat to‘lgan bo‘lishi lozim (Qolgan: ${formatRemainingTime(remainingPasswordMs)}).`
+        `${t.profile_cooldown_24h} (${formatRemainingTime(remainingPasswordMs)}).`
       );
       return;
     }
     if (!newPassword || newPassword.length < 6) {
-      setPasswordActionMsg("Yangi parol kamida 6 ta belgidan iborat bo‘lishi lozim.");
+      setPasswordActionMsg(t.profile_password_len_err);
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordActionMsg("Yangi parol va tasdiqlash paroli bir-biriga mos kelmadi.");
+      setPasswordActionMsg(t.profile_password_match_err);
       return;
     }
 
@@ -4060,12 +4060,7 @@ export default function Home() {
           {activeTab === "activities" && (
             <div key="tab-activities" className="tab-pane-container">
               <section className="activities-container">
-                <div className="section-header-bar">
-                  <div>
-                    <span className="section-sub">{t.catalog_kicker}</span>
-                    <h2 className="section-heading">{t.catalog_title}</h2>
-                  </div>
-
+                <div className="section-header-bar catalog-header-bar">
                   {/* Filter Tabs */}
                   <div className="catalog-filters-bar">
                     <button
@@ -4268,13 +4263,6 @@ export default function Home() {
           {activeTab === "analytics" && (
             <div key="tab-analytics" className="tab-pane-container">
               <section className="analytics-view">
-                <div className="section-header-bar">
-                  <div>
-                    <span className="section-sub">{t.analytics_section_sub}</span>
-                    <h2 className="section-heading">{t.analytics_section_title}</h2>
-                  </div>
-                </div>
-
                 <div className="stats-grid">
                   <article className="stat-card progress-card">
                     <div className="stat-header">
@@ -4329,13 +4317,6 @@ export default function Home() {
           {activeTab === "profile" && (
             <div key="tab-profile" className="tab-pane-container">
               <section className="profile-view">
-                <div className="section-header-bar">
-                  <div>
-                    <span className="section-sub">SHAXSIY HISOB</span>
-                    <h2 className="section-heading">Foydalanuvchi ma’lumotlari</h2>
-                  </div>
-                </div>
-
                 <div className="profile-card-container">
                   <div className="profile-avatar-block">
                     <div className="profile-large-avatar-wrap">
@@ -4470,25 +4451,25 @@ export default function Home() {
                     <div className="profile-section-title-row">
                       <h4>
                         <IconKey className="icon-xs text-lime" />
-                        <span>Parolni o‘zgartirish</span>
+                        <span>{t.profile_password_btn}</span>
                       </h4>
                       {!canChangePassword ? (
-                        <span className="security-badge locked" title="Kirilganiga kamida 24 soat bo‘lishi lozim">
+                        <span className="security-badge locked" title={t.profile_cooldown_24h}>
                           <IconLock className="icon-xs" />
-                          <span>24 soatlik himoya: {formatRemainingTime(remainingPasswordMs)} qoldi</span>
+                          <span>{t.profile_cooldown_badge}: {formatRemainingTime(remainingPasswordMs)}</span>
                         </span>
                       ) : (
                         <span className="security-badge unlocked">
                           <IconCheck className="icon-xs" />
-                          <span>Parolni yangilash mumkin</span>
+                          <span>{t.profile_password_ready}</span>
                         </span>
                       )}
                     </div>
 
                     <p className="security-hint-text">
                       {!canChangePassword
-                        ? "Xavfsizlik qoidasi: parolni o‘zgartirish uchun ushbu hisobga kirilganiga kamida 24 soat (1 kun) to‘lgan bo‘lishi lozim. Bu hisobingiz xavfsizligini ta’minlash uchundir."
-                        : "Hisobingiz xavfsizligi uchun yangi va mustahkam parol kiriting (kamida 6 ta belgi)."}
+                        ? t.profile_password_hint_locked
+                        : t.profile_password_hint_ready}
                     </p>
 
                     <div className="profile-form-grid">
@@ -4500,21 +4481,21 @@ export default function Home() {
                           className="profile-input"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder={!canChangePassword ? "24 soatdan so‘ng ochiladi" : "Yangi parol (min. 6 ta)"}
+                          placeholder={!canChangePassword ? t.profile_password_placeholder_locked : t.profile_password_placeholder_new}
                           disabled={!canChangePassword || isUpdatingPassword}
                           autoComplete="new-password"
                         />
                       </div>
 
                       <div className="profile-form-field">
-                        <label htmlFor="input-confirm-password">Parolni tasdiqlash</label>
+                        <label htmlFor="input-confirm-password">{t.profile_confirm_password_label}</label>
                         <input
                           id="input-confirm-password"
                           type="password"
                           className="profile-input"
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder={!canChangePassword ? "24 soatdan so‘ng ochiladi" : "Parolni qayta kiriting"}
+                          placeholder={!canChangePassword ? t.profile_password_placeholder_locked : t.profile_password_placeholder_confirm}
                           disabled={!canChangePassword || isUpdatingPassword}
                           autoComplete="new-password"
                         />
@@ -4533,7 +4514,7 @@ export default function Home() {
                         disabled={!canChangePassword || isUpdatingPassword}
                       >
                         <IconKey className="icon-xs" />
-                        <span>{isUpdatingPassword ? "Yangilanmoqda..." : t.profile_password_btn}</span>
+                        <span>{isUpdatingPassword ? "..." : t.profile_password_btn}</span>
                       </button>
                     </div>
                   </div>
@@ -4542,10 +4523,10 @@ export default function Home() {
                   <div className="profile-accounts-block">
                     <div className="accounts-header-row">
                       <div>
-                        <h4>Bog‘langan hisoblar</h4>
-                        <p>Bitta qurilmada 5 tagacha profilni boshqaring va ularga tezda o‘ting</p>
+                        <h4>{t.profile_accounts_title}</h4>
+                        <p>{t.profile_accounts_sub}</p>
                       </div>
-                      <span className="accounts-count-badge">{savedAccounts.length} / 5 hisob</span>
+                      <span className="accounts-count-badge">{savedAccounts.length} / 5 {t.profile_accounts_badge_unit}</span>
                     </div>
 
                     <div className="accounts-list">
@@ -4606,13 +4587,6 @@ export default function Home() {
           {activeTab === "settings" && (
             <div key="tab-settings" className="tab-pane-container">
               <section className="settings-view">
-                <div className="section-header-bar">
-                  <div>
-                    <span className="section-sub">TIZIM PARAMETRLARI</span>
-                    <h2 className="section-heading">Ilova sozlamalari</h2>
-                  </div>
-                </div>
-
                 <div className="settings-sections-list">
                   {/* Language Settings */}
                   <div className="settings-card">
@@ -4939,26 +4913,26 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconDownload className="icon-sm text-lime" />
                       <div>
-                        <h3>Ilova va qurilma (PWA)</h3>
-                        <p>MyPlan ilovasini to‘liq ekranli ilova sifatida ishlatish</p>
+                        <h3>{t.settings_pwa_title}</h3>
+                        <p>{t.settings_pwa_sub}</p>
                       </div>
                     </div>
                     <div className="pwa-status-box">
                       {isAppInstalled ? (
                         <div className="pwa-installed-indicator">
                           <IconCheck className="icon-sm text-lime" />
-                          <span>Ilova qurilmangizga o‘rnatilgan va mustaqil ishlamoqda.</span>
+                          <span>{t.settings_pwa_installed}</span>
                         </div>
                       ) : (
                         <div className="pwa-install-action">
-                          <p>MyPlan ilovasini smartfoningiz yoki kompyuteringiz bosh ekraniga o‘rnating.</p>
+                          <p>{t.settings_pwa_not_installed}</p>
                           <button
                             type="button"
                             className="btn-pwa-install"
                             onClick={() => void handleInstallApp()}
                           >
                             <IconDownload className="icon-xs" />
-                            <span>Ilovani o‘rnatish</span>
+                            <span>{t.btn_install_app}</span>
                           </button>
                         </div>
                       )}
