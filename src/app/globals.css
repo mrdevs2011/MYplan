@@ -7394,7 +7394,12 @@ select:focus-visible {
 .zen-focus-card,
 .devices-list,
 .auth-box,
-.profile-danger-card {
+.profile-danger-card,
+.notification-card,
+.notifications-policy-banner,
+.pwa-status-box,
+.profile-edit-section,
+.profile-accounts-block {
   border-radius: 32px !important;
 }
 
@@ -7411,8 +7416,10 @@ select:focus-visible {
 .btn-counter-undo,
 .btn-add-step,
 .btn-remove-step,
+.btn-reset-steps,
 .btn-pwa-install,
 .btn-add-account-action,
+.btn-account-switch,
 .setting-choice-btn,
 .time-filter-chip,
 .catalog-filters-bar,
@@ -7432,9 +7439,20 @@ select:focus-visible {
 .brand-tagline-badge,
 .nav-item,
 .sidebar-brand-btn,
+.sidebar-pwa-btn,
+.logout-action-btn,
+.user-profile-card-btn,
 .time-choice-btn,
 .custom-time-choice,
-.custom-slot-chip-wrap {
+.custom-slot-chip-wrap,
+.settings-toggle-row,
+.account-row,
+.current-account-pill,
+.step-pill,
+.security-badge,
+.notification-category-tag,
+.notifications-immutable-badge,
+.accounts-count-badge {
   border-radius: 9999px !important;
 }
 
@@ -7447,7 +7465,8 @@ select:focus-visible {
 .count-input-row input,
 .count-unit-select,
 .step-input-row input,
-.step-input-row select {
+.step-input-row select,
+input[type="number"] {
   min-height: 54px !important;
   border-radius: 9999px !important;
   padding: 12px 22px !important;
@@ -7501,6 +7520,86 @@ textarea.modal-input {
   min-height: 54px !important;
   padding: 14px 24px !important;
   font-size: 14.5px !important;
+  font-weight: 750 !important;
+}
+
+.settings-toggle-row {
+  min-height: 58px !important;
+  padding: 14px 24px !important;
+  font-size: 14.5px !important;
+  font-weight: 600 !important;
+}
+
+.account-row {
+  min-height: 64px !important;
+  padding: 12px 22px !important;
+}
+
+.btn-add-account-action {
+  min-height: 54px !important;
+  padding: 14px 24px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+.btn-reset-steps {
+  min-height: 52px !important;
+  padding: 12px 22px !important;
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+}
+
+.logout-action-btn {
+  min-height: 48px !important;
+  padding: 0 18px !important;
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+}
+
+.sidebar-pwa-btn {
+  min-height: 48px !important;
+  padding: 0 18px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.btn-account-switch {
+  min-height: 40px !important;
+  padding: 8px 18px !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+}
+
+.step-pill {
+  min-height: 44px !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  font-weight: 750 !important;
+}
+
+.notification-card {
+  min-height: 96px !important;
+  padding: 22px 26px !important;
+}
+
+.notification-category-tag {
+  padding: 4px 12px !important;
+  font-size: 10.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.08em !important;
+}
+
+.security-badge {
+  min-height: 34px !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+}
+
+.notifications-immutable-badge {
+  min-height: 34px !important;
+  padding: 6px 14px !important;
+  font-size: 11.5px !important;
   font-weight: 750 !important;
 }
 
@@ -7601,15 +7700,168 @@ textarea.modal-input {
   color: #65a30d !important;
 }
 
-/* 6. High Contrast Light Theme Refinements for Soft Radii */
+/* 6. High Contrast Pure Light Theme Refinements (Zero Dark Mode Mud) */
 [data-theme="light"] .settings-card,
 [data-theme="light"] .profile-card,
 [data-theme="light"] .stat-card,
 [data-theme="light"] .catalog-card,
 [data-theme="light"] .task-card,
-[data-theme="light"] .floating-modal-box {
+[data-theme="light"] .floating-modal-box,
+[data-theme="light"] .notification-card,
+[data-theme="light"] .pwa-status-box {
+  background: #ffffff !important;
   border-radius: 32px !important;
-  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05) !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .settings-toggle-row {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03) !important;
+}
+
+[data-theme="light"] .account-row {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03) !important;
+}
+
+[data-theme="light"] .account-row.is-current-account {
+  background: #f7fee7 !important;
+  border-color: rgba(101, 163, 13, 0.35) !important;
+}
+
+[data-theme="light"] .account-fullname {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .account-username-tag {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .btn-account-switch {
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .btn-account-switch:hover {
+  background: #65a30d !important;
+  color: #ffffff !important;
+  border-color: #65a30d !important;
+}
+
+[data-theme="light"] .btn-add-account-action {
+  background: #ffffff !important;
+  border: 1.5px dashed rgba(15, 23, 42, 0.16) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .btn-add-account-action:hover {
+  background: #f7fee7 !important;
+  border-color: #65a30d !important;
+  color: #365314 !important;
+}
+
+[data-theme="light"] .btn-reset-steps {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .btn-reset-steps:hover {
+  background: #f1f5f9 !important;
+  border-color: rgba(15, 23, 42, 0.25) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .step-pill {
+  background: #f7fee7 !important;
+  border: 1.5px solid rgba(101, 163, 13, 0.35) !important;
+  color: #365314 !important;
+}
+
+[data-theme="light"] .logout-action-btn {
+  background: #fef2f2 !important;
+  border: 1px solid rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
+[data-theme="light"] .logout-action-btn:hover {
+  background: #fee2e2 !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+  color: #b91c1c !important;
+}
+
+[data-theme="light"] .user-avatar {
+  background: #ecfccb !important;
+  border: 1.5px solid #65a30d !important;
+  color: #365314 !important;
+}
+
+[data-theme="light"] .sidebar-pwa-btn {
+  background: #f7fee7 !important;
+  border: 1px solid rgba(101, 163, 13, 0.3) !important;
+  color: #4d7c0f !important;
+}
+
+[data-theme="light"] .notifications-policy-banner {
+  background: #f0fdf4 !important;
+  border: 1px solid rgba(101, 163, 13, 0.25) !important;
+  color: #166534 !important;
+}
+
+[data-theme="light"] .notifications-immutable-badge {
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] .notification-category-tag.daily {
+  background: #f7fee7 !important;
+  color: #4d7c0f !important;
+  border: 1px solid rgba(101, 163, 13, 0.2) !important;
+}
+
+[data-theme="light"] .notification-category-tag.productivity {
+  background: #eff6ff !important;
+  color: #2563eb !important;
+  border: 1px solid rgba(37, 99, 235, 0.2) !important;
+}
+
+[data-theme="light"] .notification-category-tag.streak {
+  background: #fffbeb !important;
+  color: #d97706 !important;
+  border: 1px solid rgba(217, 119, 6, 0.2) !important;
+}
+
+[data-theme="light"] .notification-category-tag.evening {
+  background: #faf5ff !important;
+  color: #9333ea !important;
+  border: 1px solid rgba(147, 51, 234, 0.2) !important;
+}
+
+[data-theme="light"] .security-badge.locked {
+  background: #fffbeb !important;
+  border: 1px solid rgba(217, 119, 6, 0.35) !important;
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .security-badge.unlocked {
+  background: #f0fdf4 !important;
+  border: 1px solid rgba(101, 163, 13, 0.35) !important;
+  color: #15803d !important;
+}
+
+[data-theme="light"] .profile-input:disabled {
+  background: #f8fafc !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  color: #64748b !important;
 }
 
 [data-theme="light"] .catalog-filters-bar {
@@ -7626,5 +7878,145 @@ textarea.modal-input {
 [data-theme="light"] .modal-tab-btn.active {
   border-radius: 9999px !important;
   border-color: rgba(101, 163, 13, 0.5) !important;
+}
+
+/* 7. Dedicated Auth / Landing View: Stadium Pills, Big Radii & Pure Light Mode */
+.auth-mode-switch {
+  border-radius: 9999px !important;
+  padding: 6px !important;
+  min-height: 52px !important;
+}
+
+.mode-btn {
+  border-radius: 9999px !important;
+  min-height: 42px !important;
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+}
+
+.input-group input,
+.password-input-wrap input {
+  min-height: 54px !important;
+  border-radius: 9999px !important;
+  padding: 12px 22px !important;
+  font-size: 15px !important;
+}
+
+.btn-auth-submit {
+  min-height: 54px !important;
+  border-radius: 9999px !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+}
+
+.auth-glass-card,
+.auth-card-elevated {
+  border-radius: 34px !important;
+}
+
+/* Number inputs: Remove spin-buttons for a clean stadium pill look */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Light Mode Overrides for Auth and Landing pages (No Dark Mode Leaks) */
+[data-theme="light"] .auth-mode-switch {
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+
+[data-theme="light"] .mode-btn {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .mode-btn.active {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+[data-theme="light"] .input-group label {
+  color: #0f172a !important;
+  font-weight: 650 !important;
+}
+
+[data-theme="light"] .input-group input,
+[data-theme="light"] .password-input-wrap input {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.14) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .input-group input:focus,
+[data-theme="light"] .password-input-wrap input:focus {
+  border-color: #65a30d !important;
+  box-shadow: 0 0 0 3px rgba(101, 163, 13, 0.18) !important;
+}
+
+[data-theme="light"] .btn-auth-submit {
+  background: #65a30d !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 20px rgba(101, 163, 13, 0.3) !important;
+}
+
+[data-theme="light"] .btn-auth-submit:hover:not(:disabled) {
+  background: #4d7c0f !important;
+}
+
+[data-theme="light"] .landing-navbar {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+
+[data-theme="light"] .landing-layout,
+[data-theme="light"] .auth-dedicated-layout {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .auth-glass-card,
+[data-theme="light"] .auth-card-elevated {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .auth-badge {
+  background: #ecfccb !important;
+  color: #365314 !important;
+  border: 1px solid rgba(101, 163, 13, 0.3) !important;
+}
+
+[data-theme="light"] .auth-security {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .auth-heading h1 {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .auth-heading p {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .landing-footer {
+  background: #ffffff !important;
+  border-top: 1px solid rgba(15, 23, 42, 0.08) !important;
+  color: #64748b !important;
+}
+
+[data-theme="light"] .footer-brand {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .footer-center-tag {
+  color: #64748b !important;
 }
 
