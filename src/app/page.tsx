@@ -95,19 +95,6 @@ type DurationPreset =
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
 
-const DURATION_PRESETS: { id: DurationPreset; label: string; days: number }[] = [
-  { id: "3_days", label: "3 kun", days: 3 },
-  { id: "1_week", label: "1 hafta", days: 7 },
-  { id: "2_weeks", label: "2 hafta", days: 14 },
-  { id: "3_weeks", label: "3 hafta", days: 21 },
-  { id: "1_month", label: "1 oy", days: 30 },
-  { id: "2_months", label: "2 oy", days: 60 },
-  { id: "3_months", label: "3 oy", days: 90 },
-  { id: "6_months", label: "6 oy", days: 180 },
-  { id: "1_year", label: "1 yil", days: 365 },
-  { id: "custom", label: "Sozlash", days: 0 },
-];
-
 const WEEKDAYS = [
   { id: 1, short: "Du", full: "Dushanba" },
   { id: 2, short: "Se", full: "Seshanba" },
@@ -244,6 +231,35 @@ export default function Home() {
   const [autoArchiveDelay, setAutoArchiveDelay] = useState(7);
 
   const t = translations[language] || translations.uz;
+
+  const durationPresets = useMemo(
+    () => [
+      { id: "3_days" as const, label: t.preset_3d, days: 3 },
+      { id: "1_week" as const, label: t.preset_1w, days: 7 },
+      { id: "2_weeks" as const, label: t.preset_2w, days: 14 },
+      { id: "3_weeks" as const, label: t.preset_3w, days: 21 },
+      { id: "1_month" as const, label: t.preset_1m, days: 30 },
+      { id: "2_months" as const, label: t.preset_2m, days: 60 },
+      { id: "3_months" as const, label: t.preset_3m, days: 90 },
+      { id: "6_months" as const, label: t.preset_6m, days: 180 },
+      { id: "1_year" as const, label: t.preset_1y, days: 365 },
+      { id: "custom" as const, label: t.preset_custom, days: 0 },
+    ],
+    [t]
+  );
+
+  const weekdaysList = useMemo(
+    () => [
+      { id: 1, short: t.day_mon_short, full: t.day_mon_full },
+      { id: 2, short: t.day_tue_short, full: t.day_tue_full },
+      { id: 3, short: t.day_wed_short, full: t.day_wed_full },
+      { id: 4, short: t.day_thu_short, full: t.day_thu_full },
+      { id: 5, short: t.day_fri_short, full: t.day_fri_full },
+      { id: 6, short: t.day_sat_short, full: t.day_sat_full },
+      { id: 7, short: t.day_sun_short, full: t.day_sun_full },
+    ],
+    [t]
+  );
 
   // Splash Screen States (Guaranteed 100% Logo Preload)
   const [splashReady, setSplashReady] = useState(false);
@@ -788,20 +804,20 @@ export default function Home() {
     // Expose build info & banner in browser console
     if (typeof window !== "undefined") {
       (window as unknown as { myplanVersion: unknown }).myplanVersion = {
-        version: "2.6.0",
-        commit: "apex-v2.6",
-        updatedAt: "2026-11-04 09:00",
+        version: "2.7.0",
+        commit: "apex-v2.7-full-harmony",
+        updatedAt: "2026-11-04 09:15",
         features: [
-          "Zero English text in Uzbek UI (notifications, footer, messages fully localized)",
-          "Undo button strict 44px circle with zero text and anchor right alignment",
-          "Sidebar collapsed layout starts from top (no vertical center drift)",
-          "Light mode unread notifications color-harmonized with crisp dark typography",
-          "Cache busted via Service Worker v6",
+          "100% full translations across all 3 languages (Modal, Units, Weekdays, Presets, Actions, Headers)",
+          "Pure Light Mode ecosystem for Modal, Inputs, Chips, Weekdays, Scroll masks & Dropdowns",
+          "Zero mixed language everywhere in the app",
+          "Exact 44px Undo circle button without text",
+          "Top-aligned collapsed sidebar",
         ],
         status: "LATEST_VERSION_ACTIVE",
       };
       console.log(
-        "%c MYPLAN ACTIVE %c v2.6.0 (LATEST) %c Yangi versiya muvaffaqiyatli ishga tushdi ",
+        "%c MYPLAN ACTIVE %c v2.7.0 (LATEST) %c Full Light/Dark & Zero Mix Languages ",
         "background: #b4f04c; color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px 0 0 4px;",
         "background: #1e293b; color: #38bdf8; font-weight: 700; padding: 4px 8px;",
         "background: #0f172a; color: #a3e635; font-weight: 600; padding: 4px 8px; border-radius: 0 4px 4px 0;"
@@ -1716,7 +1732,7 @@ export default function Home() {
       else if (customDurationUnit === "oy") durationDays = val * 30;
       else if (customDurationUnit === "yil") durationDays = val * 365;
     } else {
-      const matched = DURATION_PRESETS.find((p) => p.id === durationPreset);
+      const matched = durationPresets.find((p) => p.id === durationPreset);
       if (matched) {
         durationDays = matched.days;
         durationLabel = matched.label;
@@ -2012,23 +2028,23 @@ export default function Home() {
             <div className="modal-header">
               <div>
                 <span className="modal-badge">
-                  <IconPlus className="icon-xs" /> YANGI REJA
+                  <IconPlus className="icon-xs" /> {t.modal_kicker}
                 </span>
-                <h3 id="modal-title">Yangi faoliyat qo‘shish</h3>
+                <h3 id="modal-title">{t.modal_title}</h3>
               </div>
               <button
                 type="button"
                 className="modal-close-btn"
                 onClick={() => setShowCreateModal(false)}
-                aria-label="Yopish"
-                title="Yopish (Esc)"
+                aria-label={t.btn_cancel}
+                title={`${t.btn_cancel} (Esc)`}
               >
                 <IconClose className="icon-sm" />
               </button>
             </div>
 
             {/* 2 Tabs: Bir martalik vs Sanoqli */}
-            <div className="modal-tab-switch" role="tablist" aria-label="Vazifa turi">
+            <div className="modal-tab-switch" role="tablist" aria-label={t.modal_title}>
               <button
                 type="button"
                 role="tab"
@@ -2037,7 +2053,7 @@ export default function Home() {
                 onClick={() => setCreateTaskKind("check")}
               >
                 <IconCheck className="icon-sm" />
-                <span>Bir martalik</span>
+                <span>{t.tab_single}</span>
               </button>
               <button
                 type="button"
@@ -2047,21 +2063,21 @@ export default function Home() {
                 onClick={() => setCreateTaskKind("count")}
               >
                 <IconHash className="icon-sm" />
-                <span>Sanoqli maqsad</span>
+                <span>{t.tab_countable}</span>
               </button>
             </div>
 
             <form className="modal-form" onSubmit={createActivity}>
               <div className="form-group">
-                <label htmlFor="modal-task-title">Faoliyat nomi *</label>
+                <label htmlFor="modal-task-title">{t.label_task_name}</label>
                 <input
                   id="modal-task-title"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder={
                     createTaskKind === "check"
-                      ? "Masalan: Kitob o‘qish yoki dori qabul qilish"
-                      : "Masalan: Mashq bajarish yoki piyoda qadam bosish"
+                      ? t.placeholder_task_single
+                      : t.placeholder_task_count
                   }
                   maxLength={160}
                   required
@@ -2072,7 +2088,7 @@ export default function Home() {
               {/* Sanoqli tab input */}
               {createTaskKind === "count" && (
                 <div className="form-group count-target-group">
-                  <label htmlFor="count-target">Kunlik rejalashtirilgan miqdor *</label>
+                  <label htmlFor="count-target">{t.label_target_count}</label>
                   <div className="count-input-row">
                     <input
                       id="count-target"
@@ -2083,7 +2099,7 @@ export default function Home() {
                         const val = e.target.value.replace(/\D/g, "").slice(0, 5);
                         setCountTarget(val);
                       }}
-                      placeholder="Masalan: 100"
+                      placeholder={t.placeholder_count}
                       maxLength={5}
                       required
                     />
@@ -2091,13 +2107,13 @@ export default function Home() {
                       className="count-unit-select"
                       value={countUnit}
                       onChange={(e) => setCountUnit(e.target.value)}
-                      title="O‘lchov birligi"
+                      title={t.label_target_count}
                     >
-                      <option value="marta">marta</option>
-                      <option value="ta">ta</option>
-                      <option value="bet">bet</option>
-                      <option value="qadam">qadam</option>
-                      <option value="daqiqa">daqiqa</option>
+                      <option value="marta">{t.unit_marta}</option>
+                      <option value="ta">{t.unit_ta}</option>
+                      <option value="bet">{t.unit_bet}</option>
+                      <option value="qadam">{t.unit_qadam}</option>
+                      <option value="daqiqa">{t.unit_daqiqa}</option>
                     </select>
                   </div>
 
@@ -2106,17 +2122,17 @@ export default function Home() {
                       ⚠️ {debouncedCountError}
                     </p>
                   )}
-                  <p className="count-hint">Maksimal 5 xonali son (2 dan 99,999 gacha qabul qilinadi).</p>
+                  <p className="count-hint">{t.hint_count_limits}</p>
                 </div>
               )}
 
               <div className="form-group">
-                <label htmlFor="modal-task-desc">Izoh (ixtiyoriy)</label>
+                <label htmlFor="modal-task-desc">{t.label_notes}</label>
                 <input
                   id="modal-task-desc"
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="Qo‘shimcha eslatma yoki maqsad tafsiloti"
+                  placeholder={t.placeholder_notes}
                   maxLength={250}
                 />
               </div>
@@ -2124,10 +2140,10 @@ export default function Home() {
               {/* Kunning vaqt zonasi (Time of Day) */}
               <div className="form-group time-of-day-picker-group">
                 <div className="field-label-row">
-                  <span>Kunning qaysi vaqti uchun?</span>
-                  <span className="field-sub-hint">Intizom va tartib uchun</span>
+                  <span>{t.label_time_of_day}</span>
+                  <span className="field-sub-hint">{t.sub_time_of_day}</span>
                 </div>
-                <div className="time-of-day-grid" role="radiogroup" aria-label="Kunning vaqti">
+                <div className="time-of-day-grid" role="radiogroup" aria-label={t.label_time_of_day}>
                   <button
                     type="button"
                     className={`time-choice-btn ${newTimeOfDay === "morning" ? "active" : ""}`}
@@ -2137,7 +2153,7 @@ export default function Home() {
                     }}
                   >
                     <IconSunrise className="icon-xs" />
-                    <span>Tong (05:00 - 12:00)</span>
+                    <span>{t.time_opt_morning}</span>
                   </button>
                   <button
                     type="button"
@@ -2148,7 +2164,7 @@ export default function Home() {
                     }}
                   >
                     <IconSun className="icon-xs" />
-                    <span>Kunduz (12:00 - 18:00)</span>
+                    <span>{t.time_opt_afternoon}</span>
                   </button>
                   <button
                     type="button"
@@ -2159,7 +2175,7 @@ export default function Home() {
                     }}
                   >
                     <IconMoon className="icon-xs" />
-                    <span>Kechqurun (18:00 - 23:00)</span>
+                    <span>{t.time_opt_evening}</span>
                   </button>
                   <button
                     type="button"
@@ -2170,7 +2186,7 @@ export default function Home() {
                     }}
                   >
                     <IconCalendar className="icon-xs" />
-                    <span>Kun davomida</span>
+                    <span>{t.time_opt_anytime}</span>
                   </button>
                 </div>
               </div>
@@ -2178,12 +2194,12 @@ export default function Home() {
               {/* Muddat (Davomiylik) Tanlovi */}
               <div className="form-group duration-picker-group">
                 <label className="field-label-row">
-                  <span>Rejalashtirilgan muddat *</span>
-                  <span className="field-sub-hint">Qancha davom etishi</span>
+                  <span>{t.label_duration}</span>
+                  <span className="field-sub-hint">{t.sub_duration}</span>
                 </label>
 
-                <div className="duration-presets-grid" role="radiogroup" aria-label="Muddat variantlari">
-                  {DURATION_PRESETS.map((preset) => {
+                <div className="duration-presets-grid" role="radiogroup" aria-label={t.label_duration}>
+                  {durationPresets.map((preset) => {
                     const isSelected = durationPreset === preset.id;
                     return (
                       <button
@@ -2209,7 +2225,7 @@ export default function Home() {
                 {durationPreset === "custom" && (
                   <div className="custom-duration-container">
                     <label htmlFor="custom-duration-input" className="custom-duration-label">
-                      Muddat miqdori va o‘lchov birligi:
+                      {t.custom_duration_title}
                     </label>
                     <div className="custom-duration-input-row">
                       <input
@@ -2228,15 +2244,7 @@ export default function Home() {
                           }
                           setCustomDurationValue(val);
                         }}
-                        placeholder={
-                          customDurationUnit === "kun"
-                            ? "Masalan: 30"
-                            : customDurationUnit === "hafta"
-                              ? "1 dan 9 gacha"
-                              : customDurationUnit === "oy"
-                                ? "1 dan 9 gacha"
-                                : "1 dan 3 gacha"
-                        }
+                        placeholder="30"
                         maxLength={customDurationUnit === "kun" ? 3 : 1}
                         required
                         autoFocus
@@ -2254,12 +2262,12 @@ export default function Home() {
                             setCustomDurationValue((prev) => prev.replace(/[^1-3]/g, "").slice(0, 1));
                           }
                         }}
-                        title="Muddat turi"
+                        title={t.label_duration}
                       >
-                        <option value="kun">Kun</option>
-                        <option value="hafta">Hafta</option>
-                        <option value="oy">Oy</option>
-                        <option value="yil">Yil</option>
+                        <option value="kun">{t.unit_day}</option>
+                        <option value="hafta">{t.unit_week}</option>
+                        <option value="oy">{t.unit_month}</option>
+                        <option value="yil">{t.unit_year}</option>
                       </select>
                     </div>
 
@@ -2268,22 +2276,15 @@ export default function Home() {
                         ⚠️ {debouncedDurationError}
                       </p>
                     )}
-
-                    <p className="duration-unit-hint">
-                      {customDurationUnit === "kun" && "Kun cheklovi: kamida 2 kun va ko‘pi bilan 120 kun."}
-                      {customDurationUnit === "hafta" && "Hafta cheklovi: ko‘pi bilan 9 hafta (1 xonali son)."}
-                      {customDurationUnit === "oy" && "Oy cheklovi: ko‘pi bilan 9 oy (1 xonali son)."}
-                      {customDurationUnit === "yil" && "Yil cheklovi: ko‘pi bilan 3 yil."}
-                    </p>
                   </div>
                 )}
               </div>
 
-              {/* Hafta kunlari (Horizontal Scroll with soft large cards and wall shadow masks) */}
+              {/* Hafta kunlari */}
               <div className="form-group weekdays-picker-group">
                 <div className="field-label-row">
-                  <span>Hafta kunlari *</span>
-                  <span className="field-sub-hint">Qaysi kunlarda bajarilishi</span>
+                  <span>{t.label_weekdays}</span>
+                  <span className="field-sub-hint">{t.sub_weekdays}</span>
                 </div>
 
                 <div className="weekdays-presets-row">
@@ -2292,7 +2293,7 @@ export default function Home() {
                     className={`weekday-preset-chip ${selectedWeekdays.length === 7 ? "active" : ""}`}
                     onClick={() => setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7])}
                   >
-                    Har kuni (7/7)
+                    {t.chip_everyday}
                   </button>
                   <button
                     type="button"
@@ -2301,7 +2302,7 @@ export default function Home() {
                     }`}
                     onClick={() => setSelectedWeekdays([1, 2, 3, 4, 5])}
                   >
-                    Ish kunlari (Du–Jum)
+                    {t.chip_workdays}
                   </button>
                   <button
                     type="button"
@@ -2314,13 +2315,13 @@ export default function Home() {
                     }`}
                     onClick={() => setSelectedWeekdays([6, 7])}
                   >
-                    Dam olish (Shan–Yak)
+                    {t.chip_weekends}
                   </button>
                 </div>
 
                 <div className="weekdays-scroll-wrapper">
-                  <div className="weekdays-scroll-container" role="group" aria-label="Hafta kunlarini tanlash">
-                    {WEEKDAYS.map((day) => {
+                  <div className="weekdays-scroll-container" role="group" aria-label={t.label_weekdays}>
+                    {weekdaysList.map((day) => {
                       const isSelected = selectedWeekdays.includes(day.id);
                       return (
                         <button
@@ -2329,12 +2330,12 @@ export default function Home() {
                           className={`weekday-card ${isSelected ? "active" : ""}`}
                           onClick={() => toggleWeekday(day.id)}
                           aria-pressed={isSelected}
-                          title={`${day.full} ${isSelected ? "(tanlangan)" : "(tanlanmagan)"}`}
+                          title={`${day.full} ${isSelected ? `(${t.status_planned})` : `(${t.status_rest})`}`}
                         >
                           <span className="weekday-card-short">{day.short}</span>
                           <span className="weekday-card-full">{day.full}</span>
                           <span className="weekday-card-status">
-                            {isSelected ? "Rejada" : "Dam"}
+                            {isSelected ? t.status_planned : t.status_rest}
                           </span>
                         </button>
                       );
@@ -2344,19 +2345,19 @@ export default function Home() {
 
                 {selectedWeekdays.length === 0 && (
                   <p className="count-validation-error" role="alert">
-                    ⚠️ Kamida bitta hafta kuni tanlangan bo‘lishi lozim.
+                    ⚠️ {t.error_min_weekday}
                   </p>
                 )}
               </div>
 
               <div className="form-group">
-                <label htmlFor="modal-schedule">Takrorlanish tartibi</label>
+                <label htmlFor="modal-schedule">{t.label_recurrence}</label>
                 <select
                   id="modal-schedule"
                   value={newSchedule}
                   onChange={(e) => setNewSchedule(e.target.value as "daily" | "once")}
                 >
-                  <option value="daily">Har kuni takrorlansin</option>
+                  <option value="daily">{t.opt_repeat_daily}</option>
                 </select>
               </div>
 
@@ -2366,14 +2367,14 @@ export default function Home() {
                   className="btn-modal-cancel"
                   onClick={() => setShowCreateModal(false)}
                 >
-                  Bekor qilish
+                  {t.btn_cancel}
                 </button>
                 <button
                   type="submit"
                   className="btn-modal-submit"
                   disabled={isSaveDisabled}
                 >
-                  {busy ? "Saqlanmoqda…" : "Rejani saqlash"}
+                  {busy ? t.btn_saving : t.btn_save_activity}
                 </button>
               </div>
             </form>
@@ -2397,15 +2398,15 @@ export default function Home() {
             <div className="modal-header">
               <div>
                 <span className="modal-badge">
-                  <IconMoon className="icon-xs" /> KECHKI SARHISOB
+                  <IconMoon className="icon-xs" /> {t.evening_modal_badge}
                 </span>
-                <h3 id="evening-review-title">Bugungi kun xulosasi</h3>
+                <h3 id="evening-review-title">{t.evening_modal_title}</h3>
               </div>
               <button
                 type="button"
                 className="modal-close-btn"
                 onClick={() => setShowEveningReview(false)}
-                aria-label="Yopish"
+                aria-label={t.btn_cancel}
               >
                 <IconClose className="icon-xs" />
               </button>
@@ -2417,40 +2418,40 @@ export default function Home() {
                   <IconFlame className="icon-fire" />
                 </div>
                 <div className="evening-banner-text">
-                  <h4>{percent === 100 ? "Kunlik marra 100% zabt etildi!" : `${percent}% reja bajarildi`}</h4>
+                  <h4>{percent === 100 ? t.evening_banner_100 : `${percent}% ${t.completed}`}</h4>
                   <p>
                     {percent === 100
-                      ? "Ajoyib natija! Bugungi barcha rejalaringizni muvaffaqiyatli yakunladingiz."
+                      ? t.evening_banner_sub_100
                       : percent >= 70
-                      ? "Juda yaxshi taraqqiyot! Asosiy vazifalaringiz bajarildi."
-                      : "Har bir qadam muhim. Ertangi kunga yanada qat’iyat bilan qadam qo‘ying."}
+                      ? t.evening_banner_sub_70
+                      : t.evening_banner_sub_low}
                   </p>
                 </div>
               </div>
 
               <div className="evening-stats-grid">
                 <div className="evening-stat-item">
-                  <span className="stat-sub">Jami reja</span>
+                  <span className="stat-sub">{t.stat_total_plans}</span>
                   <span className="stat-num">{activeActivities.length}</span>
                 </div>
                 <div className="evening-stat-item highlight">
-                  <span className="stat-sub">Bajarildi</span>
+                  <span className="stat-sub">{t.stat_completed}</span>
                   <span className="stat-num">{completedCount}</span>
                 </div>
                 <div className="evening-stat-item">
-                  <span className="stat-sub">Qoldi</span>
+                  <span className="stat-sub">{t.left}</span>
                   <span className="stat-num">{Math.max(activeActivities.length - completedCount, 0)}</span>
                 </div>
                 <div className="evening-stat-item flame">
-                  <span className="stat-sub">Seriya</span>
-                  <span className="stat-num">{streakCount} kun</span>
+                  <span className="stat-sub">{t.streak_label}</span>
+                  <span className="stat-num">{streakCount} {t.streak_days}</span>
                 </div>
               </div>
 
               <div className="evening-quote-card">
                 <IconSparkles className="icon-xs" />
                 <span>
-                  &ldquo;Muvaffaqiyat — bu har kuni takrorlanadigan kichik intizomlar yig‘indisidir.&rdquo;
+                  &ldquo;{t.footer_tagline}&rdquo;
                 </span>
               </div>
             </div>
@@ -2462,10 +2463,10 @@ export default function Home() {
                 onClick={() => {
                   triggerHaptic("success");
                   setShowEveningReview(false);
-                  setMessage("Bugungi kun xulosasi saqlandi. Ertangi kuningiz barakali bo‘lsin!");
+                  setMessage(t.evening_toast);
                 }}
               >
-                Ertangi kunga tayyorman
+                {t.evening_modal_btn}
               </button>
             </div>
           </div>
@@ -2568,17 +2569,17 @@ export default function Home() {
               setShowCreateModal(true);
               setMobileMenuOpen(false);
             }}
-            aria-label="Yangi vazifa qo‘shish"
-            title="Yangi vazifa qo‘shish"
+            aria-label={t.btn_new_plan}
+            title={t.btn_new_plan}
           >
             <IconPlus className="icon-sm" />
-            <span className="btn-add-text">Yangi reja</span>
+            <span className="btn-add-text">{t.btn_new_plan}</span>
           </button>
         </div>
 
         {/* Navigation Tabs */}
         <div className="sidebar-nav-group">
-          <span className="nav-caption">ISH MAYDONI</span>
+          <span className="nav-caption">{t.workspace_caption}</span>
           <nav className="nav-links">
             <button
               type="button"
@@ -2677,10 +2678,10 @@ export default function Home() {
                 e.stopPropagation();
                 void handleInstallApp();
               }}
-              title="Ilovani o‘rnatish"
+              title={t.btn_install_app}
             >
               <IconDownload className="icon-sm" />
-              <span className="btn-add-text">Ilovani o‘rnatish</span>
+              <span className="btn-add-text">{t.btn_install_app}</span>
             </button>
           </div>
         )}
@@ -3199,8 +3200,8 @@ export default function Home() {
               <section className="activities-container">
                 <div className="section-header-bar">
                   <div>
-                    <span className="section-sub">REJALAR BOSHQARUVI</span>
-                    <h2 className="section-heading">Barcha faoliyatlar</h2>
+                    <span className="section-sub">{t.catalog_kicker}</span>
+                    <h2 className="section-heading">{t.catalog_title}</h2>
                   </div>
 
                   {/* Filter Tabs */}
@@ -3210,21 +3211,21 @@ export default function Home() {
                       className={`catalog-filter-btn ${catalogFilter === "all" ? "active" : ""}`}
                       onClick={() => setCatalogFilter("all")}
                     >
-                      Barchasi ({activities.length})
+                      {t.filter_all} ({activities.length})
                     </button>
                     <button
                       type="button"
                       className={`catalog-filter-btn ${catalogFilter === "active" ? "active" : ""}`}
                       onClick={() => setCatalogFilter("active")}
                     >
-                      Faol ({activities.filter((a) => a.is_active).length})
+                      {t.tab_active_plans} ({activities.filter((a) => a.is_active).length})
                     </button>
                     <button
                       type="button"
                       className={`catalog-filter-btn ${catalogFilter === "archived" ? "active" : ""}`}
                       onClick={() => setCatalogFilter("archived")}
                     >
-                      Arxivda ({activities.filter((a) => !a.is_active).length})
+                      {t.tab_archived_plans} ({activities.filter((a) => !a.is_active).length})
                     </button>
                   </div>
                 </div>
@@ -3237,14 +3238,14 @@ export default function Home() {
                     className="catalog-search-input"
                     value={catalogSearch}
                     onChange={(e) => setCatalogSearch(e.target.value)}
-                    placeholder="Faoliyat nomi yoki tavsifi bo‘yicha qidirish…"
+                    placeholder={t.catalog_search_placeholder}
                   />
                   {catalogSearch && (
                     <button
                       type="button"
                       className="search-clear-btn"
                       onClick={() => setCatalogSearch("")}
-                      aria-label="Tozalash"
+                      aria-label={t.btn_cancel}
                     >
                       <IconClose className="icon-xs" />
                     </button>
@@ -3315,7 +3316,7 @@ export default function Home() {
                             onClick={() => void archiveActivity(act.id, !act.is_active)}
                           >
                             <IconArchive className="icon-xs" />
-                            <span>{act.is_active ? "Arxivlash" : "Faollashtirish"}</span>
+                            <span>{act.is_active ? t.btn_archive : t.btn_restore}</span>
                           </button>
                         </div>
                       </article>
@@ -3332,19 +3333,18 @@ export default function Home() {
               <section className="notifications-view">
                 <div className="section-header-bar">
                   <div>
-                    <span className="section-sub">SO‘NGGI 3 KUNLIK ARXIV</span>
-                    <h2 className="section-heading">Bildirishnomalar tarixi ({notifications.length})</h2>
+                    <span className="section-sub">{t.notif_archive_badge}</span>
+                    <h2 className="section-heading">{t.notif_history_title} ({notifications.length})</h2>
                   </div>
                   <div className="notifications-immutable-badge">
-                    <IconShield className="icon-xs" /> O‘zgartirib bo‘lmaydi (Read-only)
+                    <IconShield className="icon-xs" /> {t.notif_read_only}
                   </div>
                 </div>
 
                 <div className="notifications-policy-banner">
                   <IconSparkles className="icon-sm text-lime" />
                   <p>
-                    Ushbu bildirishnomalar sizning unumdorligingizni oshirish uchun shaxsiy yordamchi
-                    tomonidan tabiiy shakllantiriladi va so‘nggi 3 kunlik xronologik tarix sifatida saqlanadi.
+                    {t.notif_policy_text}
                   </p>
                 </div>
 
@@ -3376,11 +3376,11 @@ export default function Home() {
                       <div className="notification-card-footer">
                         {!notif.isRead ? (
                           <span className="status-unread-pill">
-                            <span className="pulse-dot-sm" /> Yangi
+                            <span className="pulse-dot-sm" /> {t.notif_status_new}
                           </span>
                         ) : (
                           <span className="status-read-pill">
-                            <IconCheck className="icon-xs" /> O‘qilgan
+                            <IconCheck className="icon-xs" /> {t.notif_status_read}
                           </span>
                         )}
                       </div>

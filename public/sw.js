@@ -1,5 +1,5 @@
 // MyPlan High-Reliability Production Service Worker (Network-First)
-const CACHE_NAME = "myplan-v6-network-first";
+const CACHE_NAME = "myplan-v7-network-first";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
