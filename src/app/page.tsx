@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { getRecommendedFocusActivity } from "@/lib/focus-recommendation";
 import { translations, type Language } from "@/lib/translations";
+import { PRESETS, ALL_WEEKDAYS, type Preset } from "@/lib/presets";
 import {
   IconCheck,
   IconPlus,
@@ -401,6 +402,8 @@ export default function Home() {
 
   // Floating Modal for Task Creation & Editing
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [importingPresetId, setImportingPresetId] = useState<string | null>(null);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [createTaskKind, setCreateTaskKind] = useState<"check" | "count">("check");
   const [newTitle, setNewTitle] = useState("");
@@ -941,7 +944,7 @@ export default function Home() {
     setLoadingData(true);
     const supabase = createClient();
     try {
-      const [{ data: profile, error: profileError }, { data: activityRows, error: activityError }] = await Promise.all([
+      const [{ data: profile, error: profileError }, firstActivityResult] = await Promise.all([
         supabase
           .from("profiles")
           .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date, language, counter_steps, sound_enabled, notifications_enabled, auto_archive_delay, created_at")
@@ -953,6 +956,20 @@ export default function Home() {
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
       ]);
+
+      // reminder_time arrives with migration 012; until it is applied, fall back to the base columns
+      // (Postgres 42703 = undefined_column) so the workspace never loads empty.
+      let activityRows = firstActivityResult.data as Activity[] | null;
+      let activityError = firstActivityResult.error;
+      if (activityError?.code === "42703") {
+        const retry = await supabase
+          .from("activities")
+          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on,time_of_day")
+          .eq("user_id", id)
+          .order("created_at", { ascending: false });
+        activityRows = retry.data as Activity[] | null;
+        activityError = retry.error;
+      }
 
       if (profileError) throw profileError;
       if (activityError) throw activityError;
@@ -2433,6 +2450,10 @@ export default function Home() {
 
   // Pocket Touch Gestures (Swipe to Complete & Quick Actions)
   const handleTouchStart = (taskId: string, e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest("button, a, input, select, textarea")) {
+      touchStartRef.current = null;
+      return;
+    }
     const touch = e.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     setSwipeState({ id: taskId, offset: 0, action: null });
@@ -2454,7 +2475,8 @@ export default function Home() {
   const handleTouchEnd = (activity: Activity, occ: Occurrence | undefined) => {
     if (swipeState.id === activity.id && occ) {
       if (swipeState.action === "complete") {
-        void toggleComplete(activity);
+        // Swiping right only completes; un-completing needs the checkbox or a left swipe.
+        if (occ.status !== "completed") void toggleComplete(activity);
       } else if (swipeState.action === "undo" && activity.measurement_type === "count") {
         void undoTaskCount(activity, occ);
       }
@@ -2463,12 +2485,17 @@ export default function Home() {
     touchStartRef.current = null;
   };
 
+  const handleTouchCancel = () => {
+    setSwipeState({ id: null, offset: 0, action: null });
+    touchStartRef.current = null;
+  };
+
   const handleCardDoubleTap = useCallback(
     (activity: Activity, occ: Occurrence | undefined) => {
-      if (activity.measurement_type !== "count" || !occ) return;
+      if (activity.measurement_type !== "count" || !occ || occ.status === "completed") return;
       const now = typeof performance !== "undefined" ? performance.now() : 0;
       if (lastTapRef.current && lastTapRef.current.id === activity.id && now - lastTapRef.current.time < 350) {
-        const step = counterSteps[0] || 1;
+        const step = counterSteps.length > 0 ? Math.min(...counterSteps) : 1;
         triggerHaptic("light");
         void incrementTaskCount(activity, occ, step);
         lastTapRef.current = null;
@@ -2543,7 +2570,7 @@ export default function Home() {
             description: newDescription.trim(),
             schedule_type: newSchedule,
             time_of_day: newTimeOfDay,
-            reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null,
+            ...(editingActivity.reminder_time !== undefined || newReminderTime ? { reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null } : {}),
             schedule_rule: {
               ...(editingActivity.schedule_rule || {}),
               duration_label: durationLabel,
@@ -2566,7 +2593,7 @@ export default function Home() {
           description: newDescription.trim(),
           schedule_type: newSchedule,
           time_of_day: newTimeOfDay,
-          reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null,
+          ...(/^\d{2}:\d{2}$/.test(newReminderTime) ? { reminder_time: newReminderTime } : {}),
           schedule_rule: {
             duration_label: durationLabel,
             duration_days: durationDays,
@@ -2588,6 +2615,44 @@ export default function Home() {
       setMessage(err instanceof Error ? err.message : "Faoliyatni saqlashda xatolik yuz berdi.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function importPreset(preset: Preset) {
+    if (!userId || importingPresetId) return;
+    setImportingPresetId(preset.id);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const rows = preset.items.map((item) => ({
+        user_id: userId,
+        title: item.title[language],
+        description: item.description?.[language] ?? "",
+        schedule_type: "daily",
+        time_of_day: item.timeOfDay,
+        reminder_time: item.reminderTime ?? null,
+        schedule_rule: {
+          duration_label: t.preset_unlimited,
+          duration_days: null,
+          duration_preset: "unlimited",
+          weekdays: item.weekdays ?? ALL_WEEKDAYS,
+          preset_id: preset.id,
+        },
+        measurement_type: item.kind,
+        target: item.kind === "count" ? item.target ?? null : null,
+        unit: item.kind === "count" ? item.unit?.[language] ?? "" : "",
+        starts_on: today(),
+        ends_on: null,
+      }));
+      const { error } = await supabase.from("activities").insert(rows);
+      if (error) throw error;
+      setShowPresetModal(false);
+      await loadWorkspace(userId);
+      setMessage(`${t.preset_import_success}: ${preset.name[language]}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : t.preset_import_error);
+    } finally {
+      setImportingPresetId(null);
     }
   }
 
@@ -3606,6 +3671,59 @@ export default function Home() {
         </div>
       )}
 
+      {/* Preset Import Modal */}
+      {showPresetModal && (
+        <div
+          className="floating-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !importingPresetId) setShowPresetModal(false);
+          }}
+        >
+          <div className="floating-modal-box" role="dialog" aria-modal="true" aria-labelledby="preset-modal-title">
+            <div className="modal-header">
+              <div>
+                <span className="modal-badge">
+                  <IconLibrary className="icon-xs" /> {t.preset_btn}
+                </span>
+                <h3 id="preset-modal-title">{t.preset_modal_title}</h3>
+                <p className="page-subtitle" style={{ marginTop: 4 }}>{t.preset_modal_sub}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowPresetModal(false)}
+                disabled={!!importingPresetId}
+                aria-label={t.btn_cancel}
+              >
+                <IconClose className="icon-sm" />
+              </button>
+            </div>
+
+            <div className="install-guide-list">
+              {PRESETS.map((preset) => (
+                <div key={preset.id} className="install-guide-item">
+                  <div className="install-guide-info" style={{ flex: 1 }}>
+                    <h4>
+                      {preset.name[language]} · {preset.items.length} {t.preset_items_count}
+                    </h4>
+                    <p>{preset.description[language]}</p>
+                    <p style={{ opacity: 0.7 }}>{preset.items.map((i) => i.title[language]).join(" · ")}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-primary-action"
+                    disabled={!!importingPresetId}
+                    onClick={() => void importPreset(preset)}
+                  >
+                    {importingPresetId === preset.id ? t.preset_importing : t.preset_import}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* PWA Install Guide Modal */}
       {showInstallGuideModal && (
         <div
@@ -4397,7 +4515,12 @@ export default function Home() {
                           onTouchStart={(e) => handleTouchStart(activity.id, e)}
                           onTouchMove={(e) => handleTouchMove(activity.id, e)}
                           onTouchEnd={() => handleTouchEnd(activity, occ)}
-                          onDoubleClick={() => handleCardDoubleTap(activity, occ)}
+                          onTouchCancel={handleTouchCancel}
+                          onDoubleClick={(e) => {
+                            // Rapid taps on the +N / checkbox / undo buttons must not trigger the card shortcut.
+                            if ((e.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+                            handleCardDoubleTap(activity, occ);
+                          }}
                         >
                           {/* Swipe background action reveal */}
                           <div
@@ -4465,7 +4588,10 @@ export default function Home() {
                                           .slice()
                                           .sort((a, b) => b - a)
                                           .map((step) => {
-                                            const isVisible = (current === 0 || remaining >= step) && !isDone;
+                                            const smallestStep = Math.min(...counterSteps);
+                                            const anyStepFits = counterSteps.some((st) => st <= remaining);
+                                            const isVisible =
+                                              !isDone && (step <= remaining || (!anyStepFits && step === smallestStep));
                                             return (
                                               <button
                                                 key={step}
@@ -4553,6 +4679,13 @@ export default function Home() {
             <div key="tab-activities" className="tab-pane-container">
               <section className="activities-container">
                 <div className="section-header-bar catalog-header-bar">
+                  <button
+                    type="button"
+                    className="catalog-filter-btn preset-open-btn"
+                    onClick={() => setShowPresetModal(true)}
+                  >
+                    <IconLibrary className="icon-xs" /> {t.preset_btn}
+                  </button>
                   {/* Filter Tabs */}
                   <div className="catalog-filters-bar">
                     <button
