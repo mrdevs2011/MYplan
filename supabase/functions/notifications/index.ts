@@ -9,7 +9,7 @@ Deno.serve(async (req) => {
   if (body?.action === "list") {
     const cutoff = new Date(Date.now() - 3 * 86400000).toISOString();
     const { data, error } = await supabase.from("notifications").select("id,category,title,message,created_at,read_at,data,scheduled_at")
-      .gte("created_at", cutoff).gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(100);
+      .gte("created_at", cutoff).lte("scheduled_at", new Date().toISOString()).gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(100);
     return error ? json({ error: "Could not load notifications" }, 500) : json({ notifications: data ?? [] });
   }
   if (body?.action === "mark-read" && typeof body.id === "string" && typeof body.read === "boolean") {

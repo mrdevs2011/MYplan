@@ -58,7 +58,9 @@ export async function composeNotification(input: {
   const payload = await response.json();
   const parsed = JSON.parse(payload.message?.content || "null");
   if (typeof parsed?.title !== "string" || typeof parsed?.message !== "string") throw new Error("Invalid Ollama response");
-  return { title: parsed.title.trim().slice(0, 120), message: parsed.message.trim().slice(0, 500) };
+  const title = parsed.title.trim().slice(0, 120), message = parsed.message.trim().slice(0, 500);
+  if (!title || !message) throw new Error("Empty Ollama notification copy");
+  return { title, message };
 }
 
 export async function composeNotificationBatch(inputs: Array<{
@@ -92,7 +94,8 @@ export async function composeNotificationBatch(inputs: Array<{
   const output = new Map<string, { title: string; message: string }>();
   for (const item of parsed.notifications) {
     if (typeof item?.id !== "string" || typeof item?.title !== "string" || typeof item?.message !== "string") continue;
-    output.set(item.id, { title: item.title.trim().slice(0, 120), message: item.message.trim().slice(0, 500) });
+    const title = item.title.trim().slice(0, 120), message = item.message.trim().slice(0, 500);
+    if (title && message) output.set(item.id, { title, message });
   }
   return output;
 }
@@ -131,4 +134,27 @@ export function localClock(date: Date, timezone: string) {
   }).formatToParts(date);
   const part = (name: string) => parts.find((item) => item.type === name)?.value || "00";
   return { date: `${part("year")}-${part("month")}-${part("day")}`, minutes: Number(part("hour")) * 60 + Number(part("minute")) };
+}
+
+export function scheduleAfterQuietHours(
+  date: Date,
+  timezone: string,
+  enabled: boolean,
+  quietStart: string,
+  quietEnd: string,
+) {
+  if (!enabled) return date;
+  const parseMinutes = (value: string) => {
+    const match = value.slice(0, 5).match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+    const hours = Number(match[1]), minutes = Number(match[2]);
+    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+  };
+  const start = parseMinutes(quietStart), end = parseMinutes(quietEnd);
+  if (start === null || end === null || start === end) return date;
+  const current = localClock(date, safeTimeZone(timezone)).minutes;
+  const isQuiet = start < end ? current >= start && current < end : current >= start || current < end;
+  if (!isQuiet) return date;
+  const delayMinutes = (end - current + 1440) % 1440 || 1440;
+  return new Date(date.getTime() + delayMinutes * 60_000);
 }

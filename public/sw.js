@@ -1,5 +1,5 @@
 // MYplan service worker: offline shell + standards-based Web Push.
-const CACHE_NAME = "myplan-v9-edge-push";
+const CACHE_NAME = "myplan-v10-notification-reliability";
 
 self.addEventListener("install", () => self.skipWaiting());
 

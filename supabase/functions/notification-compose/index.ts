@@ -1,4 +1,4 @@
-import { adminClient, composeNotification, corsHeaders, json, safeTimeZone, userClient } from "../_shared/notifications.ts";
+import { adminClient, composeNotification, corsHeaders, json, safeTimeZone, scheduleAfterQuietHours, userClient } from "../_shared/notifications.ts";
 
 const categories = ["daily", "streak", "productivity", "motivation", "evening", "system"] as const;
 Deno.serve(async (req) => {
@@ -25,17 +25,13 @@ Deno.serve(async (req) => {
   if (countError) return json({ error: "Could not check notification limit" }, 500);
   if ((count ?? 0) >= (prefs?.daily_limit ?? 3)) return json({ skipped: true, reason: "daily_limit" });
   const now = new Date();
-  let scheduledAt = now;
-  if (prefs?.quiet_hours_enabled !== false) {
-    const zone = safeTimeZone(profile?.timezone);
-    const local = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-    const minute = Number(local.find((p) => p.type === "hour")?.value || 0) * 60 + Number(local.find((p) => p.type === "minute")?.value || 0);
-    const [sh, sm] = (prefs?.quiet_hours_start || "22:00").slice(0, 5).split(":").map(Number);
-    const [eh, em] = (prefs?.quiet_hours_end || "08:00").slice(0, 5).split(":").map(Number);
-    const start = sh * 60 + sm, end = eh * 60 + em;
-    const quiet = start === end ? false : start < end ? minute >= start && minute < end : minute >= start || minute < end;
-    if (quiet) scheduledAt = new Date(now.getTime() + (((end - minute + 1440) % 1440) || 1440) * 60000);
-  }
+  const scheduledAt = scheduleAfterQuietHours(
+    now,
+    safeTimeZone(profile?.timezone),
+    prefs?.quiet_hours_enabled !== false,
+    prefs?.quiet_hours_start || "22:00",
+    prefs?.quiet_hours_end || "08:00",
+  );
   const language: "uz" | "en" | "ru" = profile?.language === "en" || profile?.language === "ru" ? profile.language : "uz";
   const fallback = {
     uz: { title: "Kichik bir qadam tashla", message: "Rejangdagi eng muhim ishga 5 daqiqa ajrat. Kichik qadam ham oldinga siljishdir." },

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { getRecommendedFocusActivity } from "@/lib/focus-recommendation";
 import { translations, type Language } from "@/lib/translations";
 import {
   IconCheck,
@@ -454,6 +455,18 @@ export default function Home() {
   const [focusTimerInitial, setFocusTimerInitial] = useState(300);
   const [isFocusTimerRunning, setIsFocusTimerRunning] = useState(false);
   const [focusCelebration, setFocusCelebration] = useState(false);
+  const [focusClockMinute, setFocusClockMinute] = useState<number | null>(null);
+
+  // Keep time-window recommendations accurate while the app stays open.
+  useEffect(() => {
+    const updateClock = () => {
+      const now = new Date();
+      setFocusClockMinute(now.getHours() * 60 + now.getMinutes());
+    };
+    updateClock();
+    const interval = window.setInterval(updateClock, 15_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   // Focus Timer interval effect
   useEffect(() => {
@@ -1367,8 +1380,11 @@ export default function Home() {
                 timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
                 isRead: Boolean(row.read_at),
               };
-              setNotifications((prev) => prev.some((n) => n.id === item.id) ? prev : [item, ...prev].slice(0, 100));
-              if (document.visibilityState === "visible" && (!row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now()) && !toastedNotificationIdsRef.current.has(item.id)) {
+              const isDue = !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now();
+              if (isDue) {
+                setNotifications((prev) => prev.some((n) => n.id === item.id) ? prev : [item, ...prev].slice(0, 100));
+              }
+              if (document.visibilityState === "visible" && isDue && !toastedNotificationIdsRef.current.has(item.id)) {
                 toastedNotificationIdsRef.current.add(item.id);
                 setActiveToast(item);
               }
@@ -2217,10 +2233,17 @@ export default function Home() {
 
   // Notification helpers
   const markNotificationAsRead = (id: string) => {
-    const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
-    setNotifications(updated);
+    setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: true } : item));
     void createClient().functions.invoke("notifications", { body: { action: "mark-read", id, read: true } })
-      .then(({ error }) => { if (error) console.warn("Could not sync notification read state:", error); });
+      .then(({ error }) => {
+        if (!error) return;
+        console.warn("Could not sync notification read state:", error);
+        setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: false } : item));
+      })
+      .catch((error) => {
+        console.warn("Could not sync notification read state:", error);
+        setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: false } : item));
+      });
     if (activeToast?.id === id) setActiveToast(null);
   };
 
@@ -2687,18 +2710,11 @@ export default function Home() {
     });
   }, [activities, catalogFilter, catalogSearch]);
 
-  // Next Priority Focus Recommendation
+  // Exact time windows have priority; all-day tasks are fallback only.
   const recommendedFocusActivity = useMemo(() => {
-    const incompleteActs = activeActivities.filter((act) => {
-      const occ = occurrences.find((o) => o.activity_id === act.id);
-      return occ?.status !== "completed";
-    });
-    if (incompleteActs.length === 0) return null;
-    const hour = new Date().getHours();
-    const currentZone = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 18 ? "afternoon" : "evening";
-    const matchingZone = incompleteActs.find((act) => act.time_of_day === currentZone);
-    return matchingZone || incompleteActs[0];
-  }, [activeActivities, occurrences]);
+    if (focusClockMinute === null) return null;
+    return getRecommendedFocusActivity(activeActivities, occurrences, customTimeSlots, focusClockMinute);
+  }, [activeActivities, occurrences, customTimeSlots, focusClockMinute]);
 
   // Discipline Momentum Index (Consistency rolling calculation)
   const momentumScore = useMemo(() => {
