@@ -1,4 +1,5 @@
 import webpush from "npm:web-push@3.6.7";
+import { dueStageIds, dueSummaryTime, planReminderMinutes, type StageId } from "../_shared/reminders.ts";
 import { adminClient, composeNotificationBatch, corsHeaders, isCronAuthorized, json, localClock, safeTimeZone, scheduleAfterQuietHours } from "../_shared/notifications.ts";
 
 Deno.serve(async (req) => {
@@ -101,59 +102,92 @@ Deno.serve(async (req) => {
   }));
   generated = inserted.filter((result) => result.status === "fulfilled" && result.value).length;
   for (const result of inserted) if (result.status === "rejected") console.error("Notification insert failed:", result.reason);
-  // Per-task reminders: fire at the task's own reminder_time on the user's local clock.
-  // They are explicit user requests, so they ignore the companion daily cap and quiet hours,
-  // but respect the master switches and skip tasks already completed today.
+  // ---- Per-task reminder engine ---------------------------------------------------
+  // Every active task scheduled for today climbs a reminder ladder until it is completed:
+  //   pre (-10 min) -> due (0) -> late1 (+20) -> late2 (+60), plus pending-summary nags.
+  // Tasks with an explicit reminder_time use it. Others are spread evenly across their
+  // time-of-day window, so 20 tasks never fire in the same minute.
+  // Reminders ignore quiet hours and the companion daily cap (the user asked for them),
+  // but the master switches (profile / preferences / "productivity" category) still apply.
+  type ReminderTask = {
+    id: string; user_id: string; title: string; measurement_type: string; target: number | null; unit: string | null;
+    schedule_type: string; schedule_rule: { weekdays?: number[] } | null; starts_on: string; ends_on: string | null;
+    time_of_day: string | null; created_at: string; reminder_time?: string | null;
+  };
+  const baseColumns = "id,user_id,title,measurement_type,target,unit,schedule_type,schedule_rule,starts_on,ends_on,time_of_day,created_at";
   let reminders = 0;
-  const reminderRows: Array<{ id: string; user_id: string; title: string; measurement_type: string; target: number | null; unit: string | null; schedule_type: string; schedule_rule: { weekdays?: number[] } | null; starts_on: string; ends_on: string | null; reminder_time: string }> = [];
-  for (let offset = 0; offset < profiles.length; offset += 100) {
-    const { data, error: reminderError } = await admin.from("activities")
-      .select("id,user_id,title,measurement_type,target,unit,schedule_type,schedule_rule,starts_on,ends_on,reminder_time")
-      .in("user_id", profiles.slice(offset, offset + 100).map((profile) => profile.id))
-      .eq("is_active", true).not("reminder_time", "is", null);
-    if (reminderError) { console.error("Could not load reminder tasks:", reminderError); break; }
-    reminderRows.push(...(data ?? []));
+  const taskRowsAll: ReminderTask[] = [];
+  let hasReminderColumn = true;
+  for (let offset = 0; offset < profiles.length; offset += 25) {
+    const ids = profiles.slice(offset, offset + 25).map((profile) => profile.id);
+    let result: { data: unknown[] | null; error: { code?: string } | null } = await admin.from("activities").select(`${baseColumns},reminder_time`).in("user_id", ids).eq("is_active", true);
+    if (result.error?.code === "42703") { // migration 012 not applied yet: ladder still works with derived times
+      hasReminderColumn = false;
+      result = await admin.from("activities").select(baseColumns).in("user_id", ids).eq("is_active", true);
+    }
+    if (result.error) { console.error("Could not load tasks for reminders:", result.error); break; }
+    taskRowsAll.push(...((result.data ?? []) as ReminderTask[]));
   }
-  const remindersByUser = new Map<string, typeof reminderRows>();
-  for (const row of reminderRows) remindersByUser.set(row.user_id, [...(remindersByUser.get(row.user_id) ?? []), row]);
-  const reminderResults = await Promise.allSettled(profiles.filter((profile) => remindersByUser.has(profile.id)).map(async (profile) => {
+  if (!hasReminderColumn) console.warn("activities.reminder_time is missing; using derived reminder times only");
+  const tasksByUser = new Map<string, ReminderTask[]>();
+  for (const row of taskRowsAll) tasksByUser.set(row.user_id, [...(tasksByUser.get(row.user_id) ?? []), row]);
+  const reminderResults = await Promise.allSettled(profiles.filter((profile) => tasksByUser.has(profile.id)).map(async (profile) => {
     const clock = localClock(now, safeTimeZone(profile.timezone));
     const weekday = ((new Date(`${clock.date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
-    const due = (remindersByUser.get(profile.id) ?? []).filter((task) => {
-      const match = String(task.reminder_time).match(/^(\d{2}):(\d{2})/);
-      if (!match) return false;
-      const at = Number(match[1]) * 60 + Number(match[2]);
-      // 15 minute catch-up window tolerates cron jitter; the dedupe key prevents repeats.
-      if (clock.minutes < at || clock.minutes >= at + 15) return false;
+    const today = (tasksByUser.get(profile.id) ?? []).filter((task) => {
       if (task.starts_on > clock.date || (task.ends_on && task.ends_on < clock.date)) return false;
       if (task.schedule_type === "once") return task.starts_on === clock.date;
       const weekdays = task.schedule_rule?.weekdays;
       return !Array.isArray(weekdays) || weekdays.length === 0 || weekdays.includes(weekday);
     });
-    if (!due.length) return 0;
+    if (!today.length) return 0;
+    const at = planReminderMinutes(today);
+    const dueStages: Array<{ task: ReminderTask; stage: { id: StageId } }> = [];
+    for (const task of today) for (const id of dueStageIds(at.get(task.id)!, clock.minutes)) dueStages.push({ task, stage: { id } });
+    const summaryTime = dueSummaryTime(clock.minutes);
+    if (!dueStages.length && summaryTime === undefined) return 0;
     const [prefsResult, occResult] = await Promise.all([
       admin.from("notification_preferences").select("enabled,category_settings").eq("user_id", profile.id).maybeSingle(),
-      admin.from("occurrences").select("activity_id,status").eq("user_id", profile.id).eq("period_start", clock.date).in("activity_id", due.map((task) => task.id)),
+      admin.from("occurrences").select("activity_id,status").eq("user_id", profile.id).eq("period_start", clock.date),
     ]);
     if (prefsResult.error || occResult.error) throw new Error("Could not load reminder context");
     if (prefsResult.data?.enabled === false || prefsResult.data?.category_settings?.productivity === false) return 0;
     const finished = new Set((occResult.data ?? []).filter((occ) => occ.status !== "pending").map((occ) => occ.activity_id));
     const language: "uz" | "en" | "ru" = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
-    let created = 0;
-    for (const task of due) {
+    const expiresAt = new Date(now.getTime() + 3 * 86400000).toISOString();
+    const rows: Array<Record<string, unknown>> = [];
+    for (const { task, stage } of dueStages) {
       if (finished.has(task.id)) continue;
-      const goal = task.measurement_type === "count" && task.target ? ` ${Number(task.target)}${task.unit ? ` ${task.unit}` : ""}` : "";
-      const message = { uz: `Vaqti keldi${goal ? `. Maqsad:${goal}` : ""}.`, en: `It's time${goal ? `. Goal:${goal}` : ""}.`, ru: `Пора${goal ? `. Цель:${goal}` : ""}.` }[language];
-      const { error: insertError } = await admin.from("notifications").insert({
-        user_id: profile.id, category: "productivity", title: task.title.slice(0, 120), message,
-        data: { url: "/", activityId: task.id, kind: "task-reminder" },
-        dedupe_key: `task-reminder:${task.id}:${clock.date}`, scheduled_at: nowIso,
-        expires_at: new Date(now.getTime() + 3 * 86400000).toISOString(),
+      const goal = task.measurement_type === "count" && task.target ? `${Number(task.target)}${task.unit ? ` ${task.unit}` : ""}` : "";
+      const copy = {
+        pre: { uz: "10 daqiqadan keyin vaqti.", en: "Starts in 10 minutes.", ru: "Через 10 минут." },
+        due: { uz: `Vaqti keldi${goal ? `. Maqsad: ${goal}` : ""}.`, en: `It's time${goal ? `. Goal: ${goal}` : ""}.`, ru: `Пора${goal ? `. Цель: ${goal}` : ""}.` },
+        late1: { uz: "Hali bajarilmadi. Hoziroq boshlab qo‘y.", en: "Still not done. Start now.", ru: "Ещё не выполнено. Начни сейчас." },
+        late2: { uz: "Bu vazifa hali kutmoqda. Bugun unutib qoldirma.", en: "This task is still waiting. Don't let it slip today.", ru: "Задача всё ещё ждёт. Не упусти её сегодня." },
+      }[stage.id][language];
+      rows.push({
+        user_id: profile.id, category: "productivity", title: task.title.slice(0, 120), message: copy,
+        data: { url: "/", activityId: task.id, kind: "task-reminder", stage: stage.id },
+        dedupe_key: `task-${stage.id}:${task.id}:${clock.date}`, scheduled_at: nowIso, expires_at: expiresAt,
       });
-      if (insertError && insertError.code !== "23505") throw insertError;
-      if (!insertError) created++;
     }
-    return created;
+    if (summaryTime !== undefined) {
+      const left = today.filter((task) => !finished.has(task.id)).length;
+      if (left > 0) {
+        rows.push({
+          user_id: profile.id, category: "productivity",
+          title: { uz: "Bajarilmagan vazifalar", en: "Unfinished tasks", ru: "Невыполненные задачи" }[language],
+          message: { uz: `Bugun ${left} ta vazifa hali bajarilmadi. Hozir bittasini yop.`, en: `${left} tasks are still open today. Close one now.`, ru: `Сегодня не выполнено задач: ${left}. Закрой одну прямо сейчас.` }[language],
+          data: { url: "/", kind: "task-reminder", stage: "summary" },
+          dedupe_key: `pending-summary:${summaryTime}:${clock.date}`, scheduled_at: nowIso, expires_at: expiresAt,
+        });
+      }
+    }
+    if (!rows.length) return 0;
+    const { data: created, error: insertError } = await admin.from("notifications")
+      .upsert(rows, { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }).select("id");
+    if (insertError) throw insertError;
+    return created?.length ?? 0;
   }));
   for (const result of reminderResults) {
     if (result.status === "fulfilled") reminders += result.value;
@@ -180,6 +214,8 @@ Deno.serve(async (req) => {
       await admin.from("notifications").update({ sent_at: nowIso, dispatch_locked_until: null }).eq("id", notification.id);
       continue;
     }
+    // A stale "it's time" is useless: reminders expire at the push service after 30 minutes and use high urgency.
+    const isTaskReminder = notification.data?.kind === "task-reminder";
     let deliveryLookupFailed = false;
     let deliveryPersistenceFailed = false;
     for (const sub of subs) {
@@ -193,7 +229,7 @@ Deno.serve(async (req) => {
         continue;
       }
       try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify({ id: notification.id, title: notification.title, body: notification.message, category: notification.category, url: notification.data?.url || "/" }), { TTL: 86400, urgency: "normal" });
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify({ id: notification.id, title: notification.title, body: notification.message, category: notification.category, url: notification.data?.url || "/", kind: notification.data?.kind || null, activityId: notification.data?.activityId || null }), isTaskReminder ? { TTL: 1800, urgency: "high" } : { TTL: 10800, urgency: "normal" });
         pushSent++;
         const [subscriptionUpdate, deliveryUpdate] = await Promise.all([
           admin.from("push_subscriptions").update({ last_success_at: nowIso }).eq("id", sub.id),

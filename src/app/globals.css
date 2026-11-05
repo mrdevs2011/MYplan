@@ -8428,3 +8428,13 @@ textarea,
 .life-select-option:focus-visible { outline: 2px solid var(--accent-lime); outline-offset: -2px; }
 @media (max-width: 540px) { .life-select-trigger { min-height: 50px; padding-inline: 13px; } .life-select-popover { max-height: min(55vh,340px); } }
 @media (prefers-reduced-motion: reduce) { .life-select-trigger,.life-select-chevron,.life-select-option { transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+
+/* Persistent "turn notifications on" prompt: intentionally hard to ignore, returns after a short snooze. */
+.push-nag-backdrop { z-index: 10000; backdrop-filter: blur(6px); }
+.push-nag-box { max-width: 440px; text-align: center; border: 2px solid var(--accent, #b4f04c); }
+.push-nag-bell { width: 72px; height: 72px; margin: 4px auto 12px; display: grid; place-items: center; border-radius: 50%; background: rgba(180, 240, 76, 0.16); animation: push-nag-pulse 1.4s ease-in-out infinite; }
+.push-nag-body { margin: 8px 0 16px; line-height: 1.5; }
+.push-nag-actions { display: grid; gap: 10px; }
+@keyframes push-nag-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12) rotate(-6deg); } }
+@media (prefers-reduced-motion: reduce) { .push-nag-bell { animation: none; } }

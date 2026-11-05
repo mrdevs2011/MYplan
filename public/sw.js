@@ -1,7 +1,14 @@
 // MYplan service worker: offline shell + standards-based Web Push.
-const CACHE_NAME = "myplan-v10-notification-reliability";
+const CACHE_NAME = "myplan-v11-reminders-pwa";
+const PRECACHE = ["/", "/manifest.json", "/pwa-192.png", "/pwa-512.png", "/apple-touch-icon.png"];
 
-self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("install", (event) => {
+  // Best-effort precache so the shell opens offline after the first visit; never block installation on it.
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => Promise.allSettled(PRECACHE.map((url) => cache.add(url)))).catch(() => undefined)
+      .then(() => self.skipWaiting())
+  );
+});
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
@@ -20,12 +27,20 @@ self.addEventListener("push", (event) => {
     if (visibleClient) {
       visibleClient.postMessage({ type: "MYPLAN_PUSH", payload });
     }
+    // Task reminders are urgent: one slot per task (later stages replace earlier ones but still alert),
+    // they stay on screen until dealt with and vibrate.
+    const isTaskReminder = payload.kind === "task-reminder";
     const options = {
       body: typeof payload.body === "string" ? payload.body : "Senga yangi eslatma bor.",
       icon: "/pwa-192.png",
       badge: "/pwa-192.png",
-      tag: typeof payload.id === "string" ? `myplan-${payload.id}` : "myplan-notification",
-      renotify: false,
+      tag: isTaskReminder && typeof payload.activityId === "string"
+        ? `myplan-task-${payload.activityId}`
+        : typeof payload.id === "string" ? `myplan-${payload.id}` : "myplan-notification",
+      renotify: isTaskReminder,
+      requireInteraction: isTaskReminder,
+      vibrate: isTaskReminder ? [200, 100, 200, 100, 200] : [120],
+      timestamp: Date.now(),
       data: {
         url: typeof payload.url === "string" && payload.url.startsWith("/") && !payload.url.startsWith("//") && !payload.url.includes("\\") ? payload.url : "/",
         notificationId: typeof payload.id === "string" ? payload.id : null,

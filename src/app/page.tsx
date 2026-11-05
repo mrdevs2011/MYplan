@@ -245,6 +245,11 @@ function triggerHaptic(type: "light" | "medium" | "heavy" | "success" | "warning
   }
 }
 
+function urlBase64ToUint8Array(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
 function getLocalizedNotification(
   n: MyPlanNotification,
   t: Record<string, string>
@@ -394,6 +399,10 @@ export default function Home() {
   const [pushPermission, setPushPermission] = useState<NotificationPermission>("default");
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [pushChecked, setPushChecked] = useState(false);
+  const [nagSnoozedUntil, setNagSnoozedUntil] = useState(0);
+  const [nagNow, setNagNow] = useState(0);
+  const pushSyncedUserRef = useRef<string | null>(null);
 
   // PWA State
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -1811,11 +1820,18 @@ export default function Home() {
           // In particular, some WebKit-based browsers expose serviceWorker but no pushManager.
           if (!("pushManager" in registration) || !registration.pushManager) {
             setPushSubscribed(false);
+            setPushChecked(true);
             return;
           }
           const subscription = await registration.pushManager.getSubscription();
           setPushSubscribed(Boolean(subscription));
-        }).catch((error) => console.warn("Service worker registration failed:", error));
+          setPushChecked(true);
+        }).catch((error) => {
+          console.warn("Service worker registration failed:", error);
+          setPushChecked(true);
+        });
+      } else {
+        setTimeout(() => setPushChecked(true), 0);
       }
     }
 
@@ -1928,6 +1944,25 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showCreateModal, resetModalState]);
 
+  // Re-evaluate the "turn notifications on" prompt every few seconds so a snooze always expires.
+  useEffect(() => {
+    const tick = () => setNagNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 5000);
+    return () => { clearTimeout(first); clearInterval(timer); };
+  }, []);
+
+  const pushNagMode: "ask" | "denied" | "ios-install" | "unsupported" | null = (() => {
+    if (typeof window === "undefined" || !pushChecked || !userId || loadingData || nagNow === 0) return null;
+    if (process.env.NODE_ENV !== "production") return null;
+    if (pushSubscribed && pushPermission === "granted") return null;
+    if (nagNow < nagSnoozedUntil) return null;
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
+    if (!supported) return isIOS && !isAppInstalled ? "ios-install" : "unsupported";
+    return pushPermission === "denied" ? "denied" : "ask";
+  })();
+
   // Scroll lock background when any modal is open so modal scrolls freely
   useEffect(() => {
     const isModalActive =
@@ -1935,7 +1970,8 @@ export default function Home() {
       focusModalOpen ||
       showInstallGuideModal ||
       showCustomTimeModal ||
-      showEveningReview;
+      showEveningReview ||
+      pushNagMode !== null;
     if (typeof document !== "undefined") {
       if (isModalActive) {
         document.body.style.overflow = "hidden";
@@ -1951,7 +1987,7 @@ export default function Home() {
         document.documentElement.style.overflow = "";
       }
     };
-  }, [showCreateModal, focusModalOpen, showInstallGuideModal, showCustomTimeModal, showEveningReview]);
+  }, [showCreateModal, focusModalOpen, showInstallGuideModal, showCustomTimeModal, showEveningReview, pushNagMode]);
 
   // PWA Install handler with full fallback guide modal
   const handleInstallApp = async () => {
@@ -2344,6 +2380,61 @@ export default function Home() {
     } catch (error) {
       console.error("Push subscription failed:", error);
       alert(error instanceof Error ? error.message : "Push sozlashda xatolik yuz berdi.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  // Subscribe-only (never toggles off). `silent` = never open the browser permission dialog.
+  // Also heals the server copy of the subscription and takes the device over when another
+  // account on the same browser still owns the push endpoint.
+  const enablePushForThisDevice = useCallback(async (silent = false): Promise<boolean> => {
+    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window) || !window.isSecureContext) return false;
+    const registration = await navigator.serviceWorker.ready;
+    if (!registration.pushManager) return false;
+    let permission = Notification.permission;
+    if (permission === "default" && !silent) permission = await Notification.requestPermission();
+    setPushPermission(permission);
+    if (permission !== "granted") return false;
+    const supabase = createClient();
+    const subscribeFresh = async () => {
+      const { data: keyData, error: keyError } = await supabase.functions.invoke("notification-public-key", { body: {} });
+      if (keyError || !keyData?.publicKey) throw new Error("Push kaliti serverda sozlanmagan.");
+      return registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array((keyData as { publicKey: string }).publicKey) });
+    };
+    let subscription = (await registration.pushManager.getSubscription()) ?? (await subscribeFresh());
+    let { error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } });
+    if (error && (error as { context?: Response }).context?.status === 409) {
+      await subscription.unsubscribe().catch(() => false);
+      subscription = await subscribeFresh();
+      ({ error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } }));
+    }
+    if (error) {
+      await subscription.unsubscribe().catch(() => false);
+      throw error;
+    }
+    setPushSubscribed(true);
+    return true;
+  }, []);
+
+  // Keep this device registered for the signed-in account: runs silently once per account per page load.
+  useEffect(() => {
+    if (!userId || !pushChecked || process.env.NODE_ENV !== "production") return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (pushSyncedUserRef.current === userId) return;
+    pushSyncedUserRef.current = userId;
+    void enablePushForThisDevice(true).catch((error) => console.warn("Push re-sync failed:", error));
+  }, [userId, pushChecked, enablePushForThisDevice]);
+
+  const handleNagEnable = async () => {
+    if (pushBusy) return;
+    setPushBusy(true);
+    try {
+      const ok = await enablePushForThisDevice(false);
+      if (!ok) setNagSnoozedUntil(Date.now() + 60_000);
+    } catch (error) {
+      console.error("Push enable failed:", error);
+      setNagSnoozedUntil(Date.now() + 60_000);
     } finally {
       setPushBusy(false);
     }
@@ -3725,6 +3816,33 @@ export default function Home() {
       )}
 
       {/* PWA Install Guide Modal */}
+      {pushNagMode && (
+        <div className="floating-modal-backdrop push-nag-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="push-nag-title" aria-describedby="push-nag-body">
+          <div className="floating-modal-box push-nag-box">
+            <div className="push-nag-bell"><IconBell className="icon-lg" /></div>
+            <h3 id="push-nag-title">{t.nag_title}</h3>
+            <p id="push-nag-body" className="push-nag-body">
+              {pushNagMode === "ask" ? t.nag_body_ask : pushNagMode === "denied" ? t.nag_body_denied : pushNagMode === "ios-install" ? t.nag_body_ios : t.nag_body_unsupported}
+            </p>
+            <div className="modal-actions push-nag-actions">
+              {pushNagMode === "ask" && (
+                <button type="button" className="btn-modal-submit w-full" disabled={pushBusy} onClick={() => void handleNagEnable()}>
+                  {pushBusy ? t.nag_enabling : t.nag_btn_enable}
+                </button>
+              )}
+              {pushNagMode === "ios-install" && (
+                <button type="button" className="btn-modal-submit w-full" onClick={() => void handleInstallApp()}>
+                  {t.btn_install_app}
+                </button>
+              )}
+              <button type="button" className="btn-modal-cancel w-full" onClick={() => setNagSnoozedUntil(Date.now() + 60_000)}>
+                {t.nag_btn_later}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showInstallGuideModal && (
         <div
           className="floating-modal-backdrop sub-modal-backdrop"
@@ -3759,8 +3877,8 @@ export default function Home() {
                   <IconSmartphone className="icon-md" />
                 </div>
                 <div className="install-guide-info">
-                  <h4>Chrome / Android</h4>
-                  <p>Agar o‘rnatish oynasi avtomatik ochilmasa, Chrome menyusidagi &laquo;Ilovani o‘rnatish&raquo; bandini tanla.</p>
+                  <h4>{t.install_chrome_title}</h4>
+                  <p>{t.install_chrome_desc}</p>
                 </div>
               </div>
 
@@ -3769,8 +3887,8 @@ export default function Home() {
                   <IconTablet className="icon-md" />
                 </div>
                 <div className="install-guide-info">
-                  <h4>Safari / iOS (iPhone, iPad)</h4>
-                  <p>iOS Safari saytga PWA o‘rnatish oynasini ochishga ruxsat bermaydi. Shu sabab bu qurilmada tugma orqali bevosita o‘rnatish imkoni yo‘q.</p>
+                  <h4>{t.install_safari_title}</h4>
+                  <p>{t.install_safari_desc}</p>
                 </div>
               </div>
 
@@ -3779,8 +3897,8 @@ export default function Home() {
                   <IconLaptop className="icon-md" />
                 </div>
                 <div className="install-guide-info">
-                  <h4>Kompyuter (Chrome, Edge)</h4>
-                  <p>Manzil satri o‘ng tomonidagi &laquo;O‘rnatish&raquo; (Install) belgisini bosing.</p>
+                  <h4>{t.install_desktop_title}</h4>
+                  <p>{t.install_desktop_desc}</p>
                 </div>
               </div>
             </div>

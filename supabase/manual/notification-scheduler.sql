@@ -1,4 +1,5 @@
 -- Run once in Supabase SQL Editor after deploying notification-dispatch.
+-- Runs every minute so per-task reminders fire on time. cron.schedule() with an existing job name replaces that job.
 -- Replace all placeholders. Keep the cron secret only in Supabase Vault and Edge Function secrets.
 create extension if not exists pg_cron with schema pg_catalog;
 create extension if not exists pg_net with schema extensions;
@@ -9,7 +10,7 @@ select vault.create_secret('REPLACE_WITH_NOTIFICATIONS_CRON_SECRET', 'myplan_not
 
 select cron.schedule(
   'myplan-notification-dispatch',
-  '*/5 * * * *',
+  '* * * * *',
   $$
     select net.http_post(
       url := (select decrypted_secret from vault.decrypted_secrets where name = 'myplan_supabase_url') || '/functions/v1/notification-dispatch',
