@@ -1,5 +1,6 @@
 "use client";
 
+import { saveAccountSession } from "@/lib/account-sessions";
 import { useEffect, useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -224,6 +225,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         if (error) throw error;
         const newUser = data.user;
         if (data.session && newUser) {
+          saveAccountSession(data.session);
           if (typeof window !== "undefined") {
             void syncCurrentDeviceSession(supabase, newUser.id);
             localStorage.removeItem("myplan_add_account_intent");
@@ -270,6 +272,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
             await supabase.auth.signOut({ scope: "local" });
             throw new Error("Kiritilgan hisob sessiyasi saqlanmadi. Iltimos, qayta urinib ko'r.");
           }
+          saveAccountSession(persistedSession.session);
           localStorage.removeItem("myplan_switch_account_id");
           localStorage.removeItem("myplan_add_account_intent");
           await syncCurrentDeviceSession(supabase, signInData.user.id);

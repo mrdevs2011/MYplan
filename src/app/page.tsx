@@ -70,6 +70,13 @@ import {
   IconCircleDot,
 } from "@/components/icons";
 import {
+  saveAccountSession,
+  removeAccountSession,
+  pruneAccountSessions,
+  restoreAccountSession,
+  revokeSessionToken,
+} from "@/lib/account-sessions";
+import {
   getOrCreateSessionToken,
   syncCurrentDeviceSession,
   checkDeviceSessionActive,
@@ -131,6 +138,7 @@ interface Activity {
   description: string | null;
   schedule_type: "daily" | "once";
   time_of_day?: string;
+  reminder_time?: string | null;
   schedule_rule?: {
     duration_label?: string;
     duration_days?: number | null;
@@ -430,6 +438,7 @@ export default function Home() {
   // Pocket Companion: Vaqt Zonalari (Morning, Afternoon, Evening, Anytime, Custom)
   const [activeTimeFilter, setActiveTimeFilter] = useState<string>("all");
   const [newTimeOfDay, setNewTimeOfDay] = useState<string>("anytime");
+  const [newReminderTime, setNewReminderTime] = useState<string>("");
 
   // Pocket Companion: Offline-First Sync Queue
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -940,7 +949,7 @@ export default function Home() {
           .maybeSingle(),
         supabase
           .from("activities")
-          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on,time_of_day")
+          .select("id,title,description,schedule_type,schedule_rule,measurement_type,target,unit,is_active,starts_on,ends_on,time_of_day,reminder_time")
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
       ]);
@@ -1487,6 +1496,7 @@ export default function Home() {
 
         const currentId = session.user.id;
         localStorage.setItem("myplan_active_account_id", currentId);
+        saveAccountSession(session);
         const currentName = String(
           session.user.user_metadata?.full_name || session.user.user_metadata?.username || ""
         );
@@ -1552,6 +1562,7 @@ export default function Home() {
       if (disposed) return;
       if (session?.user) {
         const nextUserId = session.user.id;
+        saveAccountSession(session);
         if (workspaceUserRef.current && workspaceUserRef.current !== nextUserId) {
           setActivities([]);
           setOccurrences([]);
@@ -1858,6 +1869,7 @@ export default function Home() {
     setCustomDurationValue("");
     setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
     setNewTimeOfDay("anytime");
+    setNewReminderTime("");
     setDebouncedDurationError("");
     setDebouncedCountError("");
     setCreateTaskKind("check");
@@ -1877,6 +1889,7 @@ export default function Home() {
     setCountTarget(act.target ? String(act.target) : "");
     setCountUnit(act.unit || "marta");
     setNewTimeOfDay(act.time_of_day || "anytime");
+    setNewReminderTime(act.reminder_time ? act.reminder_time.slice(0, 5) : "");
     if (act.schedule_rule?.duration_preset) {
       setDurationPreset(act.schedule_rule.duration_preset as DurationPreset);
     }
@@ -2175,12 +2188,20 @@ export default function Home() {
   const switchAccount = async (targetAccount: UserAccount) => {
     if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined") return;
 
-    // A saved account ID is not an authentication credential. Never impersonate it
-    // by changing React state: require that account's password and let Supabase
-    // issue a real session before showing any of its private data.
+    const supabase = createClient();
+    // The vault keeps a real Supabase session per account (see account-sessions.ts),
+    // so switching restores that account's own tokens: no password prompt, and no
+    // private data is shown unless Supabase accepts the stored refresh token.
+    if (await restoreAccountSession(supabase, targetAccount.id)) {
+      localStorage.setItem("myplan_active_account_id", targetAccount.id);
+      // Full reload so no state from the previous account survives.
+      window.location.replace("/");
+      return;
+    }
+
+    // No usable saved session (expired/revoked): ask for that account's password.
     localStorage.setItem("myplan_switch_account_id", targetAccount.id);
     localStorage.setItem("myplan_add_account_intent", "true");
-    const supabase = createClient();
     const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) {
       localStorage.removeItem("myplan_switch_account_id");
@@ -2211,10 +2232,16 @@ export default function Home() {
         const remaining = vault.filter((acc) => acc.id !== userId);
         localStorage.setItem("myplan_accounts_vault", JSON.stringify(remaining));
         setSavedAccounts(remaining);
+        if (userId) removeAccountSession(userId);
+        pruneAccountSessions(remaining.map((acc) => acc.id));
 
         if (remaining.length > 0) {
+          const supabase = createClient();
+          // Revoke the leaving account on the server first, then move on to the next one.
+          const { data: current } = await supabase.auth.getSession();
+          if (current.session) await revokeSessionToken(current.session.access_token);
           const nextAcc = remaining[0];
-          switchAccount(nextAcc);
+          await switchAccount({ ...nextAcc, id: nextAcc.id });
           return;
         }
       }
@@ -2516,6 +2543,7 @@ export default function Home() {
             description: newDescription.trim(),
             schedule_type: newSchedule,
             time_of_day: newTimeOfDay,
+            reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null,
             schedule_rule: {
               ...(editingActivity.schedule_rule || {}),
               duration_label: durationLabel,
@@ -2538,6 +2566,7 @@ export default function Home() {
           description: newDescription.trim(),
           schedule_type: newSchedule,
           time_of_day: newTimeOfDay,
+          reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null,
           schedule_rule: {
             duration_label: durationLabel,
             duration_days: durationDays,
@@ -3268,6 +3297,27 @@ export default function Home() {
                     <span>{t.time_opt_custom}</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Eslatma vaqti (Reminder time) */}
+              <div className="form-group reminder-time-group">
+                <label htmlFor="modal-task-reminder" className="field-label-row">
+                  <span>{t.label_reminder_time}</span>
+                </label>
+                <div className="custom-duration-input-row">
+                  <input
+                    id="modal-task-reminder"
+                    type="time"
+                    value={newReminderTime}
+                    onChange={(e) => setNewReminderTime(e.target.value)}
+                  />
+                  {newReminderTime && (
+                    <button type="button" className="time-choice-btn" onClick={() => setNewReminderTime("")}>
+                      <span>{t.btn_clear_reminder}</span>
+                    </button>
+                  )}
+                </div>
+                <small>{t.hint_reminder_time}</small>
               </div>
 
               {/* Muddat (Davomiylik) Tanlovi */}
