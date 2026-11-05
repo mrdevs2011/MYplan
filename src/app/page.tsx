@@ -2021,8 +2021,7 @@ export default function Home() {
       focusModalOpen ||
       showInstallGuideModal ||
       showCustomTimeModal ||
-      showEveningReview ||
-      pushNagMode !== null;
+      showEveningReview;
     if (typeof document !== "undefined") {
       if (isModalActive) {
         document.body.style.overflow = "hidden";
@@ -2038,7 +2037,7 @@ export default function Home() {
         document.documentElement.style.overflow = "";
       }
     };
-  }, [showCreateModal, focusModalOpen, showInstallGuideModal, showCustomTimeModal, showEveningReview, pushNagMode]);
+  }, [showCreateModal, focusModalOpen, showInstallGuideModal, showCustomTimeModal, showEveningReview]);
 
   // PWA Install handler with full fallback guide modal
   const handleInstallApp = async () => {
@@ -3908,33 +3907,32 @@ export default function Home() {
       )}
 
       {pushNagMode && (
-        <div className="floating-modal-backdrop push-nag-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="push-nag-title" aria-describedby="push-nag-body">
-          <div className="floating-modal-box push-nag-box">
-            <div className="push-nag-bell"><IconBell className="icon-lg" /></div>
+        // A small card in the corner: it never dims, blocks or locks the page behind it.
+        <aside className="push-nag-card" role="status" aria-live="polite" aria-labelledby="push-nag-title">
+          <div className="push-nag-head">
+            <span className="push-nag-bell"><IconBell className="icon-sm" /></span>
             <h3 id="push-nag-title">{t.nag_title}</h3>
-            <p id="push-nag-body" className="push-nag-body">
-              {pushNagMode === "ask" ? t.nag_body_ask : pushNagMode === "denied" ? t.nag_body_denied : pushNagMode === "ios-install" ? t.nag_body_ios : t.nag_body_unsupported}
-            </p>
-            {nagError && (
-              <p className="push-nag-error" role="alert">{pushErrorText(nagError)}</p>
-            )}
-            <div className="modal-actions push-nag-actions">
-              {pushNagMode === "ask" && (
-                <button type="button" className="btn-modal-submit w-full" disabled={pushBusy} onClick={() => void handleNagEnable()}>
-                  {pushBusy ? t.nag_enabling : nagError ? t.nag_retry : t.nag_btn_enable}
-                </button>
-              )}
-              {pushNagMode === "ios-install" && (
-                <button type="button" className="btn-modal-submit w-full" onClick={() => void handleInstallApp()}>
-                  {t.btn_install_app}
-                </button>
-              )}
-              <button type="button" className="btn-modal-cancel w-full" onClick={snoozeNag}>
-                {t.nag_btn_later}
-              </button>
-            </div>
           </div>
-        </div>
+          <p id="push-nag-body" className="push-nag-body">
+            {pushNagMode === "ask" ? t.nag_body_ask : pushNagMode === "denied" ? t.nag_body_denied : pushNagMode === "ios-install" ? t.nag_body_ios : t.nag_body_unsupported}
+          </p>
+          {nagError && <p className="push-nag-error" role="alert">{pushErrorText(nagError)}</p>}
+          <div className="push-nag-actions">
+            {pushNagMode === "ask" && (
+              <button type="button" className="btn-modal-submit" disabled={pushBusy} onClick={() => void handleNagEnable()}>
+                {pushBusy ? t.nag_enabling : nagError ? t.nag_retry : t.nag_btn_enable}
+              </button>
+            )}
+            {pushNagMode === "ios-install" && (
+              <button type="button" className="btn-modal-submit" onClick={() => void handleInstallApp()}>
+                {t.btn_install_app}
+              </button>
+            )}
+            <button type="button" className="btn-modal-cancel" onClick={snoozeNag}>
+              {t.nag_btn_later}
+            </button>
+          </div>
+        </aside>
       )}
 
       {showInstallGuideModal && (
