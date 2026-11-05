@@ -69,24 +69,35 @@ export function pruneAccountSessions(keepIds: string[]) {
   if (changed) writeAll(map);
 }
 
+export type RestoreResult = "ok" | "missing" | "invalid" | "retry";
+
 /**
- * Restore a saved account's session. Returns true on success. On failure
- * (expired/revoked refresh token) the stale entry is removed so the caller can
- * fall back to the password login for that account.
+ * Restore a saved account's session.
+ *  - "ok": signed in as that account.
+ *  - "missing": nothing saved for it (account added before saved sessions existed): password needed once.
+ *  - "invalid": Supabase rejected the tokens (revoked/expired): the stale entry is removed, password needed.
+ *  - "retry": transient failure (offline, 429, 5xx). The saved tokens are KEPT so a later attempt works
+ *    without asking for the password.
  */
 export async function restoreAccountSession(
   supabase: SupabaseClient,
   userId: string,
-): Promise<boolean> {
+): Promise<RestoreResult> {
   const stored = readAll()[userId];
-  if (!stored) return false;
+  if (!stored) return "missing";
   const { data, error } = await supabase.auth.setSession(stored);
-  if (error || data.session?.user.id !== userId) {
+  if (error) {
+    const status = (error as { status?: number }).status ?? 0;
+    if (error.name === "AuthRetryableFetchError" || status === 429 || status >= 500) return "retry";
     removeAccountSession(userId);
-    return false;
+    return "invalid";
+  }
+  if (data.session?.user.id !== userId) {
+    removeAccountSession(userId);
+    return "invalid";
   }
   saveAccountSession(data.session);
-  return true;
+  return "ok";
 }
 
 /** Revoke a session server-side without touching the browser's current one. */

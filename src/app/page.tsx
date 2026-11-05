@@ -1390,7 +1390,8 @@ export default function Home() {
               updated?.is_active === false
             ) {
               const sb = createClient();
-              void sb.auth.signOut().then(() => {
+              removeAccountSession(uid);
+              void sb.auth.signOut({ scope: "local" }).then(() => {
                 if (typeof window !== "undefined") {
                   localStorage.removeItem("myplan_active_account_id");
                 }
@@ -1486,7 +1487,7 @@ export default function Home() {
         const storedEpoch = localStorage.getItem(EPOCH_STORAGE_KEY);
         if (storedEpoch !== PROD_CLEAN_SLATE_EPOCH) {
           try {
-            await supabase.auth.signOut();
+            await supabase.auth.signOut({ scope: "local" });
           } catch {}
           // Remove every MYplan-owned browser value plus Supabase auth tokens.
           // Keep only the epoch marker written below so this purge runs once per release.
@@ -1514,7 +1515,8 @@ export default function Home() {
         // Instant check if this device was revoked remotely
         const sessionCheck = await checkDeviceSessionActive(supabase, session.user.id);
         if (!sessionCheck.allowed) {
-          await supabase.auth.signOut();
+          removeAccountSession(session.user.id);
+          await supabase.auth.signOut({ scope: "local" });
           if (typeof window !== "undefined") {
             localStorage.removeItem("myplan_active_account_id");
           }
@@ -2259,17 +2261,24 @@ export default function Home() {
 
   // Multi-Account Operations (Switch Account & Add Account, max 5)
   const switchAccount = async (targetAccount: UserAccount) => {
-    if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined") return;
+    if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined" || switchingAccount) return;
 
     setSwitchingAccount(true);
     const supabase = createClient();
     // The vault keeps a real Supabase session per account (see account-sessions.ts),
     // so switching restores that account's own tokens: no password prompt, and no
     // private data is shown unless Supabase accepts the stored refresh token.
-    if (await restoreAccountSession(supabase, targetAccount.id)) {
+    const restored = await restoreAccountSession(supabase, targetAccount.id);
+    if (restored === "ok") {
       localStorage.setItem("myplan_active_account_id", targetAccount.id);
       // Full reload so no state from the previous account survives.
       window.location.replace("/");
+      return;
+    }
+    if (restored === "retry") {
+      // Transient failure: keep the saved session and let the user try again instead of asking for a password.
+      setSwitchingAccount(false);
+      alert(t.switch_retry);
       return;
     }
 
