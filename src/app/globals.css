@@ -8805,7 +8805,7 @@ textarea,
     display: inline;
   }
 
-  /* Six items (5 + the + button) share the bar. */
+  /* Four items + the + button share the bar. */
   .mobile-bottom-nav {
     padding: 0 6px;
   }

@@ -5826,15 +5826,7 @@ export default function Home() {
             <span>{t.tab_today}</span>
           </button>
 
-          <button
-            type="button"
-            className={`bottom-nav-item ${activeTab === "activities" ? "active" : ""}`}
-            onClick={() => setActiveTab("activities")}
-          >
-            <IconList className="bottom-nav-icon" />
-            <span>{t.tab_activities}</span>
-          </button>
-
+          {/* The catalog is not in the bottom bar: it lives in the side menu (burger). */}
           <button
             type="button"
             className={`bottom-nav-item ${activeTab === "time" ? "active" : ""}`}
