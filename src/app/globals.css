@@ -8724,10 +8724,6 @@ textarea,
   font-size: clamp(20px, 2.4vw, 30px);
 }
 
-.time-clock-info .time-note {
-  text-transform: capitalize;
-}
-
 .time-tz {
   font-size: 11px;
   color: var(--text-muted);
@@ -8868,4 +8864,9 @@ textarea,
   .time-of-day-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
   .time-choice-btn { min-height: 48px !important; padding: 8px 8px !important; font-size: 12px !important; }
   .modal-actions button { white-space: nowrap; padding-left: 14px; padding-right: 14px; font-size: 14px; }
+}
+
+/* The Vaqt tab fills the viewport exactly; the page footer would push it into a scroll. */
+.app-footer.is-hidden-time {
+  display: none;
 }

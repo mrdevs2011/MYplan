@@ -21,7 +21,14 @@ const STORAGE_SESSION_TOKEN_KEY = "myplan_device_session_token";
  * Har bir brauzer instansiyasi / qurilma uchun unikal session_token qaytaradi.
  * LocalStorage da saqlanadi, agar yo‘q bo‘lsa kriptografik xavfsiz generatsiya qilinadi.
  */
-export function getOrCreateSessionToken(): string {
+export function getOrCreateSessionToken(userId?: string): string {
+  const base = getBrowserToken();
+  // One row per (browser, account): several accounts can share this browser without
+  // clashing on the unique session_token (the RLS policy rejects taking over another user's row).
+  return userId ? `${base}:${userId}` : base;
+}
+
+function getBrowserToken(): string {
   if (typeof window === "undefined") return "server-session";
   try {
     let token = localStorage.getItem(STORAGE_SESSION_TOKEN_KEY);
@@ -128,8 +135,15 @@ export async function syncCurrentDeviceSession(
   userId: string
 ): Promise<UserDevice | null> {
   try {
-    const sessionToken = getOrCreateSessionToken();
+    const sessionToken = getOrCreateSessionToken(userId);
     const info = detectDeviceInfo();
+
+    // Adopt the pre-multi-account row (plain browser token) so it isn't left behind as a duplicate.
+    await supabase
+      .from("user_devices")
+      .update({ session_token: sessionToken })
+      .eq("session_token", getOrCreateSessionToken())
+      .eq("user_id", userId);
 
     const payload = {
       user_id: userId,
@@ -165,10 +179,11 @@ export async function syncCurrentDeviceSession(
  * Agar session_token topilmasa yoki is_active bo‘lsa true qaytaradi; agar is_active === false bo‘lsa false qaytaradi.
  */
 export async function checkDeviceSessionActive(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  userId?: string
 ): Promise<{ allowed: boolean; reason?: string }> {
   try {
-    const sessionToken = getOrCreateSessionToken();
+    const sessionToken = getOrCreateSessionToken(userId);
     const { data, error } = await supabase
       .from("user_devices")
       .select("is_active, revoked_at")

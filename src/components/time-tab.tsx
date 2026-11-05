@@ -16,6 +16,16 @@ interface TimeTabProps {
 }
 
 const LOCALES: Record<Language, string> = { uz: "uz-UZ", en: "en-US", ru: "ru-RU" };
+
+// Browsers ship incomplete Uzbek locale data (it renders "M11 5, Thu"), so spell it out.
+const UZ_WEEKDAYS = ["Yakshanba", "Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba"];
+const UZ_MONTHS = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"];
+
+function formatDate(d: Date, language: Language) {
+  if (language === "uz") return `${d.getDate()}-${UZ_MONTHS[d.getMonth()]}, ${UZ_WEEKDAYS[d.getDay()]}`;
+  const text = d.toLocaleDateString(LOCALES[language] || "en-US", { weekday: "long", day: "numeric", month: "long" });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 const storageKey = (scope: string, name: string) => `myplan_account_${scope}_time_${name}`;
 
 function load<V>(scope: string, name: string, fallback: V): V {
@@ -326,7 +336,6 @@ function ClockPanel({ language }: Pick<TimeTabProps, "language">) {
   const sec = d.getSeconds();
   const min = d.getMinutes() + sec / 60;
   const hour = (d.getHours() % 12) + min / 60;
-  const locale = LOCALES[language] || "en-US";
   let timeZone = "";
   try {
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -362,7 +371,7 @@ function ClockPanel({ language }: Pick<TimeTabProps, "language">) {
           {now ? `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : "--:--:--"}
         </span>
         <span className="time-note">
-          {now ? d.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" }) : ""}
+          {now ? formatDate(d, language) : ""}
         </span>
         {timeZone ? <span className="time-note time-tz">{timeZone}</span> : null}
       </div>

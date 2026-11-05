@@ -67,3 +67,15 @@ Deploy the frontend over HTTPS. A user signs in and enables browser notification
 ## 6. Test
 
 Call `notification-dispatch` through the scheduler or manually with the `x-cron-secret` header. Check Supabase Edge Function logs, Cron run history and `notification_deliveries` for delivery diagnostics.
+
+## Platform support
+
+Push uses the standard Web Push protocol with VAPID, so one implementation covers every platform below. Allowed push services: Chrome/Edge/Opera/Samsung (`fcm.googleapis.com`, `*.notify.windows.com`), Firefox (`*.push.services.mozilla.com`), Safari/iOS (`*.push.apple.com`).
+
+| Platform | Requirement |
+| --- | --- |
+| Android (Chrome, Edge, Samsung, Firefox) | Works in the browser or the installed PWA. Allow notifications; exempt the app from battery optimisation for on-time delivery. |
+| iPhone / iPad (iOS 16.4+) | Only works in the PWA added to the Home Screen (Safari → Share → Add to Home Screen), opened from the Home Screen icon. The app shows install instructions until then. |
+| Windows / macOS / Linux desktop (Chrome, Edge, Firefox, Safari 16+) | Works in the browser or the installed PWA; the browser or its background service must be running. |
+
+`requireInteraction`, vibration and re-alerting are best-effort hints: browsers that ignore them (Safari, Firefox) still show every notification. If a device stops receiving pushes, `notification_deliveries.last_error` records why; an expired subscription is detected on the next app open and re-registered silently when permission is already granted.

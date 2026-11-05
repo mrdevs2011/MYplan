@@ -1373,7 +1373,7 @@ export default function Home() {
           { event: "*", schema: "public", table: "user_devices", filter: `user_id=eq.${uid}` },
           (payload) => {
             if (activeRealtimeUid !== uid) return;
-            const currentToken = getOrCreateSessionToken();
+            const currentToken = getOrCreateSessionToken(uid);
             const updated = payload.new as { session_token?: string; is_active?: boolean } | null;
             if (
               payload.eventType === "UPDATE" &&
@@ -1403,8 +1403,8 @@ export default function Home() {
               const item: MyPlanNotification = {
                 id: row.id,
                 sender: "MYplan shaxsiy yordamchisi",
-                category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-                categoryLabel: row.category.toUpperCase(),
+                category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+                categoryLabel: (row.category || "system").toUpperCase(),
                 title: row.title,
                 message: row.message,
                 createdAt: new Date(row.created_at).getTime(),
@@ -1427,8 +1427,8 @@ export default function Home() {
                 const item: MyPlanNotification = {
                   id: row.id,
                   sender: "MYplan shaxsiy yordamchisi",
-                  category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-                  categoryLabel: row.category.toUpperCase(),
+                  category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+                  categoryLabel: (row.category || "system").toUpperCase(),
                   title: row.title,
                   message: row.message,
                   createdAt: new Date(row.created_at).getTime(),
@@ -1503,7 +1503,7 @@ export default function Home() {
 
       if (session?.user) {
         // Instant check if this device was revoked remotely
-        const sessionCheck = await checkDeviceSessionActive(supabase);
+        const sessionCheck = await checkDeviceSessionActive(supabase, session.user.id);
         if (!sessionCheck.allowed) {
           await supabase.auth.signOut();
           if (typeof window !== "undefined") {
@@ -1764,8 +1764,8 @@ export default function Home() {
           const rows = (payload.notifications || []).filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now()).map((row) => ({
             id: row.id,
             sender: "MYplan shaxsiy yordamchisi",
-            category: (row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-            categoryLabel: row.category.toUpperCase(),
+            category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+            categoryLabel: (row.category || "system").toUpperCase(),
             title: row.title,
             message: row.message,
             createdAt: new Date(row.created_at).getTime(),
@@ -5499,7 +5499,7 @@ export default function Home() {
 
                       <div className="devices-list">
                         {activeDevices.map((dev) => {
-                          const isCurrent = dev.session_token === getOrCreateSessionToken();
+                          const isCurrent = dev.session_token === getOrCreateSessionToken(userId ?? undefined);
                           return (
                             <div
                               key={dev.id}
@@ -5698,7 +5698,7 @@ export default function Home() {
           )}
 
           {/* Workspace Footer */}
-          <footer className="app-footer">
+          <footer className={`app-footer ${activeTab === "time" ? "is-hidden-time" : ""}`}>
             <div className="footer-left">
               <span className="footer-brand">MyPlan</span>
               <span className="footer-separator">•</span>
