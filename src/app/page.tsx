@@ -1813,7 +1813,7 @@ export default function Home() {
         void navigator.serviceWorker.register("/sw.js").then(async (registration) => {
           // Service Worker support does not guarantee that the browser implements Web Push.
           // In particular, some WebKit-based browsers expose serviceWorker but no pushManager.
-          if (!("pushManager" in registration) || !registration.pushManager) {
+          if (!registration || !("pushManager" in registration) || !registration.pushManager) {
             setPushSubscribed(false);
             setPushChecked(true);
             return;
