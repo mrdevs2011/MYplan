@@ -693,8 +693,8 @@ select:focus-visible {
 
 .mobile-unread-dot {
   position: absolute;
-  top: 6px;
-  right: calc(50% - 12px);
+  top: 4px;
+  right: calc(50% - 16px);
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -2311,6 +2311,7 @@ select:focus-visible {
   }
 
   .bottom-nav-item {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -8431,11 +8432,22 @@ textarea,
 
 
 /* Persistent "turn notifications on" prompt: intentionally hard to ignore, returns after a short snooze. */
-.push-nag-backdrop { z-index: 10000; backdrop-filter: blur(6px); }
-.push-nag-box { max-width: 440px; text-align: center; border: 2px solid var(--accent, #b4f04c); }
-.push-nag-bell { width: 72px; height: 72px; margin: 4px auto 12px; display: grid; place-items: center; border-radius: 50%; background: rgba(180, 240, 76, 0.16); animation: push-nag-pulse 1.4s ease-in-out infinite; }
-.push-nag-body { margin: 8px 0 16px; line-height: 1.5; }
-.push-nag-actions { display: grid; gap: 10px; }
+.push-nag-backdrop { z-index: 10000; backdrop-filter: blur(6px); overflow-y: auto; }
+.push-nag-box {
+  max-width: 440px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  align-items: center;
+  text-align: center;
+  border: 2px solid var(--accent-lime) !important;
+  padding: 28px 22px 22px !important;
+}
+.push-nag-box h3 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; color: var(--text-primary); }
+.push-nag-bell { width: 72px; height: 72px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: rgba(180, 240, 76, 0.16); color: var(--accent-lime); animation: push-nag-pulse 1.4s ease-in-out infinite; }
+.push-nag-body { margin: 10px 0 20px; font-size: 15px; line-height: 1.55; color: var(--text-secondary); }
+.push-nag-actions { display: grid; grid-template-columns: 1fr; justify-content: stretch; justify-items: stretch; gap: 10px; width: 100%; margin: 0; padding: 0; border-top: 0; }
+.push-nag-actions button { width: 100%; min-height: 48px; justify-content: center; text-align: center; font-size: 15px; }
+.push-nag-actions .btn-modal-cancel { border: 1px solid var(--border-subtle); }
 @keyframes push-nag-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12) rotate(-6deg); } }
 @media (prefers-reduced-motion: reduce) { .push-nag-bell { animation: none; } }
 

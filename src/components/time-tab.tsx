@@ -257,14 +257,21 @@ function StopwatchPanel({ t, scope }: Pick<TimeTabProps, "t" | "scope">) {
         ? { ...s, startedAt: null, base: s.base + (Date.now() - s.startedAt) }
         : { ...s, startedAt: Date.now() },
     );
-  const lap = () => setState((s) => ({ ...s, laps: [...s.laps, s.base + (s.startedAt ? Date.now() - s.startedAt : 0)] }));
+  const lap = () =>
+    setState((s) => {
+      const total = s.base + (s.startedAt ? Date.now() - s.startedAt : 0);
+      const prev = s.laps.length ? s.laps[s.laps.length - 1] : 0;
+      // Ignore accidental double taps (a real lap is never < 0.25s after the last one).
+      if (total - prev < 250) return s;
+      return { ...s, laps: [...s.laps, total].slice(-99) };
+    });
   const reset = () => setState({ startedAt: null, base: 0, laps: [] });
 
-  const lastLaps = state.laps.slice(-2).map((total, i, arr) => {
-    const index = state.laps.length - arr.length + i;
-    const prev = index > 0 ? state.laps[index - 1] : 0;
-    return { n: index + 1, split: total - prev, total };
-  });
+  // Newest first, so the lap you just took is always on top.
+  const lastLaps = state.laps
+    .map((total, index) => ({ n: index + 1, split: total - (index > 0 ? state.laps[index - 1] : 0), total }))
+    .slice(-2)
+    .reverse();
 
   return (
     <>
