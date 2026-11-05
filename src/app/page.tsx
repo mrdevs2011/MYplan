@@ -284,6 +284,8 @@ export default function Home() {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const activitiesRef = useRef<Activity[]>([]);
   const occurrencesRef = useRef<Occurrence[]>([]);
+  const workspaceUserRef = useRef<string | null>(null);
+  const workspaceLoadSequenceRef = useRef(0);
   const offlineQueueProcessingRef = useRef(false);
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
   const [taskHistory, setTaskHistory] = useState<Record<string, number[]>>({});
@@ -620,9 +622,14 @@ export default function Home() {
       if (!Array.isArray(queue) || queue.length === 0) return;
 
       const supabase = createClient();
-      const processedQueueIds = new Set(queue.map((item) => item.id));
-      const remaining: typeof queue = [];
-      for (const item of queue) {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) return;
+      // Offline mutations belong to the account that created them. Never replay
+      // another account's queued writes under the currently authenticated session.
+      const accountQueue = queue.filter((item) => item?.payload?.user_id === user.id);
+      const processedQueueIds = new Set(accountQueue.map((item) => item.id));
+      const remaining: typeof queue = queue.filter((item) => item?.payload?.user_id !== user.id);
+      for (const item of accountQueue) {
         try {
           let error = null;
           if (item.type === "occurrence_status") {
@@ -663,8 +670,9 @@ export default function Home() {
       // Preserve mutations enqueued while this batch was being uploaded.
       const latestRaw = localStorage.getItem("myplan_offline_sync_queue");
       const latestQueue = latestRaw ? JSON.parse(latestRaw) : [];
+      const retainedQueueIds = new Set(remaining.map((item) => item.id));
       const newlyQueued = Array.isArray(latestQueue)
-        ? latestQueue.filter((item) => !processedQueueIds.has(item.id))
+        ? latestQueue.filter((item) => !processedQueueIds.has(item.id) && !retainedQueueIds.has(item.id))
         : [];
       const pendingQueue = [...remaining, ...newlyQueued];
       if (pendingQueue.length > 0) {
@@ -890,6 +898,9 @@ export default function Home() {
 
   // Load Workspace Data
   const loadWorkspace = useCallback(async (id: string) => {
+    workspaceUserRef.current = id;
+    const loadSequence = ++workspaceLoadSequenceRef.current;
+    const isCurrentLoad = () => workspaceUserRef.current === id && workspaceLoadSequenceRef.current === loadSequence;
     setLoadingData(true);
     const supabase = createClient();
     try {
@@ -907,6 +918,7 @@ export default function Home() {
       ]);
 
       if (activityError) throw activityError;
+      if (!isCurrentLoad()) return;
       const acts = (activityRows || []) as Activity[];
       setActivities(acts);
 
@@ -983,6 +995,7 @@ export default function Home() {
         .eq("period_start", todayStr);
 
       if (occError) throw occError;
+      if (!isCurrentLoad()) return;
 
       const existingOccs = (occRows || []) as Occurrence[];
 
@@ -1012,6 +1025,7 @@ export default function Home() {
           .from("occurrences")
           .insert(inserts)
           .select("id,activity_id,period_start,period_end,status");
+        if (!isCurrentLoad()) return;
         if (!insertError && newOccs) {
           setOccurrences([...existingOccs, ...(newOccs as Occurrence[])]);
         } else {
@@ -1067,11 +1081,12 @@ export default function Home() {
         // Non-blocking progress sync fallback
       }
 
+      if (!isCurrentLoad()) return;
       setTaskCounts(initialCounts);
     } catch (err) {
-      console.error("Workspace loading error:", err);
+      if (isCurrentLoad()) console.error("Workspace loading error:", err);
     } finally {
-      setLoadingData(false);
+      if (isCurrentLoad()) setLoadingData(false);
     }
   }, []);
 
@@ -1144,6 +1159,7 @@ export default function Home() {
           "postgres_changes",
           { event: "*", schema: "public", table: "activities", filter: `user_id=eq.${uid}` },
           (payload) => {
+            if (activeRealtimeUid !== uid) return;
             if (payload.eventType === "INSERT") {
               const row = payload.new as Activity;
               setActivities((prev) => (prev.some((a) => a.id === row.id) ? prev : [row, ...prev]));
@@ -1160,6 +1176,7 @@ export default function Home() {
           "postgres_changes",
           { event: "*", schema: "public", table: "occurrences", filter: `user_id=eq.${uid}` },
           (payload) => {
+            if (activeRealtimeUid !== uid) return;
             if (payload.eventType === "INSERT") {
               const row = payload.new as Occurrence;
               setOccurrences((prev) => (prev.some((o) => o.id === row.id) ? prev : [row, ...prev]));
@@ -1176,6 +1193,7 @@ export default function Home() {
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "progress_events", filter: `user_id=eq.${uid}` },
           async (payload) => {
+            if (activeRealtimeUid !== uid) return;
             const event = payload.new as { occurrence_id?: string };
             if (!event.occurrence_id) return;
             const progressRows: { amount: number }[] = [];
@@ -1194,6 +1212,7 @@ export default function Home() {
               progressRows.push(...batch);
               if (batch.length < 1000) break;
             }
+            if (activeRealtimeUid !== uid || workspaceUserRef.current !== uid) return;
             const occurrence = occurrencesRef.current.find((item) => item.id === event.occurrence_id);
             const activity = occurrence
               ? activitiesRef.current.find((item) => item.id === occurrence.activity_id)
@@ -1211,6 +1230,7 @@ export default function Home() {
           "postgres_changes",
           { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${uid}` },
           (payload) => {
+            if (activeRealtimeUid !== uid) return;
             const p = payload.new as Record<string, unknown>;
             if (p.language && typeof p.language === "string") {
               const l = p.language as Language;
@@ -1397,6 +1417,7 @@ export default function Home() {
         }
 
         const currentId = session.user.id;
+        localStorage.setItem("myplan_active_account_id", currentId);
         const currentName = String(
           session.user.user_metadata?.full_name || session.user.user_metadata?.username || ""
         );
@@ -1458,11 +1479,36 @@ export default function Home() {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        setUserId(session.user.id);
-        void loadWorkspace(session.user.id);
-        setupRealtime(session.user.id);
+        const nextUserId = session.user.id;
+        if (workspaceUserRef.current && workspaceUserRef.current !== nextUserId) {
+          setActivities([]);
+          setOccurrences([]);
+          setTaskCounts({});
+          setTaskHistory({});
+          setNotifications([]);
+          setActiveToast(null);
+        }
+        if (typeof window !== "undefined") localStorage.setItem("myplan_active_account_id", nextUserId);
+        setUserId(nextUserId);
+        void loadWorkspace(nextUserId);
+        setupRealtime(nextUserId);
       } else {
+        activeRealtimeUid = null;
+        if (realtimeChannel) {
+          void supabase.removeChannel(realtimeChannel);
+          realtimeChannel = null;
+        }
+        workspaceUserRef.current = null;
+        workspaceLoadSequenceRef.current += 1;
         setUserId(null);
+        setActivities([]);
+        setOccurrences([]);
+        setTaskCounts({});
+        setTaskHistory({});
+        setNotifications([]);
+        setActiveToast(null);
+        setLoadingData(false);
+        if (typeof window !== "undefined") localStorage.removeItem("myplan_active_account_id");
         router.replace("/login");
       }
     });
@@ -1647,6 +1693,12 @@ export default function Home() {
       // High-performance PWA service worker registration
       if (typeof window !== "undefined" && "serviceWorker" in navigator && process.env.NODE_ENV === "production") {
         void navigator.serviceWorker.register("/sw.js").then(async (registration) => {
+          // Service Worker support does not guarantee that the browser implements Web Push.
+          // In particular, some WebKit-based browsers expose serviceWorker but no pushManager.
+          if (!("pushManager" in registration) || !registration.pushManager) {
+            setPushSubscribed(false);
+            return;
+          }
           const subscription = await registration.pushManager.getSubscription();
           setPushSubscribed(Boolean(subscription));
         }).catch((error) => console.warn("Service worker registration failed:", error));
@@ -2033,17 +2085,23 @@ export default function Home() {
   }
 
   // Multi-Account Operations (Switch Account & Add Account, max 5)
-  const switchAccount = (targetAccount: UserAccount) => {
-    setUserId(targetAccount.id);
-    setAccountName(targetAccount.fullName);
-    setAccountUsername(targetAccount.username);
-    setUserAge(targetAccount.age || "");
-    const savedAvatar = typeof window !== "undefined" ? localStorage.getItem(`myplan_avatar_${targetAccount.id}`) : null;
-    setAvatarUrl(savedAvatar || targetAccount.avatarUrl || null);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("myplan_active_account_id", targetAccount.id);
+  const switchAccount = async (targetAccount: UserAccount) => {
+    if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined") return;
+
+    // A saved account ID is not an authentication credential. Never impersonate it
+    // by changing React state: require that account's password and let Supabase
+    // issue a real session before showing any of its private data.
+    localStorage.setItem("myplan_switch_account_id", targetAccount.id);
+    localStorage.setItem("myplan_add_account_intent", "true");
+    const supabase = createClient();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      localStorage.removeItem("myplan_switch_account_id");
+      localStorage.removeItem("myplan_add_account_intent");
+      console.error("Could not end the current account session:", error.message);
+      return;
     }
-    void loadWorkspace(targetAccount.id);
+    router.replace("/login");
   };
 
   const handleAddAccount = () => {
@@ -2096,8 +2154,8 @@ export default function Home() {
   };
 
   const handleRequestPush = async () => {
-    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator)) {
-      alert("Bu brauzer Web Push bildirishnomalarini qo‘llab-quvvatlamaydi.");
+    if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("Bu brauzer Web Push bildirishnomalarini qo‘llab-quvvatlamaydi. Push API qo‘llaydigan brauzerda ochib ko‘r.");
       return;
     }
     if (!window.isSecureContext) {
@@ -2108,6 +2166,9 @@ export default function Home() {
     setPushBusy(true);
     try {
       const registration = await navigator.serviceWorker.ready;
+      if (!("pushManager" in registration) || !registration.pushManager) {
+        throw new Error("Bu brauzer Service Worker'ni qo‘llaydi, lekin Web Push API mavjud emas. Push API qo‘llaydigan brauzerdan foydalan.");
+      }
       const existing = await registration.pushManager.getSubscription();
       const supabase = createClient();
 
@@ -2472,7 +2533,19 @@ export default function Home() {
     () => occurrences.filter((item) => item.status === "completed").length,
     [occurrences]
   );
-  const percent = activeActivities.length ? Math.round((completedCount / activeActivities.length) * 100) : 0;
+  const percent = activeActivities.length
+    ? Math.round(
+        (activeActivities.reduce((total, activity) => {
+          const occurrence = occurrences.find((item) => item.activity_id === activity.id);
+          if (!occurrence) return total;
+          if (activity.measurement_type === "count" && activity.target && activity.target > 0) {
+            const count = taskCounts[occurrence.id] ?? (occurrence.status === "completed" ? activity.target : 0);
+            return total + Math.min(Math.max(count, 0) / activity.target, 1);
+          }
+          return total + (occurrence.status === "completed" ? 1 : 0);
+        }, 0) / activeActivities.length) * 100
+      )
+    : 0;
 
   const timeCounts = useMemo(() => {
     return {
@@ -2559,10 +2632,10 @@ export default function Home() {
   // Discipline Momentum Index (Consistency rolling calculation)
   const momentumScore = useMemo(() => {
     if (activeActivities.length === 0) return 100;
-    const dailyRatio = Math.round((completedCount / activeActivities.length) * 100);
+    const dailyRatio = percent;
     const streakBonus = Math.min(streakCount * 5, 25);
     return Math.min(100, Math.max(35, Math.round(dailyRatio * 0.75 + streakBonus)));
-  }, [activeActivities.length, completedCount, streakCount]);
+  }, [activeActivities.length, percent, streakCount]);
 
   // Executive Keyboard Shortcuts (N: New, F: Focus, 1-5: Tabs, Esc: Close)
   useEffect(() => {

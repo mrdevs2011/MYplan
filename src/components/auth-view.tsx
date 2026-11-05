@@ -50,6 +50,19 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
   useEffect(() => {
     const addingIntent = typeof window !== "undefined" && localStorage.getItem("myplan_add_account_intent") === "true";
     setTimeout(() => setIsAddingAccount(addingIntent), 0);
+    if (addingIntent && typeof window !== "undefined") {
+      const pendingAccountId = localStorage.getItem("myplan_switch_account_id");
+      if (pendingAccountId) {
+        try {
+          const rawVault = localStorage.getItem("myplan_accounts_vault");
+          const vault = rawVault ? JSON.parse(rawVault) as Array<{ id: string; username?: string }> : [];
+          const target = vault.find((account) => account.id === pendingAccountId);
+          if (target?.username) setTimeout(() => setUsername(target.username || ""), 0);
+        } catch (error) {
+          console.warn("Could not restore the selected account username:", error);
+        }
+      }
+    }
 
     // Check if session already exists
     if (!configured) return;
@@ -245,6 +258,13 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         });
         if (error) throw error;
         if (typeof window !== "undefined" && signInData.user) {
+          const expectedAccountId = localStorage.getItem("myplan_switch_account_id");
+          if (expectedAccountId && signInData.user.id !== expectedAccountId) {
+            await supabase.auth.signOut();
+            setMessage("Tanlangan hisobga kirish uchun aynan shu hisobning foydalanuvchi nomi va parolini kirit.");
+            return;
+          }
+          localStorage.removeItem("myplan_switch_account_id");
           localStorage.removeItem("myplan_add_account_intent");
           void syncCurrentDeviceSession(supabase, signInData.user.id);
           try {
