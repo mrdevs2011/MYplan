@@ -5269,24 +5269,18 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="pwa-status-box">
-                      {isAppInstalled ? (
-                        <div className="pwa-installed-indicator">
-                          <IconCheck className="icon-sm text-lime" />
-                          <span>{t.settings_pwa_installed}</span>
-                        </div>
-                      ) : (
-                        <div className="pwa-install-action">
-                          <p>{t.settings_pwa_not_installed}</p>
-                          <button
-                            type="button"
-                            className="btn-pwa-install"
-                            onClick={() => void handleInstallApp()}
-                          >
-                            <IconDownload className="icon-xs" />
-                            <span>{t.btn_install_app}</span>
-                          </button>
-                        </div>
-                      )}
+                      <div className="pwa-install-action">
+                        <button
+                          type="button"
+                          className={`btn-pwa-install${isAppInstalled ? " is-installed" : ""}`}
+                          onClick={() => void handleInstallApp()}
+                          disabled={isAppInstalled}
+                          aria-live="polite"
+                        >
+                          {isAppInstalled ? <IconCheck className="icon-xs" /> : <IconDownload className="icon-xs" />}
+                          <span>{isAppInstalled ? t.settings_pwa_installed : t.btn_install_app}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

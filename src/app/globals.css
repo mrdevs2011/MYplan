@@ -4122,6 +4122,24 @@ select:focus-visible {
   box-shadow: 0 4px 16px rgba(180, 240, 76, 0.35);
 }
 
+.btn-pwa-install:disabled,
+.btn-pwa-install.is-installed {
+  background: #52525b;
+  border-color: #52525b;
+  color: #e4e4e7;
+  cursor: default;
+  opacity: 1;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-pwa-install:disabled:hover,
+.btn-pwa-install.is-installed:hover {
+  background: #52525b;
+  transform: none;
+  box-shadow: none;
+}
+
 /* Tablet & Mobile tweaks for the new components */
 @media (max-width: 1024px) {
   .pillars-grid,
