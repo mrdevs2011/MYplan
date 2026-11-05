@@ -409,6 +409,8 @@ export default function Home() {
   const [pushChecked, setPushChecked] = useState(false);
   const [nagSnoozedUntil, setNagSnoozedUntil] = useState(0);
   const [nagNow, setNagNow] = useState(0);
+  const [nagArmedAt, setNagArmedAt] = useState(0);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const pushSyncedUserRef = useRef<string | null>(null);
 
   // PWA State
@@ -1199,7 +1201,14 @@ export default function Home() {
     if (typeof window !== "undefined") {
       const img = new window.Image();
       img.src = "/myplan-logo-transparent.png";
-      const minTimer = new Promise((resolve) => setTimeout(resolve, 850));
+      let splashSeen = false;
+      try {
+        splashSeen = sessionStorage.getItem("myplan_splash_seen") === "1";
+        sessionStorage.setItem("myplan_splash_seen", "1");
+      } catch {
+        // first-load behaviour when storage is unavailable
+      }
+      const minTimer = new Promise((resolve) => setTimeout(resolve, splashSeen ? 0 : 600));
       const imgLoaded = img.complete
         ? Promise.resolve()
         : new Promise((resolve) => {
@@ -1209,7 +1218,7 @@ export default function Home() {
 
       void Promise.all([imgLoaded, minTimer]).then(() => {
         setSplashFading(true);
-        setTimeout(() => setSplashReady(true), 350);
+        setTimeout(() => setSplashReady(true), splashSeen ? 120 : 350);
       });
     }
 
@@ -1939,16 +1948,32 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showCreateModal, resetModalState]);
 
-  // Re-evaluate the "turn notifications on" prompt every few seconds so a snooze always expires.
+  // The "turn notifications on" prompt wakes exactly when it may (re)appear. No interval: a timer that
+  // set state every few seconds re-rendered this whole page for nothing.
   useEffect(() => {
-    const tick = () => setNagNow(Date.now());
-    const first = setTimeout(tick, 0);
-    const timer = setInterval(tick, 5000);
-    return () => { clearTimeout(first); clearInterval(timer); };
+    const timer = setTimeout(() => {
+      try {
+        const stored = Number(sessionStorage.getItem("myplan_nag_snooze_until") || 0);
+        if (stored > Date.now()) setNagSnoozedUntil(stored);
+      } catch {
+        // sessionStorage unavailable: snooze simply is not remembered across reloads
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setNagNow(Date.now()), Math.max(0, Math.max(nagSnoozedUntil, nagArmedAt) - Date.now()) + 30);
+    return () => clearTimeout(timer);
+  }, [nagSnoozedUntil, nagArmedAt]);
+  // Let the app appear first; the prompt follows a moment after the workspace has loaded.
+  useEffect(() => {
+    if (!userId || !pushChecked || loadingData || nagArmedAt !== 0) return;
+    const timer = setTimeout(() => setNagArmedAt(Date.now() + 2500), 0);
+    return () => clearTimeout(timer);
+  }, [userId, pushChecked, loadingData, nagArmedAt]);
 
   const pushNagMode: "ask" | "denied" | "ios-install" | "unsupported" | null = (() => {
-    if (typeof window === "undefined" || !pushChecked || !userId || loadingData || nagNow === 0) return null;
+    if (typeof window === "undefined" || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
     if (process.env.NODE_ENV !== "production") return null;
     if (pushSubscribed && pushPermission === "granted") return null;
     if (nagNow < nagSnoozedUntil) return null;
@@ -2236,6 +2261,7 @@ export default function Home() {
   const switchAccount = async (targetAccount: UserAccount) => {
     if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined") return;
 
+    setSwitchingAccount(true);
     const supabase = createClient();
     // The vault keeps a real Supabase session per account (see account-sessions.ts),
     // so switching restores that account's own tokens: no password prompt, and no
@@ -2255,6 +2281,7 @@ export default function Home() {
       localStorage.removeItem("myplan_switch_account_id");
       localStorage.removeItem("myplan_add_account_intent");
       console.error("Could not end the current account session:", error.message);
+      setSwitchingAccount(false);
       return;
     }
     window.location.replace("/login");
@@ -2421,15 +2448,25 @@ export default function Home() {
     void enablePushForThisDevice(true).catch((error) => console.warn("Push re-sync failed:", error));
   }, [userId, pushChecked, enablePushForThisDevice]);
 
+  const snoozeNag = () => {
+    const until = Date.now() + 60_000;
+    setNagSnoozedUntil(until);
+    try {
+      sessionStorage.setItem("myplan_nag_snooze_until", String(until));
+    } catch {
+      // not persisted: acceptable
+    }
+  };
+
   const handleNagEnable = async () => {
     if (pushBusy) return;
     setPushBusy(true);
     try {
       const ok = await enablePushForThisDevice(false);
-      if (!ok) setNagSnoozedUntil(Date.now() + 60_000);
+      if (!ok) snoozeNag();
     } catch (error) {
       console.error("Push enable failed:", error);
-      setNagSnoozedUntil(Date.now() + 60_000);
+      snoozeNag();
     } finally {
       setPushBusy(false);
     }
@@ -3805,6 +3842,14 @@ export default function Home() {
       )}
 
       {/* PWA Install Guide Modal */}
+      {switchingAccount && (
+        <div className="switching-overlay" role="status" aria-live="polite">
+          <Image className="loading-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={72} height={72} priority />
+          <span className="switching-spinner" aria-hidden="true" />
+          <p>{t.switching_account}</p>
+        </div>
+      )}
+
       {pushNagMode && (
         <div className="floating-modal-backdrop push-nag-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="push-nag-title" aria-describedby="push-nag-body">
           <div className="floating-modal-box push-nag-box">
@@ -3824,7 +3869,7 @@ export default function Home() {
                   {t.btn_install_app}
                 </button>
               )}
-              <button type="button" className="btn-modal-cancel w-full" onClick={() => setNagSnoozedUntil(Date.now() + 60_000)}>
+              <button type="button" className="btn-modal-cancel w-full" onClick={snoozeNag}>
                 {t.nag_btn_later}
               </button>
             </div>

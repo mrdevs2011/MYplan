@@ -2622,8 +2622,6 @@ select:focus-visible {
   inset: 0;
   z-index: 120;
   background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6253,7 +6251,6 @@ select:focus-visible {
 /* LIGHT MODE: FLOATING MODAL & INNER CONTROLS */
 [data-theme="light"] .floating-modal-backdrop {
   background: rgba(15, 23, 42, 0.5) !important;
-  backdrop-filter: blur(8px) !important;
 }
 
 [data-theme="light"] .floating-modal-box {
@@ -8432,7 +8429,7 @@ textarea,
 
 
 /* Persistent "turn notifications on" prompt: intentionally hard to ignore, returns after a short snooze. */
-.push-nag-backdrop { z-index: 10000; backdrop-filter: blur(6px); overflow-y: auto; }
+.push-nag-backdrop { z-index: 10000; overflow-y: auto; background: rgba(0, 0, 0, 0.74); }
 .push-nag-box {
   max-width: 440px;
   max-height: calc(100dvh - 32px);
@@ -8870,3 +8867,10 @@ textarea,
 .app-footer.is-hidden-time {
   display: none;
 }
+
+/* Account switching: opaque, branded hand-off instead of a dimmed frozen page. */
+.switching-overlay { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; align-content: center; gap: 16px; background: var(--bg-base); text-align: center; }
+.switching-overlay p { margin: 0; font-size: 15px; font-weight: 650; color: var(--text-secondary); }
+.switching-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(180, 240, 76, 0.25); border-top-color: var(--accent-lime); animation: switching-spin 0.8s linear infinite; }
+@keyframes switching-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .switching-spinner { animation-duration: 2s; } }
