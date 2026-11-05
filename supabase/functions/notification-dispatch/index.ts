@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       const category = period === "morning" ? "daily" : "evening", dedupeKey = `${period}:${clock.date}`;
       const [prefsResult, countResult, tasksResult] = await Promise.all([
         admin.from("notification_preferences").select("enabled,daily_limit,category_settings,quiet_hours_enabled,quiet_hours_start,quiet_hours_end").eq("user_id", profile.id).maybeSingle(),
-        admin.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", profile.id).gte("created_at", new Date(now.getTime() - 86400000).toISOString()),
+        admin.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", profile.id).in("category", ["daily", "evening"]).gte("created_at", new Date(now.getTime() - 86400000).toISOString()),
         admin.from("activities").select("id").eq("user_id", profile.id).eq("is_active", true).limit(30),
       ]);
       if (prefsResult.error || countResult.error || tasksResult.error) throw new Error("Could not load notification context");
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
       if (occurrencesError) throw occurrencesError;
       const completed = (occurrences ?? []).filter((x) => x.status === "completed").length;
       const language: "uz" | "en" | "ru" = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
-      const context = { localDate: clock.date, activeTaskCount: taskRows.length, completedTaskCount: completed, pendingTaskCount: (occurrences ?? []).filter((x) => x.status === "pending").length, timeOfDay: period };
+      const context = { localDate: clock.date, activeTaskCount: taskRows.length, completedTaskCount: completed, remainingTaskCount: Math.max(0, taskRows.length - completed), pendingTaskCount: (occurrences ?? []).filter((x) => x.status === "pending").length, timeOfDay: period };
       const fallback = period === "morning"
         ? { uz: { title: "Xayrli tong!", message: `Bugun ${taskRows.length} ta faol rejang bor. Eng muhimidan boshlasang kifoya.` }, en: { title: "Good morning!", message: `You have ${taskRows.length} active plans today. Start with the most important one.` }, ru: { title: "Доброе утро!", message: `Сегодня у тебя ${taskRows.length} активных планов. Начни с самого важного.` } }
         : { uz: { title: "Kuning qanday o‘tdi?", message: "Bugungi ishlaringni xotirjam ko‘rib chiq va ertangi kun uchun bitta muhim qadamni belgilab qo‘y." }, en: { title: "How did your day go?", message: "Review what you did today and choose one useful step for tomorrow." }, ru: { title: "Как прошёл день?", message: "Спокойно вспомни сегодняшний день и выбери один полезный шаг на завтра." } };
@@ -80,7 +80,14 @@ Deno.serve(async (req) => {
     const template = aiTemplates.get(`${candidate.language}:${candidate.category}`);
     const prefix = candidate.category === "daily"
       ? { uz: `Bugun ${candidate.context.activeTaskCount} ta faol rejang bor.`, en: `You have ${candidate.context.activeTaskCount} active plans today.`, ru: `Сегодня у тебя ${candidate.context.activeTaskCount} активных планов.` }
-      : { uz: `Bugun ${candidate.context.completedTaskCount} ta vazifani bajarding.`, en: `You completed ${candidate.context.completedTaskCount} tasks today.`, ru: `Сегодня ты выполнил(а) ${candidate.context.completedTaskCount} задач.` };
+      : (() => {
+        const done = candidate.context.completedTaskCount, left = candidate.context.remainingTaskCount as number;
+        return {
+          uz: `Bugun ${done} ta vazifani bajarding${left > 0 ? `, ${left} tasi qoldi` : ""}.`,
+          en: `You completed ${done} tasks today${left > 0 ? `, ${left} left` : ""}.`,
+          ru: `Сегодня выполнено задач: ${done}${left > 0 ? `, осталось ${left}` : ""}.`,
+        };
+      })();
     const copy = template
       ? { title: template.title, message: `${prefix[candidate.language]} ${template.message}`.slice(0, 500) }
       : candidate.fallback;
@@ -94,7 +101,66 @@ Deno.serve(async (req) => {
   }));
   generated = inserted.filter((result) => result.status === "fulfilled" && result.value).length;
   for (const result of inserted) if (result.status === "rejected") console.error("Notification insert failed:", result.reason);
-  if (!pushConfigured) return json({ ok: true, generated, pushConfigured: false, processed: 0, pushSent: 0, failed: 0 });
+  // Per-task reminders: fire at the task's own reminder_time on the user's local clock.
+  // They are explicit user requests, so they ignore the companion daily cap and quiet hours,
+  // but respect the master switches and skip tasks already completed today.
+  let reminders = 0;
+  const reminderRows: Array<{ id: string; user_id: string; title: string; measurement_type: string; target: number | null; unit: string | null; schedule_type: string; schedule_rule: { weekdays?: number[] } | null; starts_on: string; ends_on: string | null; reminder_time: string }> = [];
+  for (let offset = 0; offset < profiles.length; offset += 100) {
+    const { data, error: reminderError } = await admin.from("activities")
+      .select("id,user_id,title,measurement_type,target,unit,schedule_type,schedule_rule,starts_on,ends_on,reminder_time")
+      .in("user_id", profiles.slice(offset, offset + 100).map((profile) => profile.id))
+      .eq("is_active", true).not("reminder_time", "is", null);
+    if (reminderError) { console.error("Could not load reminder tasks:", reminderError); break; }
+    reminderRows.push(...(data ?? []));
+  }
+  const remindersByUser = new Map<string, typeof reminderRows>();
+  for (const row of reminderRows) remindersByUser.set(row.user_id, [...(remindersByUser.get(row.user_id) ?? []), row]);
+  const reminderResults = await Promise.allSettled(profiles.filter((profile) => remindersByUser.has(profile.id)).map(async (profile) => {
+    const clock = localClock(now, safeTimeZone(profile.timezone));
+    const weekday = ((new Date(`${clock.date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+    const due = (remindersByUser.get(profile.id) ?? []).filter((task) => {
+      const match = String(task.reminder_time).match(/^(\d{2}):(\d{2})/);
+      if (!match) return false;
+      const at = Number(match[1]) * 60 + Number(match[2]);
+      // 15 minute catch-up window tolerates cron jitter; the dedupe key prevents repeats.
+      if (clock.minutes < at || clock.minutes >= at + 15) return false;
+      if (task.starts_on > clock.date || (task.ends_on && task.ends_on < clock.date)) return false;
+      if (task.schedule_type === "once") return task.starts_on === clock.date;
+      const weekdays = task.schedule_rule?.weekdays;
+      return !Array.isArray(weekdays) || weekdays.length === 0 || weekdays.includes(weekday);
+    });
+    if (!due.length) return 0;
+    const [prefsResult, occResult] = await Promise.all([
+      admin.from("notification_preferences").select("enabled,category_settings").eq("user_id", profile.id).maybeSingle(),
+      admin.from("occurrences").select("activity_id,status").eq("user_id", profile.id).eq("period_start", clock.date).in("activity_id", due.map((task) => task.id)),
+    ]);
+    if (prefsResult.error || occResult.error) throw new Error("Could not load reminder context");
+    if (prefsResult.data?.enabled === false || prefsResult.data?.category_settings?.productivity === false) return 0;
+    const finished = new Set((occResult.data ?? []).filter((occ) => occ.status !== "pending").map((occ) => occ.activity_id));
+    const language: "uz" | "en" | "ru" = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
+    let created = 0;
+    for (const task of due) {
+      if (finished.has(task.id)) continue;
+      const goal = task.measurement_type === "count" && task.target ? ` ${Number(task.target)}${task.unit ? ` ${task.unit}` : ""}` : "";
+      const message = { uz: `Vaqti keldi${goal ? `. Maqsad:${goal}` : ""}.`, en: `It's time${goal ? `. Goal:${goal}` : ""}.`, ru: `Пора${goal ? `. Цель:${goal}` : ""}.` }[language];
+      const { error: insertError } = await admin.from("notifications").insert({
+        user_id: profile.id, category: "productivity", title: task.title.slice(0, 120), message,
+        data: { url: "/", activityId: task.id, kind: "task-reminder" },
+        dedupe_key: `task-reminder:${task.id}:${clock.date}`, scheduled_at: nowIso,
+        expires_at: new Date(now.getTime() + 3 * 86400000).toISOString(),
+      });
+      if (insertError && insertError.code !== "23505") throw insertError;
+      if (!insertError) created++;
+    }
+    return created;
+  }));
+  for (const result of reminderResults) {
+    if (result.status === "fulfilled") reminders += result.value;
+    else console.error("Task reminder failed:", result.reason);
+  }
+  generated += reminders;
+  if (!pushConfigured) return json({ ok: true, generated, reminders, pushConfigured: false, processed: 0, pushSent: 0, failed: 0 });
   const { data: due, error } = await admin.rpc("claim_due_notifications", { p_limit: 100 });
   if (error) return json({ error: "Could not claim due notifications" }, 500);
   let pushSent = 0, failed = 0;
@@ -173,5 +239,5 @@ Deno.serve(async (req) => {
     }
   }
   await admin.from("notifications").delete().lte("expires_at", nowIso);
-  return json({ ok: true, generated, pushConfigured: true, processed: due?.length ?? 0, pushSent, failed });
+  return json({ ok: true, generated, reminders, pushConfigured: true, processed: due?.length ?? 0, pushSent, failed });
 });

@@ -17,6 +17,7 @@ The SQL files in this directory are the canonical schema scripts. Matching Supab
 9. `009_settings_and_realtime.sql` — settings columns and Realtime publication.
 10. `010_user_devices_and_security.sql` — device registry and device-session RLS.
 11. `011_custom_time_of_day.sql` — custom time-of-day values.
+12. `012_activity_reminder_time.sql` — optional per-task reminder time (`activities.reminder_time`).
 
 The scripts use `IF NOT EXISTS`/replace patterns where practical, but they are not a substitute for reviewing the target schema and backing up production data. Do not blindly replay modified scripts against a live database.
 
