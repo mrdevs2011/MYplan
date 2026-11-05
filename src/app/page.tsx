@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent, type
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import TimeTab from "@/components/time-tab";
+import { formatLongDate } from "@/lib/date-format";
+import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -277,13 +279,17 @@ function getLocalizedNotification(
 }
 
 function getNotificationTimeLabel(timestamp: number, language: Language) {
+  // Spelled out by hand: many browsers have no `uz` Intl.RelativeTimeFormat data and print "-4 min".
   const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
-  const formatter = new Intl.RelativeTimeFormat(language === "en" ? "en" : language === "ru" ? "ru" : "uz", { numeric: "auto" });
-  if (diffMinutes < 1) return formatter.format(0, "second");
-  if (diffMinutes < 60) return formatter.format(-diffMinutes, "minute");
   const hours = Math.floor(diffMinutes / 60);
-  if (hours < 24) return formatter.format(-hours, "hour");
-  return formatter.format(-Math.floor(hours / 24), "day");
+  const days = Math.floor(hours / 24);
+  const [value, unit] = diffMinutes < 1 ? [0, "now"] : diffMinutes < 60 ? [diffMinutes, "min"] : hours < 24 ? [hours, "h"] : [days, "d"];
+  const labels = {
+    uz: { now: "hozir", min: "daqiqa oldin", h: "soat oldin", d: "kun oldin" },
+    ru: { now: "только что", min: "мин. назад", h: "ч. назад", d: "дн. назад" },
+    en: { now: "just now", min: "min ago", h: "h ago", d: "d ago" },
+  }[language];
+  return unit === "now" ? labels.now : `${value} ${labels[unit as "min" | "h" | "d"]}`;
 }
 
 export default function Home() {
@@ -1038,12 +1044,7 @@ export default function Home() {
         const profileLanguage = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
         setLanguage(profileLanguage);
         localStorage.setItem("myplan_lang", profileLanguage);
-        const locale = profileLanguage === "en" ? "en-US" : profileLanguage === "ru" ? "ru-RU" : "uz-UZ";
-        setFormattedToday(new Intl.DateTimeFormat(locale, {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-        }).format(new Date()));
+        setFormattedToday(formatLongDate(profileLanguage));
 
         const validSteps = Array.isArray(profile.counter_steps)
           ? (profile.counter_steps as number[])
@@ -1329,13 +1330,7 @@ export default function Home() {
               const l = p.language as Language;
               setLanguage(l);
               localStorage.setItem("myplan_lang", l);
-              const locale = l === "en" ? "en-US" : l === "ru" ? "ru-RU" : "uz-UZ";
-              const dateFmt = new Intl.DateTimeFormat(locale, {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-              });
-              setFormattedToday(dateFmt.format(new Date()));
+              setFormattedToday(formatLongDate(l));
             }
             if (Array.isArray(p.counter_steps)) {
               const steps = (p.counter_steps as number[])
@@ -1478,9 +1473,8 @@ export default function Home() {
         (authStateRevision !== initialAuthRevision && latestAuthEventUserId !== (session?.user.id ?? null))
       ) return;
       // Clean Production Start Epoch (Purge legacy test sessions so returning test users cleanly log out)
-      const PROD_CLEAN_SLATE_EPOCH = "v4_production_clean_20261104";
       if (typeof window !== "undefined") {
-        const storedEpoch = localStorage.getItem("myplan_production_epoch");
+        const storedEpoch = localStorage.getItem(EPOCH_STORAGE_KEY);
         if (storedEpoch !== PROD_CLEAN_SLATE_EPOCH) {
           try {
             await supabase.auth.signOut();
@@ -1499,7 +1493,7 @@ export default function Home() {
               sessionStorage.removeItem(key);
             }
           }
-          localStorage.setItem("myplan_production_epoch", PROD_CLEAN_SLATE_EPOCH);
+          markCleanSlateEpoch();
           setUserId(null);
           setAuthReady(true);
           router.replace("/login");
@@ -2764,13 +2758,7 @@ export default function Home() {
   const handleLanguageChange = (newLang: Language) => {
     setLanguage(newLang);
     localStorage.setItem("myplan_lang", newLang);
-    const locale = newLang === "en" ? "en-US" : newLang === "ru" ? "ru-RU" : "uz-UZ";
-    const dateFmt = new Intl.DateTimeFormat(locale, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    });
-    setFormattedToday(dateFmt.format(new Date()));
+    setFormattedToday(formatLongDate(newLang));
 
     if (userId) {
       const supabase = createClient();

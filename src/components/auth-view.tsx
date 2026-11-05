@@ -1,6 +1,7 @@
 "use client";
 
 import { saveAccountSession } from "@/lib/account-sessions";
+import { markCleanSlateEpoch } from "@/lib/epoch";
 import { useEffect, useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -223,6 +224,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           },
         });
         if (error) throw error;
+        markCleanSlateEpoch();
         const newUser = data.user;
         if (data.session && newUser) {
           saveAccountSession(data.session);
@@ -259,6 +261,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           password,
         });
         if (error) throw error;
+        markCleanSlateEpoch();
         if (typeof window !== "undefined" && signInData.user) {
           const expectedAccountId = localStorage.getItem("myplan_switch_account_id");
           if (expectedAccountId && signInData.user.id !== expectedAccountId) {
