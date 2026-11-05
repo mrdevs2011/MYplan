@@ -260,13 +260,19 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         if (typeof window !== "undefined" && signInData.user) {
           const expectedAccountId = localStorage.getItem("myplan_switch_account_id");
           if (expectedAccountId && signInData.user.id !== expectedAccountId) {
-            await supabase.auth.signOut();
+            await supabase.auth.signOut({ scope: "local" });
             setMessage("Tanlangan hisobga kirish uchun aynan shu hisobning foydalanuvchi nomi va parolini kirit.");
             return;
           }
+          const { data: persistedSession, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) throw sessionError;
+          if (persistedSession.session?.user.id !== signInData.user.id) {
+            await supabase.auth.signOut({ scope: "local" });
+            throw new Error("Kiritilgan hisob sessiyasi saqlanmadi. Iltimos, qayta urinib ko'r.");
+          }
           localStorage.removeItem("myplan_switch_account_id");
           localStorage.removeItem("myplan_add_account_intent");
-          void syncCurrentDeviceSession(supabase, signInData.user.id);
+          await syncCurrentDeviceSession(supabase, signInData.user.id);
           try {
             const rawVault = localStorage.getItem("myplan_accounts_vault");
             const vault = rawVault ? JSON.parse(rawVault) : [];
@@ -285,6 +291,10 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           } catch (err) {
             console.error(err);
           }
+        }
+        if (typeof window !== "undefined") {
+          window.location.replace("/");
+          return;
         }
         router.replace("/");
       }

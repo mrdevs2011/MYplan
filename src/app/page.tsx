@@ -136,6 +136,8 @@ interface Occurrence {
   status: "pending" | "completed";
 }
 
+const accountStorageKey = (userId: string, key: string) => `myplan_account_${userId}_${key}`;
+
 const today = () => {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -288,6 +290,15 @@ export default function Home() {
   const workspaceLoadSequenceRef = useRef(0);
   const offlineQueueProcessingRef = useRef(false);
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  const taskCountsRef = useRef<Record<string, number>>({});
+  const progressSyncVersionsRef = useRef(new Map<string, number>());
+  const updateTaskCounts = useCallback((
+    next: Record<string, number> | ((current: Record<string, number>) => Record<string, number>)
+  ) => {
+    const resolved = typeof next === "function" ? next(taskCountsRef.current) : next;
+    taskCountsRef.current = resolved;
+    setTaskCounts(resolved);
+  }, []);
   const [taskHistory, setTaskHistory] = useState<Record<string, number[]>>({});
   const [loadingData, setLoadingData] = useState(false);
 
@@ -381,19 +392,7 @@ export default function Home() {
   const [debouncedDurationError, setDebouncedDurationError] = useState("");
 
   // Custom Time Slots
-  const [customTimeSlots, setCustomTimeSlots] = useState<CustomTimeSlot[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = localStorage.getItem("myplan_custom_time_slots");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  const [customTimeSlots, setCustomTimeSlots] = useState<CustomTimeSlot[]>([]);
   const [showCustomTimeModal, setShowCustomTimeModal] = useState<boolean>(false);
   const [customTimeInput, setCustomTimeInput] = useState<string>("");
   const [customTimeError, setCustomTimeError] = useState<string>("");
@@ -904,7 +903,7 @@ export default function Home() {
     setLoadingData(true);
     const supabase = createClient();
     try {
-      const [{ data: profile }, { data: activityRows, error: activityError }] = await Promise.all([
+      const [{ data: profile, error: profileError }, { data: activityRows, error: activityError }] = await Promise.all([
         supabase
           .from("profiles")
           .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date, language, counter_steps, sound_enabled, notifications_enabled, auto_archive_delay, created_at")
@@ -917,10 +916,26 @@ export default function Home() {
           .order("created_at", { ascending: false }),
       ]);
 
+      if (profileError) throw profileError;
       if (activityError) throw activityError;
       if (!isCurrentLoad()) return;
       const acts = (activityRows || []) as Activity[];
       setActivities(acts);
+      const savedSlots = localStorage.getItem(accountStorageKey(id, "custom_time_slots"));
+      let accountSlots: CustomTimeSlot[] = [];
+      if (savedSlots) {
+        try {
+          const parsedSlots: unknown = JSON.parse(savedSlots);
+          if (Array.isArray(parsedSlots)) {
+            accountSlots = parsedSlots.filter((slot): slot is CustomTimeSlot =>
+              Boolean(slot && typeof slot.id === "string" && typeof slot.label === "string")
+            );
+          }
+        } catch {
+          localStorage.removeItem(accountStorageKey(id, "custom_time_slots"));
+        }
+      }
+      setCustomTimeSlots(accountSlots);
 
       if (acts && acts.length > 0) {
         setCustomTimeSlots((prev) => {
@@ -937,7 +952,7 @@ export default function Home() {
           if (!changed) return prev;
           const updated = Array.from(map.entries()).map(([id, label]) => ({ id, label }));
           if (typeof window !== "undefined") {
-            localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+            localStorage.setItem(accountStorageKey(id, "custom_time_slots"), JSON.stringify(updated));
           }
           return updated;
         });
@@ -946,42 +961,41 @@ export default function Home() {
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
         setAccountUsername(profile.username || "");
-        if (profile.full_name) setEditFullName(profile.full_name);
-        if (profile.age) {
-          setUserAge(profile.age);
-          setEditAge(profile.age);
-        }
-        if (profile.created_at) setUserCreatedAt(profile.created_at);
-        if (typeof profile.avatar_url === "string" && profile.avatar_url) {
-          setAvatarUrl(profile.avatar_url);
-        } else if (profile.avatar_url === null) {
-          setAvatarUrl(null);
-          localStorage.removeItem(`myplan_avatar_${id}`);
-        }
-        if (typeof profile.streak_count === "number") setStreakCount(profile.streak_count);
-        if (typeof profile.best_streak === "number") setBestStreak(profile.best_streak);
-        if (profile.language && (profile.language === "uz" || profile.language === "en" || profile.language === "ru")) {
-          setLanguage(profile.language as Language);
-          localStorage.setItem("myplan_lang", profile.language);
-        }
-        if (Array.isArray(profile.counter_steps) && profile.counter_steps.length > 0) {
-          const validSteps = (profile.counter_steps as number[])
-            .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
-            .sort((a, b) => b - a);
-          setCounterSteps(validSteps);
-          localStorage.setItem("myplan_counter_steps", JSON.stringify(validSteps));
-        }
-        if (typeof profile.sound_enabled === "boolean") {
-          setSoundEnabled(profile.sound_enabled);
-          localStorage.setItem("myplan_sound_enabled", String(profile.sound_enabled));
-        }
-        if (typeof profile.notifications_enabled === "boolean") {
-          setNotificationsEnabled(profile.notifications_enabled);
-          localStorage.setItem("myplan_notifications_enabled", String(profile.notifications_enabled));
-        }
-        if (typeof profile.auto_archive_delay === "number") {
-          setAutoArchiveDelay(profile.auto_archive_delay);
-        }
+        setEditFullName(profile.full_name || profile.username || "");
+        setUserAge(profile.age ?? "");
+        setEditAge(profile.age ?? "");
+        setUserCreatedAt(profile.created_at || "");
+        setAvatarUrl(typeof profile.avatar_url === "string" && profile.avatar_url ? profile.avatar_url : null);
+        if (!profile.avatar_url) localStorage.removeItem(`myplan_avatar_${id}`);
+        setStreakCount(typeof profile.streak_count === "number" ? profile.streak_count : 0);
+        setBestStreak(typeof profile.best_streak === "number" ? profile.best_streak : 0);
+
+        const profileLanguage = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
+        setLanguage(profileLanguage);
+        localStorage.setItem("myplan_lang", profileLanguage);
+        const locale = profileLanguage === "en" ? "en-US" : profileLanguage === "ru" ? "ru-RU" : "uz-UZ";
+        setFormattedToday(new Intl.DateTimeFormat(locale, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        }).format(new Date()));
+
+        const validSteps = Array.isArray(profile.counter_steps)
+          ? (profile.counter_steps as number[])
+              .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
+              .sort((a, b) => b - a)
+          : [];
+        const resolvedSteps = validSteps.length > 0 ? validSteps : [10, 5, 1];
+        setCounterSteps(resolvedSteps);
+        localStorage.setItem("myplan_counter_steps", JSON.stringify(resolvedSteps));
+
+        const soundEnabledForAccount = typeof profile.sound_enabled === "boolean" ? profile.sound_enabled : true;
+        const notificationsEnabledForAccount = typeof profile.notifications_enabled === "boolean" ? profile.notifications_enabled : true;
+        setSoundEnabled(soundEnabledForAccount);
+        setNotificationsEnabled(notificationsEnabledForAccount);
+        localStorage.setItem("myplan_sound_enabled", String(soundEnabledForAccount));
+        localStorage.setItem("myplan_notifications_enabled", String(notificationsEnabledForAccount));
+        setAutoArchiveDelay(typeof profile.auto_archive_delay === "number" ? profile.auto_archive_delay : 7);
       }
 
       // Load today's occurrences using correct PostgreSQL schema
@@ -1082,13 +1096,13 @@ export default function Home() {
       }
 
       if (!isCurrentLoad()) return;
-      setTaskCounts(initialCounts);
+      updateTaskCounts(initialCounts);
     } catch (err) {
       if (isCurrentLoad()) console.error("Workspace loading error:", err);
     } finally {
       if (isCurrentLoad()) setLoadingData(false);
     }
-  }, []);
+  }, [updateTaskCounts]);
 
   // Auth Initialization & Session Listener
   useEffect(() => {
@@ -1144,6 +1158,9 @@ export default function Home() {
     const supabase = createClient();
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
     let activeRealtimeUid: string | null = null;
+    let authStateRevision = 0;
+    let latestAuthEventUserId: string | null | undefined;
+    let disposed = false;
 
     const setupRealtime = (uid: string) => {
       activeRealtimeUid = uid;
@@ -1196,6 +1213,9 @@ export default function Home() {
             if (activeRealtimeUid !== uid) return;
             const event = payload.new as { occurrence_id?: string };
             if (!event.occurrence_id) return;
+            const occurrenceId = event.occurrence_id;
+            const syncVersion = (progressSyncVersionsRef.current.get(occurrenceId) || 0) + 1;
+            progressSyncVersionsRef.current.set(occurrenceId, syncVersion);
             const progressRows: { amount: number }[] = [];
             for (let offset = 0; ; offset += 1000) {
               const { data, error } = await supabase
@@ -1212,17 +1232,25 @@ export default function Home() {
               progressRows.push(...batch);
               if (batch.length < 1000) break;
             }
-            if (activeRealtimeUid !== uid || workspaceUserRef.current !== uid) return;
-            const occurrence = occurrencesRef.current.find((item) => item.id === event.occurrence_id);
+            if (
+              activeRealtimeUid !== uid ||
+              workspaceUserRef.current !== uid ||
+              progressSyncVersionsRef.current.get(occurrenceId) !== syncVersion
+            ) return;
+            const occurrence = occurrencesRef.current.find((item) => item.id === occurrenceId);
+            if (!occurrence) {
+              void loadWorkspace(uid);
+              return;
+            }
             const activity = occurrence
               ? activitiesRef.current.find((item) => item.id === occurrence.activity_id)
               : undefined;
             const total = progressRows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
             const cap = activity?.target && activity.target > 0 ? activity.target : Infinity;
             const count = Math.min(Math.max(0, total), cap);
-            setTaskCounts((prev) => ({ ...prev, [event.occurrence_id!]: count }));
+            updateTaskCounts((prev) => ({ ...prev, [occurrenceId]: count }));
             if (typeof window !== "undefined") {
-              localStorage.setItem(`myplan_count_${event.occurrence_id}`, String(count));
+              localStorage.setItem(`myplan_count_${occurrenceId}`, String(count));
             }
           }
         )
@@ -1284,6 +1312,7 @@ export default function Home() {
           "postgres_changes",
           { event: "*", schema: "public", table: "user_devices", filter: `user_id=eq.${uid}` },
           (payload) => {
+            if (activeRealtimeUid !== uid) return;
             const currentToken = getOrCreateSessionToken();
             const updated = payload.new as { session_token?: string; is_active?: boolean } | null;
             if (
@@ -1308,6 +1337,7 @@ export default function Home() {
           "postgres_changes",
           { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` },
           (payload) => {
+            if (activeRealtimeUid !== uid) return;
             if (payload.eventType === "INSERT") {
               const row = payload.new as { id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null };
               const item: MyPlanNotification = {
@@ -1371,7 +1401,14 @@ export default function Home() {
         });
     };
 
+    const initialAuthRevision = authStateRevision;
     void supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // An auth event that arrived after getSession started is authoritative.
+      // Ignore this potentially stale snapshot instead of restoring an old account.
+      if (
+        disposed ||
+        (authStateRevision !== initialAuthRevision && latestAuthEventUserId !== (session?.user.id ?? null))
+      ) return;
       // Clean Production Start Epoch (Purge legacy test sessions so returning test users cleanly log out)
       const PROD_CLEAN_SLATE_EPOCH = "v4_production_clean_20261104";
       if (typeof window !== "undefined") {
@@ -1478,20 +1515,62 @@ export default function Home() {
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      authStateRevision += 1;
+      latestAuthEventUserId = session?.user.id ?? null;
+      if (disposed) return;
       if (session?.user) {
         const nextUserId = session.user.id;
         if (workspaceUserRef.current && workspaceUserRef.current !== nextUserId) {
           setActivities([]);
           setOccurrences([]);
-          setTaskCounts({});
+          updateTaskCounts({});
+          progressSyncVersionsRef.current.clear();
           setTaskHistory({});
           setNotifications([]);
           setActiveToast(null);
         }
+        const currentName = String(
+          session.user.user_metadata?.full_name || session.user.user_metadata?.username || ""
+        );
+        const currentUsername = String(session.user.user_metadata?.username || "");
+        const currentAge = session.user.user_metadata?.age || "";
         if (typeof window !== "undefined") localStorage.setItem("myplan_active_account_id", nextUserId);
         setUserId(nextUserId);
-        void loadWorkspace(nextUserId);
-        setupRealtime(nextUserId);
+        setAccountName(currentName);
+        setAccountUsername(currentUsername);
+        setUserAge(currentAge);
+        setEditFullName(currentName);
+        setEditAge(currentAge);
+        setUserLastSignInAt(session.user.last_sign_in_at || session.user.created_at || new Date().toISOString());
+        setUserCreatedAt(session.user.created_at || new Date().toISOString());
+        setAuthReady(true);
+        const savedAvatar = localStorage.getItem(`myplan_avatar_${nextUserId}`);
+        setAvatarUrl(savedAvatar);
+        setTimeout(() => {
+          if (disposed) return;
+          void loadWorkspace(nextUserId);
+          setupRealtime(nextUserId);
+          void syncCurrentDeviceSession(supabase, nextUserId);
+          void loadActiveDevices(nextUserId);
+          try {
+            const rawVault = localStorage.getItem("myplan_accounts_vault");
+            const vault: UserAccount[] = rawVault ? JSON.parse(rawVault) : [];
+            const existing = vault.find((account) => account.id === nextUserId);
+            const updatedAccount: UserAccount = {
+              id: nextUserId,
+              username: currentUsername || existing?.username || "foydalanuvchi",
+              fullName: currentName || existing?.fullName || "Foydalanuvchi",
+              age: currentAge || existing?.age || null,
+              avatarUrl: savedAvatar || existing?.avatarUrl || null,
+              addedAt: existing?.addedAt || Date.now(),
+            };
+            const updatedVault = [...vault.filter((account) => account.id !== nextUserId), updatedAccount].slice(-5);
+            localStorage.setItem("myplan_accounts_vault", JSON.stringify(updatedVault));
+            setSavedAccounts(updatedVault);
+          } catch (error) {
+            console.warn("Account vault could not be synchronized:", error);
+          }
+        }, 0);
       } else {
         activeRealtimeUid = null;
         if (realtimeChannel) {
@@ -1503,7 +1582,8 @@ export default function Home() {
         setUserId(null);
         setActivities([]);
         setOccurrences([]);
-        setTaskCounts({});
+        updateTaskCounts({});
+        progressSyncVersionsRef.current.clear();
         setTaskHistory({});
         setNotifications([]);
         setActiveToast(null);
@@ -1600,34 +1680,8 @@ export default function Home() {
       };
       colorSchemeMedia.addEventListener("change", handleSystemThemeChange);
 
-      const savedLang = (localStorage.getItem("myplan_lang") as Language) || "uz";
-      setTimeout(() => {
-        setLanguage(savedLang);
-        const locale = savedLang === "en" ? "en-US" : savedLang === "ru" ? "ru-RU" : "uz-UZ";
-        const dateFmt = new Intl.DateTimeFormat(locale, {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-        });
-        setFormattedToday(dateFmt.format(new Date()));
-        const currentD = new Date().getDay();
-        setTodayDayOfWeek(currentD === 0 ? 7 : currentD);
-      }, 0);
-
-      const savedSteps = localStorage.getItem("myplan_counter_steps");
-      if (savedSteps) {
-        try {
-          const parsed = JSON.parse(savedSteps);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const filteredSteps = parsed
-              .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
-              .sort((a, b) => b - a);
-            setTimeout(() => setCounterSteps(filteredSteps), 0);
-          }
-        } catch {
-          // ignore
-        }
-      }
+      const currentD = new Date().getDay();
+      setTimeout(() => setTodayDayOfWeek(currentD === 0 ? 7 : currentD), 0);
 
       // Notifications are loaded from Supabase; never synthesize fake history in the browser.
       const notificationClient = createClient();
@@ -1651,7 +1705,7 @@ export default function Home() {
             title: row.title,
             message: row.message,
             createdAt: new Date(row.created_at).getTime(),
-            timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), savedLang),
+            timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
             isRead: Boolean(row.read_at),
           } satisfies MyPlanNotification));
           setNotifications((prev) => {
@@ -1707,6 +1761,7 @@ export default function Home() {
 
     const activeTimers = counterTimersRef.current;
     return () => {
+      disposed = true;
       listener.subscription.unsubscribe();
       if (realtimeChannel) {
         void supabase.removeChannel(realtimeChannel);
@@ -1725,7 +1780,7 @@ export default function Home() {
         }
       }
     };
-  }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices]);
+  }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices, updateTaskCounts]);
 
   const handleAddCustomTimeSlot = useCallback(() => {
     const trimmed = customTimeInput.trim();
@@ -1738,7 +1793,7 @@ export default function Home() {
     setCustomTimeSlots((prev) => {
       const updated = [...prev, newSlot];
       if (typeof window !== "undefined") {
-        localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+        if (userId) localStorage.setItem(accountStorageKey(userId, "custom_time_slots"), JSON.stringify(updated));
       }
       return updated;
     });
@@ -1747,19 +1802,19 @@ export default function Home() {
     setCustomTimeError("");
     setShowCustomTimeModal(false);
     triggerHaptic("medium");
-  }, [customTimeInput, t.field_required]);
+  }, [customTimeInput, t.field_required, userId]);
 
   const handleDeleteCustomTimeSlot = useCallback((id: string) => {
     setCustomTimeSlots((prev) => {
       const updated = prev.filter((s) => s.id !== id);
       if (typeof window !== "undefined") {
-        localStorage.setItem("myplan_custom_time_slots", JSON.stringify(updated));
+        if (userId) localStorage.setItem(accountStorageKey(userId, "custom_time_slots"), JSON.stringify(updated));
       }
       return updated;
     });
     setNewTimeOfDay((prev) => (prev === id ? "anytime" : prev));
     setActiveTimeFilter((prev) => (prev === id ? "all" : prev));
-  }, []);
+  }, [userId]);
 
   const resetModalState = useCallback(() => {
     setEditingActivity(null);
@@ -1881,7 +1936,7 @@ export default function Home() {
 
     if (activity.measurement_type === "count" && activity.target) {
       const newCount = nextStatus === "completed" ? activity.target : 0;
-      setTaskCounts((prev) => ({ ...prev, [occ.id]: newCount }));
+      updateTaskCounts((prev) => ({ ...prev, [occ.id]: newCount }));
       localStorage.setItem(`myplan_count_${occ.id}`, String(newCount));
     }
 
@@ -1910,7 +1965,7 @@ export default function Home() {
   async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
     if (!userId) return;
     const target = activity.target || 0;
-    const current = Math.min(taskCounts[occurrence.id] || 0, target > 0 ? target : Infinity);
+    const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
     const actualAdd = target > 0 ? Math.min(amount, Math.max(0, target - current)) : amount;
     if (actualAdd <= 0) return;
 
@@ -1928,7 +1983,7 @@ export default function Home() {
       setCollapsedCounters((prev) => ({ ...prev, [occurrence.id]: true }));
     }, 10000);
 
-    setTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
+    updateTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
     setTaskHistory((prev) => ({
       ...prev,
       [occurrence.id]: [...(prev[occurrence.id] || []), actualAdd],
@@ -2012,7 +2067,7 @@ export default function Home() {
     const lastAdd = history[history.length - 1];
     const newHistory = history.slice(0, -1);
     const target = activity.target || 0;
-    const current = Math.min(taskCounts[occurrence.id] || 0, target > 0 ? target : Infinity);
+    const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
     const next = Math.max(0, current - lastAdd);
 
     // Cancel 10s timer and un-collapse space immediately on undo
@@ -2021,7 +2076,7 @@ export default function Home() {
     }
     setCollapsedCounters((prev) => ({ ...prev, [occurrence.id]: false }));
 
-    setTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
+    updateTaskCounts((prev) => ({ ...prev, [occurrence.id]: next }));
     setTaskHistory((prev) => ({ ...prev, [occurrence.id]: newHistory }));
 
     if (typeof window !== "undefined") {
@@ -2094,14 +2149,14 @@ export default function Home() {
     localStorage.setItem("myplan_switch_account_id", targetAccount.id);
     localStorage.setItem("myplan_add_account_intent", "true");
     const supabase = createClient();
-    const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) {
       localStorage.removeItem("myplan_switch_account_id");
       localStorage.removeItem("myplan_add_account_intent");
       console.error("Could not end the current account session:", error.message);
       return;
     }
-    router.replace("/login");
+    window.location.replace("/login");
   };
 
   const handleAddAccount = () => {
