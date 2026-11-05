@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export interface LifeSelectOption {
@@ -8,7 +8,7 @@ export interface LifeSelectOption {
   label: string;
   group?: string;
   detail?: string;
-  icon?: string;
+  icon?: ReactNode;
 }
 
 interface LifeSelectProps {

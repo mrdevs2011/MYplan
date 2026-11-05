@@ -51,6 +51,22 @@ import {
   IconZap,
   IconPlay,
   IconPause,
+  IconCheckCircle,
+  IconRepeat,
+  IconDumbbell,
+  IconFootprints,
+  IconMapPin,
+  IconGlassWater,
+  IconDroplet,
+  IconBookOpen,
+  IconLibrary,
+  IconGraduationCap,
+  IconMessageCircle,
+  IconTimer,
+  IconCalendarDays,
+  IconFlag,
+  IconPin,
+  IconCircleDot,
 } from "@/components/icons";
 import {
   getOrCreateSessionToken,
@@ -3098,24 +3114,24 @@ export default function Home() {
                       onChange={setCountUnit}
                       ariaLabel={t.label_target_count}
                       options={[
-                        { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: "Mashq, odat va kundalik takrorlar", icon: "↻" },
-                        { value: "set", label: t.unit_set, group: t.group_fitness_health, detail: "Kuch mashqlari va trening setlari", icon: "🏋️" },
-                        { value: "qadam", label: t.unit_qadam, group: t.group_fitness_health, detail: "Yurish va kunlik faollik", icon: "👟" },
-                        { value: "km", label: t.unit_km, group: t.group_fitness_health, detail: "Yugurish, yurish va masofa", icon: "📍" },
-                        { value: "stakan", label: t.unit_stakan, group: t.group_fitness_health, detail: "Suv ichish odati", icon: "🥛" },
-                        { value: "litr", label: t.unit_litr, group: t.group_fitness_health, detail: "Suyuqlik miqdori", icon: "💧" },
-                        { value: "kkal", label: t.unit_kkal, group: t.group_fitness_health, detail: "Energiya va ovqatlanish", icon: "🔥" },
-                        { value: "bet", label: t.unit_bet, group: t.group_study_mind, detail: "Kitob o'qish va mutolaa", icon: "📖" },
-                        { value: "bob", label: t.unit_bob, group: t.group_study_mind, detail: "Kitob yoki kurs bo'limlari", icon: "📚" },
-                        { value: "dars", label: t.unit_dars, group: t.group_study_mind, detail: "Dars va o'quv mashg'ulotlari", icon: "🎓" },
-                        { value: "soz", label: t.unit_soz, group: t.group_study_mind, detail: "Til o'rganish va lug'at", icon: "💬" },
-                        { value: "daqiqa", label: t.unit_daqiqa, group: t.group_time_focus, detail: "Diqqat va odat uchun vaqt", icon: "⏱️" },
-                        { value: "soat", label: t.unit_soat, group: t.group_time_focus, detail: "Uzoq mashg'ulotlar", icon: "🕒" },
-                        { value: "pomodoro", label: t.unit_pomodoro, group: t.group_time_focus, detail: "Fokus sessiyalari", icon: "🍅" },
-                        { value: "ta", label: t.unit_ta, group: t.group_time_focus, detail: "Vazifa va yakunlangan ishlar", icon: "✓" },
-                        { value: "rakat", label: t.unit_rakat, group: t.group_spiritual, detail: "Ibodat va namoz", icon: "🌙" },
-                        { value: "oyat", label: t.unit_oyat, group: t.group_spiritual, detail: "Qur'on mutolaasi", icon: "☪" },
-                        { value: "tasbeh", label: t.unit_tasbeh, group: t.group_spiritual, detail: "Zikr va tasbeh", icon: "📿" },
+                        { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: "Mashq, odat va kundalik takrorlar", icon: <IconRepeat className="life-select-svg-icon" /> },
+                        { value: "set", label: t.unit_set, group: t.group_fitness_health, detail: "Kuch mashqlari va trening setlari", icon: <IconDumbbell className="life-select-svg-icon" /> },
+                        { value: "qadam", label: t.unit_qadam, group: t.group_fitness_health, detail: "Yurish va kunlik faollik", icon: <IconFootprints className="life-select-svg-icon" /> },
+                        { value: "km", label: t.unit_km, group: t.group_fitness_health, detail: "Yugurish, yurish va masofa", icon: <IconMapPin className="life-select-svg-icon" /> },
+                        { value: "stakan", label: t.unit_stakan, group: t.group_fitness_health, detail: "Suv ichish odati", icon: <IconGlassWater className="life-select-svg-icon" /> },
+                        { value: "litr", label: t.unit_litr, group: t.group_fitness_health, detail: "Suyuqlik miqdori", icon: <IconDroplet className="life-select-svg-icon" /> },
+                        { value: "kkal", label: t.unit_kkal, group: t.group_fitness_health, detail: "Energiya va ovqatlanish", icon: <IconFlame className="life-select-svg-icon" /> },
+                        { value: "bet", label: t.unit_bet, group: t.group_study_mind, detail: "Kitob o'qish va mutolaa", icon: <IconBookOpen className="life-select-svg-icon" /> },
+                        { value: "bob", label: t.unit_bob, group: t.group_study_mind, detail: "Kitob yoki kurs bo'limlari", icon: <IconLibrary className="life-select-svg-icon" /> },
+                        { value: "dars", label: t.unit_dars, group: t.group_study_mind, detail: "Dars va o'quv mashg'ulotlari", icon: <IconGraduationCap className="life-select-svg-icon" /> },
+                        { value: "soz", label: t.unit_soz, group: t.group_study_mind, detail: "Til o'rganish va lug'at", icon: <IconMessageCircle className="life-select-svg-icon" /> },
+                        { value: "daqiqa", label: t.unit_daqiqa, group: t.group_time_focus, detail: "Diqqat va odat uchun vaqt", icon: <IconTimer className="life-select-svg-icon" /> },
+                        { value: "soat", label: t.unit_soat, group: t.group_time_focus, detail: "Uzoq mashg'ulotlar", icon: <IconClock className="life-select-svg-icon" /> },
+                        { value: "pomodoro", label: t.unit_pomodoro, group: t.group_time_focus, detail: "Fokus sessiyalari", icon: <IconTimer className="life-select-svg-icon" /> },
+                        { value: "ta", label: t.unit_ta, group: t.group_time_focus, detail: "Vazifa va yakunlangan ishlar", icon: <IconCheckCircle className="life-select-svg-icon" /> },
+                        { value: "rakat", label: t.unit_rakat, group: t.group_spiritual, detail: "Ibodat va namoz", icon: <IconMoon className="life-select-svg-icon" /> },
+                        { value: "oyat", label: t.unit_oyat, group: t.group_spiritual, detail: "Qur'on mutolaasi", icon: <IconBookOpen className="life-select-svg-icon" /> },
+                        { value: "tasbeh", label: t.unit_tasbeh, group: t.group_spiritual, detail: "Zikr va tasbeh", icon: <IconCircleDot className="life-select-svg-icon" /> },
                       ] satisfies LifeSelectOption[]}
                     />
                   </div>
@@ -3310,10 +3326,10 @@ export default function Home() {
                         }}
                         ariaLabel={t.label_duration}
                         options={[
-                          { value: "kun", label: t.unit_day, detail: "Qisqa muddatli reja", icon: "☀️" },
-                          { value: "hafta", label: t.unit_week, detail: "Bir necha haftalik maqsad", icon: "📅" },
-                          { value: "oy", label: t.unit_month, detail: "Oylik odat va marafon", icon: "🗓️" },
-                          { value: "yil", label: t.unit_year, detail: "Uzoq muddatli maqsad", icon: "🏁" },
+                          { value: "kun", label: t.unit_day, detail: "Qisqa muddatli reja", icon: <IconSun className="life-select-svg-icon" /> },
+                          { value: "hafta", label: t.unit_week, detail: "Bir necha haftalik maqsad", icon: <IconCalendar className="life-select-svg-icon" /> },
+                          { value: "oy", label: t.unit_month, detail: "Oylik odat va marafon", icon: <IconCalendarDays className="life-select-svg-icon" /> },
+                          { value: "yil", label: t.unit_year, detail: "Uzoq muddatli maqsad", icon: <IconFlag className="life-select-svg-icon" /> },
                         ] satisfies LifeSelectOption[]}
                       />
                     </div>
@@ -3405,8 +3421,8 @@ export default function Home() {
                   onChange={(value) => setNewSchedule(value as "daily" | "once")}
                   ariaLabel={t.label_recurrence}
                   options={[
-                    { value: "daily", label: t.opt_repeat_daily, detail: "Har kuni bajariladigan odat", icon: "🔁" },
-                    { value: "once", label: t.opt_one_time, detail: "Bir marta bajariladigan vazifa", icon: "📌" },
+                    { value: "daily", label: t.opt_repeat_daily, detail: "Har kuni bajariladigan odat", icon: <IconRepeat className="life-select-svg-icon" /> },
+                    { value: "once", label: t.opt_one_time, detail: "Bir marta bajariladigan vazifa", icon: <IconPin className="life-select-svg-icon" /> },
                   ]}
                 />
               </div>
