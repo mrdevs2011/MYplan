@@ -248,6 +248,27 @@ function triggerHaptic(type: "light" | "medium" | "heavy" | "success" | "warning
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
+type PushErrorKind = "dismissed" | "service" | "timeout" | "server" | "generic";
+
+function classifyPushError(error: unknown): { kind: PushErrorKind; detail: string } {
+  const e = error as { name?: string; message?: string } | null;
+  const message = String(e?.message ?? error ?? "");
+  const name = String(e?.name ?? "");
+  if (message === "push-permission-dismissed") return { kind: "dismissed", detail: "" };
+  if (message === "push-timeout" || message === "push-service-timeout" || /push service error|registration failed|AbortError/i.test(`${name} ${message}`)) {
+    return { kind: message === "push-timeout" ? "timeout" : "service", detail: message };
+  }
+  if (/Functions|Failed to send a request|non-2xx|notification-/i.test(`${name} ${message}`)) return { kind: "server", detail: message };
+  return { kind: "generic", detail: message.slice(0, 120) };
+}
+
 function urlBase64ToUint8Array(value: string) {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
   return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
@@ -410,6 +431,7 @@ export default function Home() {
   const [nagSnoozedUntil, setNagSnoozedUntil] = useState(0);
   const [nagNow, setNagNow] = useState(0);
   const [nagArmedAt, setNagArmedAt] = useState(0);
+  const [nagError, setNagError] = useState<{ kind: PushErrorKind; detail: string } | null>(null);
   const [switchingAccount, setSwitchingAccount] = useState(false);
   const pushSyncedUserRef = useRef<string | null>(null);
 
@@ -2358,9 +2380,17 @@ export default function Home() {
     if (activeToast?.id === id) setActiveToast(null);
   };
 
+  const pushErrorText = (error: { kind: PushErrorKind; detail: string }) =>
+    error.kind === "dismissed" ? t.nag_err_dismissed
+    : error.kind === "service" ? t.nag_err_service
+    : error.kind === "timeout" ? t.nag_err_timeout
+    : error.kind === "server" ? t.nag_err_server
+    : `${t.nag_err_generic}${error.detail ? ` (${error.detail})` : ""}`;
+
+  // Settings toggle: turns push off when this device is subscribed, otherwise runs the same enabling flow as the prompt.
   const handleRequestPush = async () => {
     if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      alert("Bu brauzer Web Push bildirishnomalarini qo‘llab-quvvatlamaydi. Push API qo‘llaydigan brauzerda ochib ko‘r.");
+      alert(t.nag_body_unsupported);
       return;
     }
     if (!window.isSecureContext) {
@@ -2370,47 +2400,25 @@ export default function Home() {
     if (pushBusy) return;
     setPushBusy(true);
     try {
-      const registration = await navigator.serviceWorker.ready;
-      if (!("pushManager" in registration) || !registration.pushManager) {
-        throw new Error("Bu brauzer Service Worker'ni qo‘llaydi, lekin Web Push API mavjud emas. Push API qo‘llaydigan brauzerdan foydalan.");
-      }
-      const existing = await registration.pushManager.getSubscription();
-      const supabase = createClient();
-
-      if (existing) {
-        const { error } = await supabase.functions.invoke("notification-subscribe", {
-          body: { action: "unsubscribe", endpoint: existing.endpoint },
-        });
-        if (error) throw new Error("Obunani serverdan bekor qilib bo‘lmadi. Qayta urinib ko‘r.");
-        const removed = await existing.unsubscribe();
-        if (!removed) throw new Error("Brauzer obunasini bekor qilib bo‘lmadi.");
+      if (pushSubscribed) {
+        const registration = await withTimeout(navigator.serviceWorker.ready, 10_000, "push-timeout");
+        const existing = await registration.pushManager.getSubscription();
+        if (existing) {
+          const supabase = createClient();
+          const { error } = await supabase.functions.invoke("notification-subscribe", { body: { action: "unsubscribe", endpoint: existing.endpoint } });
+          if (error) throw new Error("notification-subscribe: obunani serverdan bekor qilib bo‘lmadi.");
+          if (!(await existing.unsubscribe())) throw new Error("Brauzer obunasini bekor qilib bo‘lmadi.");
+        }
         setPushSubscribed(false);
-        alert("Brauzer bildirishnomalari ushbu qurilma uchun o‘chirildi.");
         return;
       }
-
-      const permission = await Notification.requestPermission();
-      setPushPermission(permission);
-      if (permission !== "granted") return;
-      const { data: keyData, error: keyError } = await supabase.functions.invoke("notification-public-key", { body: {} });
-      if (keyError || !keyData?.publicKey) throw new Error("Push kaliti serverda sozlanmagan.");
-      const { publicKey } = keyData as { publicKey: string };
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: Uint8Array.from(atob(publicKey.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(publicKey.length / 4) * 4, "=")), (char) => char.charCodeAt(0)),
-      });
-      const { error: saveError } = await supabase.functions.invoke("notification-subscribe", {
-        body: { ...subscription.toJSON(), userAgent: navigator.userAgent },
-      });
-      if (saveError) {
-        await subscription.unsubscribe().catch(() => false);
-        throw new Error(saveError.message || "Qurilma obunasini saqlab bo‘lmadi.");
+      // Success shows a real OS notification, so no extra alert is needed.
+      if (!(await enablePushForThisDevice(false)) && Notification.permission === "default") {
+        alert(t.nag_err_dismissed);
       }
-      setPushSubscribed(true);
-      alert("Tayyor! Endi MYplan muhim eslatmalarni ushbu qurilmaga yubora oladi.");
     } catch (error) {
-      console.error("Push subscription failed:", error);
-      alert(error instanceof Error ? error.message : "Push sozlashda xatolik yuz berdi.");
+      console.error("Push toggle failed:", error);
+      alert(pushErrorText(classifyPushError(error)));
     } finally {
       setPushBusy(false);
     }
@@ -2421,17 +2429,27 @@ export default function Home() {
   // account on the same browser still owns the push endpoint.
   const enablePushForThisDevice = useCallback(async (silent = false): Promise<boolean> => {
     if (typeof window === "undefined" || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window) || !window.isSecureContext) return false;
-    const registration = await navigator.serviceWorker.ready;
-    if (!registration.pushManager) return false;
+    // Ask for permission FIRST, synchronously inside the click: Safari and Firefox drop the request
+    // if anything is awaited before it (the user gesture is gone by then).
     let permission = Notification.permission;
     if (permission === "default" && !silent) permission = await Notification.requestPermission();
     setPushPermission(permission);
+    if (permission === "default" && !silent) throw new Error("push-permission-dismissed");
     if (permission !== "granted") return false;
+    // `navigator.serviceWorker.ready` never settles when no worker was registered, so register explicitly and cap the wait.
+    const existing = await navigator.serviceWorker.getRegistration();
+    const registrationPromise = existing?.active ? Promise.resolve(existing) : navigator.serviceWorker.register("/sw.js").then(() => navigator.serviceWorker.ready);
+    const registration = await withTimeout(registrationPromise, 10_000, "push-timeout");
+    if (!registration.pushManager) return false;
     const supabase = createClient();
     const subscribeFresh = async () => {
       const { data: keyData, error: keyError } = await supabase.functions.invoke("notification-public-key", { body: {} });
-      if (keyError || !keyData?.publicKey) throw new Error("Push kaliti serverda sozlanmagan.");
-      return registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array((keyData as { publicKey: string }).publicKey) });
+      if (keyError || !keyData?.publicKey) throw new Error("notification-public-key: push kaliti serverda sozlanmagan.");
+      return withTimeout(
+        registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array((keyData as { publicKey: string }).publicKey) }),
+        20_000,
+        "push-service-timeout",
+      );
     };
     let subscription = (await registration.pushManager.getSubscription()) ?? (await subscribeFresh());
     let { error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } });
@@ -2445,8 +2463,17 @@ export default function Home() {
       throw error;
     }
     setPushSubscribed(true);
+    if (!silent) {
+      // Prove the whole chain works on this device: show a real OS notification right away.
+      void registration.showNotification("MYplan", {
+        body: t.nag_enabled_body,
+        icon: "/pwa-192.png",
+        badge: "/pwa-192.png",
+        tag: "myplan-enabled",
+      }).catch(() => undefined);
+    }
     return true;
-  }, []);
+  }, [t.nag_enabled_body]);
 
   // Keep this device registered for the signed-in account: runs silently once per account per page load.
   useEffect(() => {
@@ -2470,12 +2497,16 @@ export default function Home() {
   const handleNagEnable = async () => {
     if (pushBusy) return;
     setPushBusy(true);
+    setNagError(null);
     try {
       const ok = await enablePushForThisDevice(false);
-      if (!ok) snoozeNag();
+      // `false` here means permission was blocked: the dialog switches to the "blocked" instructions by itself.
+      if (!ok && typeof Notification !== "undefined" && Notification.permission !== "denied") {
+        setNagError({ kind: "generic", detail: "" });
+      }
     } catch (error) {
       console.error("Push enable failed:", error);
-      snoozeNag();
+      setNagError(classifyPushError(error));
     } finally {
       setPushBusy(false);
     }
@@ -3867,10 +3898,13 @@ export default function Home() {
             <p id="push-nag-body" className="push-nag-body">
               {pushNagMode === "ask" ? t.nag_body_ask : pushNagMode === "denied" ? t.nag_body_denied : pushNagMode === "ios-install" ? t.nag_body_ios : t.nag_body_unsupported}
             </p>
+            {nagError && (
+              <p className="push-nag-error" role="alert">{pushErrorText(nagError)}</p>
+            )}
             <div className="modal-actions push-nag-actions">
               {pushNagMode === "ask" && (
                 <button type="button" className="btn-modal-submit w-full" disabled={pushBusy} onClick={() => void handleNagEnable()}>
-                  {pushBusy ? t.nag_enabling : t.nag_btn_enable}
+                  {pushBusy ? t.nag_enabling : nagError ? t.nag_retry : t.nag_btn_enable}
                 </button>
               )}
               {pushNagMode === "ios-install" && (

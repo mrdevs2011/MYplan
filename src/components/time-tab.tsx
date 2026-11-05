@@ -277,10 +277,9 @@ function StopwatchPanel({ t, scope }: Pick<TimeTabProps, "t" | "scope">) {
     });
   const reset = () => setState({ startedAt: null, base: 0, laps: [] });
 
-  // Newest first, so the lap you just took is always on top.
+  // Full history (up to 99 laps), newest first so the lap you just took is always on top; the list scrolls.
   const lastLaps = state.laps
     .map((total, index) => ({ n: index + 1, split: total - (index > 0 ? state.laps[index - 1] : 0), total }))
-    .slice(-2)
     .reverse();
 
   return (
@@ -290,7 +289,7 @@ function StopwatchPanel({ t, scope }: Pick<TimeTabProps, "t" | "scope">) {
         <span className="time-note time-cs">.{cs}</span>
       </Ring>
 
-      <div className="time-extra">
+      <div className="time-extra time-extra-laps">
         <ul className="time-laps">
           {lastLaps.length === 0 ? (
             <li className="time-lap-empty">{t.clk_no_laps}</li>
