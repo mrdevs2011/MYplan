@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent, type ChangeEvent } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import TimeTab from "@/components/time-tab";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -90,7 +91,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-type TabType = "today" | "activities" | "notifications" | "analytics" | "profile" | "settings";
+type TabType = "today" | "activities" | "notifications" | "analytics" | "time" | "profile" | "settings";
 
 interface UserAccount {
   id: string;
@@ -4176,6 +4177,20 @@ export default function Home() {
 
             <button
               type="button"
+              className={`nav-item ${activeTab === "time" ? "active" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab("time");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <IconClock className="nav-icon" />
+              <span className="nav-label">{t.tab_time}</span>
+              {activeTab === "time" && <span className="active-indicator" />}
+            </button>
+
+            <button
+              type="button"
               className={`nav-item ${activeTab === "profile" ? "active" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -4285,9 +4300,12 @@ export default function Home() {
             type="button"
             className="mobile-brand-btn"
             onClick={() => setActiveTab("today")}
+            aria-label="Bosh sahifa"
           >
-            <Image src="/myplan-logo-transparent.png" alt="MyPlan" width={28} height={28} priority />
-            <span>MyPlan</span>
+            <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={32} height={32} priority />
+            <span className="brand-title">
+              <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+            </span>
           </button>
 
           <div className="mobile-topbar-actions">
@@ -4315,7 +4333,7 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="content-container">
+        <main className={`content-container ${activeTab === "time" ? "is-time" : ""}`}>
           {/* Header Bar Distinct for Each Tab */}
           <header className="page-header">
             <div className="header-text">
@@ -4353,6 +4371,15 @@ export default function Home() {
                   </span>
                   <h1 className="page-title">{t.analytics_title}</h1>
                   <p className="page-subtitle">{t.analytics_sub}</p>
+                </>
+              )}
+              {activeTab === "time" && (
+                <>
+                  <span className="page-kicker">
+                    <IconClock className="icon-xs" /> {t.clk_kicker}
+                  </span>
+                  <h1 className="page-title">{t.clk_title}</h1>
+                  <p className="page-subtitle">{t.clk_sub}</p>
                 </>
               )}
               {activeTab === "profile" && (
@@ -5057,6 +5084,12 @@ export default function Home() {
           )}
 
           {/* TAB 4: PROFIL (READ-ONLY) */}
+          {activeTab === "time" && (
+            <div key="tab-time" className="tab-pane-container time-pane">
+              <TimeTab t={t} language={language} scope={userId || "guest"} soundEnabled={soundEnabled} />
+            </div>
+          )}
+
           {activeTab === "profile" && (
             <div key="tab-profile" className="tab-pane-container">
               <section className="profile-view">
@@ -5707,6 +5740,15 @@ export default function Home() {
           >
             <IconList className="bottom-nav-icon" />
             <span>{t.tab_activities}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`bottom-nav-item ${activeTab === "time" ? "active" : ""}`}
+            onClick={() => setActiveTab("time")}
+          >
+            <IconClock className="bottom-nav-icon" />
+            <span>{t.tab_time}</span>
           </button>
 
           {/* Center Floating Plus Button */}
