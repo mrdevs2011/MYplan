@@ -8886,4 +8886,11 @@ textarea,
 [data-theme="light"] .push-nag-error { color: #991b1b; background: rgba(239, 68, 68, 0.08); }
 /* The prompt must always be fully visible: no entrance animation that could leave it transparent. */
 .push-nag-backdrop, .push-nag-box { animation: none !important; transform: none !important; }
-.push-nag-backdrop { background: rgba(0, 0, 0, 0.6); }
+/* No dimming layer at all: the prompt stands out through its own border and shadow, so nothing can leave the page looking grey. */
+.push-nag-backdrop { background: transparent !important; }
+.push-nag-box { box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(180, 240, 76, 0.35) !important; }
+
+/* In-app toast: sits under the mobile header so it never covers the menu/profile buttons. */
+@media (max-width: 768px) {
+  .floating-inapp-toast { top: calc(var(--topbar-h-mobile, 64px) + 8px); left: 12px; right: 12px; width: auto; max-width: none; }
+}

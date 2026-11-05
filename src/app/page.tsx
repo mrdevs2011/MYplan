@@ -423,6 +423,12 @@ export default function Home() {
   const notificationsRef = useRef<MyPlanNotification[]>([]);
   const toastedNotificationIdsRef = useRef<Set<string>>(new Set());
   const [activeToast, setActiveToast] = useState<MyPlanNotification | null>(null);
+  // In-app toasts dismiss themselves: with many reminders a toast that waits for a tap would cover the header all day.
+  useEffect(() => {
+    if (!activeToast) return;
+    const timer = setTimeout(() => setActiveToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [activeToast]);
   useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
   const [pushPermission, setPushPermission] = useState<NotificationPermission>("default");
   const [pushSubscribed, setPushSubscribed] = useState(false);
@@ -433,6 +439,7 @@ export default function Home() {
   const [nagArmedAt, setNagArmedAt] = useState(0);
   const [nagError, setNagError] = useState<{ kind: PushErrorKind; detail: string } | null>(null);
   const [switchingAccount, setSwitchingAccount] = useState(false);
+  const [overlayText, setOverlayText] = useState("");
   const pushSyncedUserRef = useRef<string | null>(null);
 
   // PWA State
@@ -2326,6 +2333,9 @@ export default function Home() {
     if (typeof window !== "undefined") {
       localStorage.setItem("myplan_add_account_intent", "true");
     }
+    // Immediate feedback: the login route can take a moment to arrive, so never leave the page looking frozen.
+    setOverlayText(t.please_wait);
+    setSwitchingAccount(true);
     router.push("/login");
   };
 
@@ -2352,6 +2362,8 @@ export default function Home() {
         }
       }
 
+      setOverlayText(t.please_wait);
+      setSwitchingAccount(true);
       const supabase = createClient();
       await supabase.auth.signOut();
       if (typeof window !== "undefined") {
@@ -2474,6 +2486,11 @@ export default function Home() {
     }
     return true;
   }, [t.nag_enabled_body]);
+
+  // Warm the login route so "add account" / sign-out navigate instantly.
+  useEffect(() => {
+    if (userId) router.prefetch("/login");
+  }, [userId, router]);
 
   // Keep this device registered for the signed-in account: runs silently once per account per page load.
   useEffect(() => {
@@ -3886,7 +3903,7 @@ export default function Home() {
         <div className="switching-overlay" role="status" aria-live="polite">
           <Image className="loading-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={72} height={72} priority />
           <span className="switching-spinner" aria-hidden="true" />
-          <p>{t.switching_account}</p>
+          <p>{overlayText || t.switching_account}</p>
         </div>
       )}
 
