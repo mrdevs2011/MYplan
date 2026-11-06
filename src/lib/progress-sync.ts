@@ -132,3 +132,52 @@ export function isPermanentWriteError(code: string | undefined): boolean {
   if (!code) return false;
   return ["23503", "23514", "22P02", "42501", "PGRST116", "PGRST204"].includes(code);
 }
+
+/**
+ * A row created offline carries a locally made id. If the server already has that row under another id,
+ * every queued write that points at the local id is rewritten to the real one.
+ */
+export function remapOutboxIds(queue: OutboxItem[], fromId: string, toId: string): OutboxItem[] {
+  return queue.map((item) => {
+    const payload = item.payload;
+    if (payload?.occurrence_id !== fromId && payload?.id !== fromId) return item;
+    return {
+      ...item,
+      payload: {
+        ...payload,
+        ...(payload.occurrence_id === fromId ? { occurrence_id: toId } : {}),
+        ...(item.type === "occurrence_status" && payload.id === fromId ? { id: toId } : {}),
+      },
+    };
+  });
+}
+
+/** Activities written offline, laid over a server snapshot so a refresh never hides them before they upload. */
+export function overlayPendingActivities<A extends { id: string }>(acts: A[], queue: OutboxItem[], userId: string): A[] {
+  let result = acts;
+  for (const item of queue) {
+    if (item.payload?.user_id !== userId) continue;
+    if (item.type === "activity_write") {
+      const row = item.payload.row as A;
+      result = result.some((a) => a.id === row.id)
+        ? result.map((a) => (a.id === row.id ? { ...a, ...row } : a))
+        : [row, ...result];
+    } else if (item.type === "activity_update") {
+      const id = String(item.payload.id);
+      const patch = item.payload.patch as Partial<A>;
+      result = result.map((a) => (a.id === id ? { ...a, ...patch } : a));
+    }
+  }
+  return result;
+}
+
+/** Profile settings changed offline, merged in order. */
+export function pendingProfilePatch(queue: OutboxItem[], userId: string): Record<string, unknown> {
+  let patch: Record<string, unknown> = {};
+  for (const item of queue) {
+    if (item.type === "profile_patch" && item.payload?.user_id === userId) {
+      patch = { ...patch, ...(item.payload.patch as Record<string, unknown>) };
+    }
+  }
+  return patch;
+}

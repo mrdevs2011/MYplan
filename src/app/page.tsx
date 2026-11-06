@@ -32,7 +32,10 @@ import {
   localStatuses,
   newEventId,
   nextBatch,
+  overlayPendingActivities,
+  pendingProfilePatch,
   readOutbox,
+  remapOutboxIds,
   reconcileCount,
   toLocalProgress,
   writeOutbox,
@@ -201,6 +204,33 @@ interface Occurrence {
   period_start: string;
   period_end: string;
   status: "pending" | "completed";
+}
+
+/** Plans that are scheduled today but have no row for today yet. */
+function activitiesMissingToday<A extends { id: string; is_active: boolean; schedule_type: string; starts_on?: string | null; schedule_rule?: { weekdays?: number[] } | null }>(
+  acts: A[],
+  todayOccs: { activity_id: string }[],
+  todayStr: string,
+  todayDay: number,
+): A[] {
+  return acts.filter((a) => {
+    if (!a.is_active) return false;
+    // One-time tasks get exactly one occurrence on their start date; never regenerate them daily.
+    if (a.schedule_type === "once") return a.starts_on === todayStr && !todayOccs.some((o) => o.activity_id === a.id);
+    const weekdays = a.schedule_rule?.weekdays;
+    if (weekdays && Array.isArray(weekdays) && weekdays.length > 0 && !weekdays.includes(todayDay)) return false;
+    return !todayOccs.some((o) => o.activity_id === a.id);
+  });
+}
+
+/** The last good picture of the workspace: the app opens from it at once, also with no connection. */
+interface WorkspaceSnapshot {
+  day: string;
+  activities: Activity[];
+  occurrences: Occurrence[];
+  notifications: MyPlanNotification[];
+  streak: number;
+  best: number;
 }
 
 const accountStorageKey = (userId: string, key: string) => `myplan_account_${userId}_${key}`;
@@ -859,6 +889,44 @@ export default function Home() {
             .update({ status: head.payload.status })
             .eq("id", head.payload.id)
             .eq("user_id", head.payload.user_id));
+        } else if (head.type === "activity_write") {
+          ({ error } = await supabase
+            .from("activities")
+            .upsert({ ...(head.payload.row as Record<string, unknown>), id: head.payload.id, user_id: head.payload.user_id }, { onConflict: "id" }));
+        } else if (head.type === "activity_update") {
+          ({ error } = await supabase
+            .from("activities")
+            .update(head.payload.patch as Record<string, unknown>)
+            .eq("id", head.payload.id as string)
+            .eq("user_id", head.payload.user_id as string));
+        } else if (head.type === "profile_patch") {
+          ({ error } = await supabase
+            .from("profiles")
+            .update(head.payload.patch as Record<string, unknown>)
+            .eq("id", head.payload.user_id as string));
+        } else if (head.type === "occurrence_ensure") {
+          const { id: localId, user_id, activity_id, period_start, period_end, status } = head.payload as Record<string, string>;
+          ({ error } = await supabase
+            .from("occurrences")
+            .upsert({ id: localId, user_id, activity_id, period_start, period_end, status }, { onConflict: "activity_id,period_start", ignoreDuplicates: true }));
+          if (!error) {
+            // Another device may have created today's row first: point every queued write at the real id.
+            const { data: real } = await supabase
+              .from("occurrences")
+              .select("id")
+              .eq("activity_id", activity_id)
+              .eq("period_start", period_start)
+              .maybeSingle();
+            if (real?.id && real.id !== localId) {
+              writeOutbox(remapOutboxIds(readOutbox(), localId, real.id));
+              setOccurrences((curr) => curr.map((o) => (o.id === localId ? { ...o, id: real.id } : o)));
+              updateTaskCounts((prev) => {
+                if (!(localId in prev)) return prev;
+                const { [localId]: moved, ...others } = prev;
+                return { ...others, [real.id]: moved };
+              });
+            }
+          }
         } else if (head.type === "update_streak") {
           ({ error } = await supabase
             .from("profiles")
@@ -914,7 +982,7 @@ export default function Home() {
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(() => void processOfflineQueue(), delay);
     }
-  }, [pruneAckedWrites]);
+  }, [pruneAckedWrites, updateTaskCounts]);
 
   const enqueueOfflineMutation = useCallback((mutation: Pick<OutboxItem, "type" | "payload" | "notify">) => {
     if (typeof window === "undefined") return;
@@ -997,6 +1065,48 @@ export default function Home() {
   const isMatureAccount = (currentTime - accountCreatedTime) >= (24 * 60 * 60 * 1000);
 
   // Active Devices Loader
+  // Opens the workspace from the last saved picture (no network needed). Today's rows are made locally when the
+  // day has rolled over or a plan was added offline; they upload with the queue.
+  const hydrateWorkspace = useCallback((uid: string): boolean => {
+    const snap = readJson<WorkspaceSnapshot>(accountStorageKey(uid, "snapshot"));
+    if (!snap || !Array.isArray(snap.activities) || !Array.isArray(snap.occurrences)) return false;
+    const queue = readOutbox();
+    const todayStr = today();
+    const weekday = new Date().getDay() === 0 ? 7 : new Date().getDay();
+    const acts = overlayPendingActivities(snap.activities, queue, uid);
+
+    let occs: Occurrence[] = snap.day === todayStr ? snap.occurrences : [];
+    for (const item of queue) {
+      if (item.type === "occurrence_ensure" && item.payload?.user_id === uid && item.payload.period_start === todayStr) {
+        const pending = item.payload as unknown as Occurrence;
+        if (!occs.some((o) => o.activity_id === pending.activity_id)) occs = [...occs, pending];
+      }
+    }
+    for (const activity of activitiesMissingToday(acts, occs, todayStr, weekday)) {
+      const made: Occurrence = { id: newEventId(), activity_id: activity.id, period_start: todayStr, period_end: todayStr, status: "pending" };
+      occs = [...occs, made];
+      enqueueOfflineMutation({ type: "occurrence_ensure", payload: { ...made, user_id: uid } });
+    }
+    const statuses = localStatuses(queue, [], Date.now());
+    occs = occs.map((o) => (statuses.has(o.id) ? { ...o, status: statuses.get(o.id) as Occurrence["status"] } : o));
+
+    const counts: Record<string, number> = {};
+    for (const occ of occs) {
+      const target = acts.find((a) => a.id === occ.activity_id)?.target;
+      const saved = localStorage.getItem(`myplan_count_${occ.id}`);
+      if (saved !== null) counts[occ.id] = Math.min(Math.max(0, parseFloat(saved) || 0), target || Infinity);
+    }
+    updateTaskCounts(counts);
+    setActivities(acts);
+    setOccurrences(occs);
+    setNotifications(Array.isArray(snap.notifications) ? snap.notifications : []);
+    setStreakCount(snap.streak || 0);
+    setBestStreak(snap.best || 0);
+    workspaceHydratedRef.current = uid;
+    setLoadingData(false);
+    return true;
+  }, [enqueueOfflineMutation, updateTaskCounts]);
+
   const loadActiveDevices = useCallback(async (uid: string) => {
     try {
       const supabase = createClient();
@@ -1147,7 +1257,11 @@ export default function Home() {
     if (workspaceHydratedRef.current !== id) setLoadingData(true);
     const supabase = createClient();
     try {
-      const [{ data: profile, error: profileError }, firstActivityResult] = await Promise.all([
+      // Without this account's session (offline start, token not refreshed yet) the database answers with empty
+      // lists instead of errors, which would wipe the screen. Keep what is shown and try again later.
+      const { data: { session: loadSession } } = await supabase.auth.getSession();
+      if (loadSession?.user.id !== id) return;
+      const [{ data: serverProfile, error: profileError }, firstActivityResult] = await Promise.all([
         supabase
           .from("profiles")
           .select("username, full_name, age, avatar_url, streak_count, best_streak, last_active_date, language, counter_steps, sound_enabled, notifications_enabled, auto_archive_delay, created_at")
@@ -1177,7 +1291,10 @@ export default function Home() {
       if (profileError) throw profileError;
       if (activityError) throw activityError;
       if (!isCurrentLoad()) return;
-      const acts = (activityRows || []) as Activity[];
+      // Changes made offline that have not uploaded yet stay on top of what the server says.
+      const pendingQueue = readOutbox();
+      const profile = serverProfile ? { ...serverProfile, ...pendingProfilePatch(pendingQueue, id) } : serverProfile;
+      const acts = overlayPendingActivities((activityRows || []) as Activity[], pendingQueue, id);
       setActivities(acts);
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
@@ -1231,19 +1348,16 @@ export default function Home() {
 
       let todayOccs = (occRows || []) as Occurrence[];
 
+      // Rows created offline (with local ids) that the server does not have yet.
+      const pendingEnsures = pendingQueue
+        .filter((item) => item.type === "occurrence_ensure" && item.payload?.user_id === id && item.payload.period_start === todayStr)
+        .map((item) => item.payload as unknown as Occurrence);
+      for (const pending of pendingEnsures) {
+        if (!todayOccs.some((o) => o.activity_id === pending.activity_id)) todayOccs = [...todayOccs, pending];
+      }
+
       // Only generate occurrence for activities scheduled on today's weekday
-      const missingActivities = acts.filter((a) => {
-        if (!a.is_active) return false;
-        // One-time tasks get exactly one occurrence on their start date; never regenerate them daily.
-        if (a.schedule_type === "once") {
-          return a.starts_on === todayStr && !todayOccs.some((o) => o.activity_id === a.id);
-        }
-        const weekdays = a.schedule_rule?.weekdays;
-        if (weekdays && Array.isArray(weekdays) && weekdays.length > 0 && !weekdays.includes(todayDay)) {
-          return false;
-        }
-        return !todayOccs.some((o) => o.activity_id === a.id);
-      });
+      const missingActivities = activitiesMissingToday(acts, todayOccs, todayStr, todayDay);
 
       if (missingActivities.length > 0) {
         const inserts = missingActivities.map((a) => ({
@@ -1471,6 +1585,7 @@ export default function Home() {
       bootedUserRef.current = uid;
       profileFormDirtyRef.current = false;
       setHabits(readJson<HabitProfile>(accountStorageKey(uid, "habits")) || EMPTY_PROFILE);
+      hydrateWorkspace(uid);
       void loadWorkspace(uid);
       setupRealtime(uid);
       void syncCurrentDeviceSession(supabase, uid);
@@ -1787,8 +1902,32 @@ export default function Home() {
           }
         }
       } else {
-        setAuthReady(true);
-        router.replace("/login");
+        // Offline with an expired token: the saved session cannot refresh, but the person is still signed in.
+        // Open their account from what this device saved; the session renews itself when the connection returns.
+        let offlineId: string | null = null;
+        let offlineVault: UserAccount[] = [];
+        try {
+          if (!navigator.onLine) {
+            offlineId = localStorage.getItem("myplan_active_account_id");
+            offlineVault = JSON.parse(localStorage.getItem("myplan_accounts_vault") || "[]");
+          }
+        } catch {
+          offlineId = null;
+        }
+        const known = offlineId ? offlineVault.find((account) => account.id === offlineId) : undefined;
+        if (offlineId && known) {
+          setUserId(offlineId);
+          setAccountName(known.fullName);
+          setAccountUsername(known.username);
+          setSavedAccounts(offlineVault);
+          const offlineAvatar = localStorage.getItem(`myplan_avatar_${offlineId}`);
+          if (offlineAvatar) setAvatarUrl(offlineAvatar);
+          setAuthReady(true);
+          startWorkspace(offlineId);
+        } else {
+          setAuthReady(true);
+          router.replace("/login");
+        }
       }
     });
 
@@ -1852,6 +1991,9 @@ export default function Home() {
           }
         }, 0);
       } else {
+        // The first event of a start without a usable session is handled by the getSession() path above, which may
+        // open this account offline. Only a real sign-out leaves the app.
+        if (event === "INITIAL_SESSION") return;
         activeRealtimeUid = null;
         if (realtimeChannel) {
           void supabase.removeChannel(realtimeChannel);
@@ -2049,7 +2191,54 @@ export default function Home() {
         }
       }
     };
-  }, [loadWorkspace, refreshHabits, router, processOfflineQueue, loadActiveDevices, updateTaskCounts]);
+  }, [loadWorkspace, hydrateWorkspace, refreshHabits, router, processOfflineQueue, loadActiveDevices, updateTaskCounts]);
+
+  // First visit: the service worker was not in control yet, so hand it the list of files this page loaded.
+  useEffect(() => {
+    if (!userId || process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    const timer = setTimeout(() => {
+      void navigator.serviceWorker.ready.then((registration) => {
+        const urls = performance
+          .getEntriesByType("resource")
+          .map((entry) => entry.name)
+          .filter((name) => name.startsWith(window.location.origin) && !name.includes("/api/"));
+        registration.active?.postMessage({ type: "MYPLAN_CACHE_URLS", urls: [...urls, "/", "/login"] });
+      }).catch(() => undefined);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [userId]);
+
+  // Keep the saved picture current: after every change, and when the page is hidden or closed.
+  const snapshotRef = useRef<{ uid: string; data: WorkspaceSnapshot } | null>(null);
+  useEffect(() => {
+    if (!userId || loadingData || workspaceHydratedRef.current !== userId) return;
+    const data: WorkspaceSnapshot = {
+      day: occurrences[0]?.period_start || today(),
+      activities,
+      occurrences,
+      notifications: notifications.slice(0, 100),
+      streak: streakCount,
+      best: bestStreak,
+    };
+    snapshotRef.current = { uid: userId, data };
+    const timer = setTimeout(() => writeJson(accountStorageKey(userId, "snapshot"), data), 300);
+    return () => clearTimeout(timer);
+  }, [userId, loadingData, activities, occurrences, notifications, streakCount, bestStreak]);
+  useEffect(() => {
+    const saveNow = () => {
+      const snap = snapshotRef.current;
+      if (snap) writeJson(accountStorageKey(snap.uid, "snapshot"), snap.data);
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") saveNow();
+    };
+    window.addEventListener("pagehide", saveNow);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", saveNow);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, []);
 
   const handleAddCustomTimeSlot = useCallback(() => {
     const trimmed = customTimeInput.trim();
@@ -2545,8 +2734,19 @@ export default function Home() {
     if (!userId) return;
     const previous = activitiesRef.current.find((item) => item.id === id)?.is_active;
     setActivities((curr) => curr.map((item) => (item.id === id ? { ...item, is_active: newActiveState } : item)));
+    const keepOffline = () =>
+      enqueueOfflineMutation({ type: "activity_update", payload: { id, user_id: userId, patch: { is_active: newActiveState } } });
+    if (!navigator.onLine) {
+      keepOffline();
+      return;
+    }
     const supabase = createClient();
     const { error } = await supabase.from("activities").update({ is_active: newActiveState }).eq("id", id).eq("user_id", userId);
+    if (error && !error.code) {
+      // The request never reached the server: keep the change and upload it later.
+      keepOffline();
+      return;
+    }
     if (error) {
       setActivities((curr) => curr.map((item) => (item.id === id && previous !== undefined ? { ...item, is_active: previous } : item)));
       setMessage(t.save_failed_kept);
@@ -2884,10 +3084,7 @@ export default function Home() {
     setCounterSteps(updated);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
     setNewStepInput("");
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ counter_steps: updated }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { counter_steps: updated } } });
   };
 
   const handleRemoveCounterStep = (stepToRemove: number) => {
@@ -2899,10 +3096,7 @@ export default function Home() {
     setCounterSteps(updated);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
     setNewStepError("");
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ counter_steps: updated }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { counter_steps: updated } } });
   };
 
   const handleResetCounterSteps = () => {
@@ -2910,10 +3104,7 @@ export default function Home() {
     setCounterSteps(defaults);
     localStorage.setItem("myplan_counter_steps", JSON.stringify(defaults));
     setNewStepError("");
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ counter_steps: defaults }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { counter_steps: defaults } } });
   };
 
   // Pocket Touch Gestures (Swipe to Complete & Quick Actions)
@@ -3023,33 +3214,45 @@ export default function Home() {
     setMessage("");
     try {
       const supabase = createClient();
+      // No connection (or the request never reached the server): the change is kept on this device, shown at once
+      // and uploaded from the queue as soon as the network is back. Real server rejections still keep the form open.
+      const notReachable = (error: { code?: string } | null) => !navigator.onLine || !error?.code;
       if (editingActivity) {
-        const { error } = await supabase
-          .from("activities")
-          .update({
-            title: newTitle.trim(),
-            description: newDescription.trim(),
-            schedule_type: newSchedule,
-            time_of_day: newTimeOfDay,
-            ...(editingActivity.reminder_time !== undefined || newReminderTime ? { reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null } : {}),
-            schedule_rule: {
-              ...(editingActivity.schedule_rule || {}),
-              duration_label: durationLabel,
-              duration_days: durationDays,
-              duration_preset: durationPreset,
-              weekdays: selectedWeekdays,
-            },
-            measurement_type: editingActivity.measurement_type,
-            target: targetValue,
-            unit: unitValue,
-            ends_on: endsOnStr,
-          })
-          .eq("id", editingActivity.id)
-          .eq("user_id", userId);
-        if (error) throw error;
+        const patch = {
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+          schedule_type: newSchedule,
+          time_of_day: newTimeOfDay,
+          ...(editingActivity.reminder_time !== undefined || newReminderTime ? { reminder_time: /^\d{2}:\d{2}$/.test(newReminderTime) ? newReminderTime : null } : {}),
+          schedule_rule: {
+            ...(editingActivity.schedule_rule || {}),
+            duration_label: durationLabel,
+            duration_days: durationDays,
+            duration_preset: durationPreset,
+            weekdays: selectedWeekdays,
+          },
+          measurement_type: editingActivity.measurement_type,
+          target: targetValue,
+          unit: unitValue,
+          ends_on: endsOnStr,
+        };
+        const keepEditOffline = () => {
+          setActivities((curr) => curr.map((a) => (a.id === editingActivity.id ? ({ ...a, ...patch } as Activity) : a)));
+          enqueueOfflineMutation({ type: "activity_update", payload: { id: editingActivity.id, user_id: userId, patch } });
+        };
+        if (!navigator.onLine) {
+          keepEditOffline();
+        } else {
+          const { error } = await supabase.from("activities").update(patch).eq("id", editingActivity.id).eq("user_id", userId);
+          if (error) {
+            if (notReachable(error)) keepEditOffline();
+            else throw error;
+          }
+        }
       } else {
-        const { data: created, error } = await supabase.from("activities").insert({
-          user_id: userId,
+        // The id is made here, so a retry after a lost response can never create the plan twice.
+        const newId = newEventId();
+        const row = {
           title: newTitle.trim(),
           description: newDescription.trim(),
           schedule_type: newSchedule,
@@ -3066,12 +3269,31 @@ export default function Home() {
           unit: unitValue,
           starts_on: today(),
           ends_on: endsOnStr,
-        }).select().single();
-        if (error) throw error;
-        // Visible at once; its row for today follows from the quiet refresh below.
-        if (created) {
-          const row = created as Activity;
-          setActivities((prev) => (prev.some((a) => a.id === row.id) ? prev : [row, ...prev]));
+        };
+        const keepCreateOffline = () => {
+          const full = { ...row, id: newId, is_active: true } as unknown as Activity;
+          setActivities((prev) => (prev.some((a) => a.id === newId) ? prev : [full, ...prev]));
+          enqueueOfflineMutation({ type: "activity_write", payload: { id: newId, user_id: userId, row } });
+          // Today's row is made now, with a local id, so the new plan can be ticked right away.
+          const weekday = new Date().getDay() === 0 ? 7 : new Date().getDay();
+          if (activitiesMissingToday([full], [], today(), weekday).length > 0) {
+            const made: Occurrence = { id: newEventId(), activity_id: newId, period_start: today(), period_end: today(), status: "pending" };
+            setOccurrences((prev) => [...prev, made]);
+            enqueueOfflineMutation({ type: "occurrence_ensure", payload: { ...made, user_id: userId } });
+          }
+        };
+        if (!navigator.onLine) {
+          keepCreateOffline();
+        } else {
+          const { data: created, error } = await supabase.from("activities").insert({ ...row, id: newId, user_id: userId }).select().single();
+          if (error) {
+            if (notReachable(error)) keepCreateOffline();
+            else throw error;
+          } else if (created) {
+            // Visible at once; its row for today follows from the quiet refresh below.
+            const createdRow = created as Activity;
+            setActivities((prev) => (prev.some((a) => a.id === createdRow.id) ? prev : [createdRow, ...prev]));
+          }
         }
       }
 
@@ -3203,30 +3425,21 @@ export default function Home() {
     localStorage.setItem("myplan_lang", newLang);
     setFormattedToday(formatLongDate(newLang));
 
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ language: newLang }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { language: newLang } } });
   };
 
   // Sound toggle
   const handleSoundToggle = (enabled: boolean) => {
     setSoundEnabled(enabled);
     localStorage.setItem("myplan_sound_enabled", String(enabled));
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ sound_enabled: enabled }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { sound_enabled: enabled } } });
   };
 
   // Notifications toggle
   const handleNotificationsToggle = (enabled: boolean) => {
     setNotificationsEnabled(enabled);
     localStorage.setItem("myplan_notifications_enabled", String(enabled));
-    if (userId) {
-      const supabase = createClient();
-      void supabase.from("profiles").update({ notifications_enabled: enabled }).eq("id", userId);
-    }
+    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { notifications_enabled: enabled } } });
   };
 
   // Calculations for Today's Execution (only tasks scheduled for today's weekday)
