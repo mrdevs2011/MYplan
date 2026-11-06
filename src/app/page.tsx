@@ -1411,7 +1411,7 @@ export default function Home() {
     // 100% Guaranteed Splash Screen Preload
     if (typeof window !== "undefined") {
       const img = new window.Image();
-      img.src = "/myplan-logo-transparent.png";
+      img.src = "/myplan-logo-192.png";
       let splashSeen = false;
       try {
         splashSeen = sessionStorage.getItem("myplan_splash_seen") === "1";
@@ -3365,7 +3365,7 @@ export default function Home() {
         <div className="loading-card">
           <Image
             className="loading-logo"
-            src="/myplan-logo-transparent.png"
+            src="/myplan-logo-192.png" unoptimized
             alt="MyPlan"
             width={96}
             height={96}
@@ -4211,7 +4211,7 @@ export default function Home() {
       {/* PWA Install Guide Modal */}
       {switchingAccount && (
         <div className="switching-overlay" role="status" aria-live="polite">
-          <Image className="loading-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={72} height={72} priority />
+          <Image className="loading-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={72} height={72} priority />
           <span className="switching-spinner" aria-hidden="true" />
           <p>{overlayText || t.switching_account}</p>
         </div>
@@ -4448,7 +4448,7 @@ export default function Home() {
                 }}
                 aria-label="Bosh sahifa"
               >
-                <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={34} height={34} priority />
+                <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={34} height={34} priority />
                 <span className="brand-title">
                   <span className="brand-my">My</span><span className="brand-plan">Plan</span>
                 </span>
@@ -4477,7 +4477,7 @@ export default function Home() {
               aria-label="Sidebarni ochish"
               title="Sidebarni ochish"
             >
-              <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={36} height={36} priority />
+              <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={36} height={36} priority />
               <span className="collapsed-open-hint" aria-hidden="true">
                 <IconChevronRight className="icon-sm" />
               </span>
@@ -4704,7 +4704,7 @@ export default function Home() {
             onClick={() => setActiveTab("today")}
             aria-label="Bosh sahifa"
           >
-            <Image className="brand-logo" src="/myplan-logo-transparent.png" alt="MyPlan" width={32} height={32} priority />
+            <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={32} height={32} priority />
             <span className="brand-title">
               <span className="brand-my">My</span><span className="brand-plan">Plan</span>
             </span>

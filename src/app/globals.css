@@ -9063,15 +9063,19 @@ html, body { overscroll-behavior-y: none; }
   .st-insights ul { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* KPI grid: 6 across on wide screens, 3 across in the middle, 2 on phones (last card takes the full row). */
-@media (max-width: 1280px) {
+/* KPI grid follows the width of the statistics column itself (container query), not the window: with the side
+   menu open the column is much narrower than the viewport, and viewport breakpoints squeezed the cards. */
+.st { container-type: inline-size; container-name: st; }
+.st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.st-kpi-ring { flex-direction: row; align-items: center; gap: 16px; grid-column: 1 / -1; }
+.st-kpi-ring .st-ring { width: 88px !important; height: 88px !important; }
+.st-kpis > .st-kpi:last-child { grid-column: 1 / -1; }
+@container st (min-width: 620px) {
   .st-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .st-kpi-ring { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .st-kpi-ring { flex-direction: column; align-items: flex-start; gap: 10px; grid-column: auto; }
   .st-kpi-ring .st-ring { width: 76px !important; height: 76px !important; }
+  .st-kpis > .st-kpi:last-child { grid-column: auto; }
 }
-@media (max-width: 640px) {
-  .st-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .st-kpi-ring { flex-direction: row; align-items: center; gap: 16px; grid-column: 1 / -1; }
-  .st-kpi-ring .st-ring { width: 88px !important; height: 88px !important; }
-  .st-kpis > .st-kpi:last-child { grid-column: 1 / -1; }
+@container st (min-width: 1180px) {
+  .st-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }

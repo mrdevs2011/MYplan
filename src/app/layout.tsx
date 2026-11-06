@@ -53,7 +53,7 @@ export default function RootLayout({
             `,
           }}
         />
-        <link rel="preload" as="image" href="/myplan-logo-transparent.png" type="image/png" />
+        <link rel="preload" as="image" href="/myplan-logo-192.png" type="image/png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

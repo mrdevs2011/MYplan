@@ -369,7 +369,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           <Link href="/" className="brand-link" aria-label="MyPlan bosh sahifasi">
             <Image
               className="brand-logo"
-              src="/myplan-logo-transparent.png"
+              src="/myplan-logo-192.png" unoptimized
               alt="MyPlan"
               width={38}
               height={38}
@@ -709,7 +709,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       <footer className="landing-footer">
         <div className="footer-container">
           <Link href="/" className="footer-brand">
-            <Image src="/myplan-logo-transparent.png" alt="MyPlan" width={32} height={32} priority />
+            <Image src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={32} height={32} priority />
             <span>MyPlan</span>
           </Link>
           <span className="footer-center-tag">PLAN YOUR DAY. OWN YOUR TIME.</span>
