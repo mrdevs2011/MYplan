@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     return json({ skipped: true, reason: "disabled" });
   }
   const since = new Date(Date.now() - 86400000).toISOString();
-  const { count, error: countError } = await admin.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).gte("created_at", since);
+  const { count, error: countError } = await admin.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).neq("category", "productivity").gte("created_at", since);
   if (countError) return json({ error: "Could not check notification limit" }, 500);
   if ((count ?? 0) >= (prefs?.daily_limit ?? 3)) return json({ skipped: true, reason: "daily_limit" });
   const now = new Date();

@@ -1,6 +1,10 @@
 import webpush from "npm:web-push@3.6.7";
-import { dueStageIds, dueSummaryTime, planReminderMinutes, type StageId } from "../_shared/reminders.ts";
-import { adminClient, composeNotificationBatch, corsHeaders, isCronAuthorized, json, localClock, safeTimeZone, scheduleAfterQuietHours } from "../_shared/notifications.ts";
+import { ACTIVE_WINDOW_MS, dueStageIds, dueSummaryTime, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind, type ProgressPoint, type StageId } from "../_shared/reminders.ts";
+import { adminClient, composeNotificationBatch, corsHeaders, isCronAuthorized, isQuietTime, json, localClock, safeTimeZone, scheduleAfterQuietHours } from "../_shared/notifications.ts";
+
+// Habits change slowly and this runs every minute, so each warm instance reuses what it learned for an hour.
+const HABIT_CACHE_MS = 60 * 60_000;
+const habitCache = new Map<string, { at: number; usual: Map<string, number> }>();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -103,12 +107,11 @@ Deno.serve(async (req) => {
   generated = inserted.filter((result) => result.status === "fulfilled" && result.value).length;
   for (const result of inserted) if (result.status === "rejected") console.error("Notification insert failed:", result.reason);
   // ---- Per-task reminder engine ---------------------------------------------------
-  // Every active task scheduled for today climbs a reminder ladder until it is completed:
-  //   pre (-10 min) -> due (0) -> late1 (+20) -> late2 (+60), plus pending-summary nags.
-  // Tasks with an explicit reminder_time use it. Others are spread evenly across their
-  // time-of-day window, so 20 tasks never fire in the same minute.
-  // Reminders ignore quiet hours and the companion daily cap (the user asked for them),
-  // but the master switches (profile / preferences / "productivity" category) still apply.
+  // A reminder fires when it can help, and stays silent otherwise (see shouldRemind):
+  //   - a time the person chose is honoured; everything else follows when they really start that plan,
+  //     falling back to an even spread across its time-of-day window
+  //   - nothing interrupts someone who is logging progress right now, and nothing unchosen breaks quiet hours
+  //   - plans due in the same half hour arrive as one notification, and a counter shows what is actually left
   type ReminderTask = {
     id: string; user_id: string; title: string; measurement_type: string; target: number | null; unit: string | null;
     schedule_type: string; schedule_rule: { weekdays?: number[] } | null; starts_on: string; ends_on: string | null;
@@ -141,43 +144,118 @@ Deno.serve(async (req) => {
       return !Array.isArray(weekdays) || weekdays.length === 0 || weekdays.includes(weekday);
     });
     if (!today.length) return 0;
-    const at = planReminderMinutes(today);
+    const zone = safeTimeZone(profile.timezone);
+    let habit = habitCache.get(profile.id);
+    if (!habit || now.getTime() - habit.at > HABIT_CACHE_MS) {
+      const since = new Date(now.getTime() - 30 * 86400000);
+      const [habitEvents, habitOccurrences] = await Promise.all([
+        admin.from("progress_events").select("occurrence_id,amount,recorded_at").eq("user_id", profile.id).gt("amount", 0).gte("recorded_at", since.toISOString()).order("recorded_at", { ascending: false }).limit(1000),
+        admin.from("occurrences").select("id,activity_id").eq("user_id", profile.id).gte("period_start", localClock(since, zone).date).limit(1000),
+      ]);
+      if (habitEvents.error || habitOccurrences.error) throw new Error("Could not load habit history");
+      const activityOf = new Map((habitOccurrences.data ?? []).map((row) => [row.id, row.activity_id]));
+      const points: ProgressPoint[] = [];
+      for (const row of habitEvents.data ?? []) {
+        const activityId = activityOf.get(row.occurrence_id);
+        if (!activityId) continue;
+        const local = localClock(new Date(row.recorded_at), zone);
+        points.push({ activityId, date: local.date, minute: local.minutes });
+      }
+      habit = { at: now.getTime(), usual: learnUsualMinutes(points) };
+      habitCache.set(profile.id, habit);
+    }
+    const at = planReminderMinutes(today, habit.usual);
     const dueStages: Array<{ task: ReminderTask; stage: { id: StageId } }> = [];
     for (const task of today) for (const id of dueStageIds(at.get(task.id)!, clock.minutes)) dueStages.push({ task, stage: { id } });
     const summaryTime = dueSummaryTime(clock.minutes);
     if (!dueStages.length && summaryTime === undefined) return 0;
-    const [prefsResult, occResult] = await Promise.all([
-      admin.from("notification_preferences").select("enabled,category_settings").eq("user_id", profile.id).maybeSingle(),
-      admin.from("occurrences").select("activity_id,status").eq("user_id", profile.id).eq("period_start", clock.date),
+    const [prefsResult, occResult, nudgeResult, latestResult] = await Promise.all([
+      admin.from("notification_preferences").select("enabled,category_settings,quiet_hours_enabled,quiet_hours_start,quiet_hours_end").eq("user_id", profile.id).maybeSingle(),
+      admin.from("occurrences").select("id,activity_id,status").eq("user_id", profile.id).eq("period_start", clock.date),
+      admin.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", profile.id).eq("category", "productivity").gte("created_at", new Date(now.getTime() - clock.minutes * 60_000).toISOString()),
+      admin.from("progress_events").select("recorded_at").eq("user_id", profile.id).order("recorded_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
-    if (prefsResult.error || occResult.error) throw new Error("Could not load reminder context");
+    if (prefsResult.error || occResult.error || nudgeResult.error || latestResult.error) throw new Error("Could not load reminder context");
     if (prefsResult.data?.enabled === false || prefsResult.data?.category_settings?.productivity === false) return 0;
     const finished = new Set((occResult.data ?? []).filter((occ) => occ.status !== "pending").map((occ) => occ.activity_id));
+    const isActiveNow = Boolean(latestResult.data && now.getTime() - new Date(latestResult.data.recorded_at).getTime() < ACTIVE_WINDOW_MS);
+    const isQuiet = prefsResult.data?.quiet_hours_enabled !== false && isQuietTime(clock.minutes, prefsResult.data?.quiet_hours_start || "22:00", prefsResult.data?.quiet_hours_end || "08:00");
+    const occurrenceIds = (occResult.data ?? []).map((occ) => occ.id);
+    const doneByActivity = new Map<string, number>();
+    if (occurrenceIds.length) {
+      const { data: todayEvents, error: todayError } = await admin.from("progress_events").select("occurrence_id,amount").in("occurrence_id", occurrenceIds);
+      if (todayError) throw todayError;
+      const activityOf = new Map((occResult.data ?? []).map((occ) => [occ.id, occ.activity_id]));
+      for (const row of todayEvents ?? []) {
+        const activityId = activityOf.get(row.occurrence_id);
+        if (activityId) doneByActivity.set(activityId, (doneByActivity.get(activityId) ?? 0) + Number(row.amount));
+      }
+    }
     const language: "uz" | "en" | "ru" = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
     const expiresAt = new Date(now.getTime() + 3 * 86400000).toISOString();
     const rows: Array<Record<string, unknown>> = [];
+    // A chosen time keeps its exact minute. Other plans due in the same half hour share one notification,
+    // which lists all of them up front, so none is swallowed by the shared dedupe key.
+    const groups = new Map<string, { stage: StageId; group: string; tasks: ReminderTask[] }>();
+    let nudgesToday = nudgeResult.count ?? 0;
     for (const { task, stage } of dueStages) {
       if (finished.has(task.id)) continue;
-      const goal = task.measurement_type === "count" && task.target ? `${Number(task.target)}${task.unit ? ` ${task.unit}` : ""}` : "";
-      const copy = {
+      const hasChosenTime = Boolean(task.reminder_time);
+      const base = at.get(task.id)!;
+      // A time learned from the person's own mornings is not an intrusion, even inside default quiet hours.
+      const quietForTask = isQuiet && !(stage.id === "due" && habit.usual.has(task.id));
+      if (!shouldRemind({ stage: stage.id, hasChosenTime, isQuiet: quietForTask, isActiveNow, nudgesToday })) continue;
+      const group = hasChosenTime ? `at${base}` : `slot${reminderSlot(base)}`;
+      const key = `${stage.id}:${group}`;
+      const existing = groups.get(key);
+      if (existing) {
+        if (!existing.tasks.includes(task)) existing.tasks.push(task);
+        continue;
+      }
+      const tasks = hasChosenTime
+        ? [task]
+        : today.filter((other) => !other.reminder_time && !finished.has(other.id) && reminderSlot(at.get(other.id)!) === reminderSlot(base));
+      groups.set(key, { stage: stage.id, group, tasks });
+      if (!hasChosenTime) nudgesToday += 1;
+    }
+    for (const { stage, group, tasks } of groups.values()) {
+      const dedupe = `task-${stage}:${group}:${clock.date}`;
+      const data = { url: "/", kind: "task-reminder", stage, ...(tasks.length === 1 ? { activityId: tasks[0].id } : {}) };
+      if (tasks.length > 1) {
+        const names = tasks.slice(0, 3).map((task) => task.title).join(", ");
+        const more = tasks.length > 3 ? ` +${tasks.length - 3}` : "";
+        rows.push({
+          user_id: profile.id, category: "productivity",
+          title: { uz: `${tasks.length} ta reja vaqti`, en: `${tasks.length} plans are due`, ru: `Пора: планов ${tasks.length}` }[language],
+          message: `${names}${more}`.slice(0, 500), data, dedupe_key: dedupe, scheduled_at: nowIso, expires_at: expiresAt,
+        });
+        continue;
+      }
+      const task = tasks[0];
+      const target = task.measurement_type === "count" && task.target ? Number(task.target) : 0;
+      const done = Math.max(0, doneByActivity.get(task.id) ?? 0);
+      const unit = task.unit ? ` ${task.unit}` : "";
+      const progress = target > 0 && done > 0
+        ? { uz: `${done}/${target}${unit}. Yana ${target - done} qoldi.`, en: `${done}/${target}${unit}. ${target - done} to go.`, ru: `${done}/${target}${unit}. Осталось ${target - done}.` }[language]
+        : null;
+      const goal = target > 0 ? `${target}${unit}` : "";
+      const copy = progress ?? {
         pre: { uz: "10 daqiqadan keyin vaqti.", en: "Starts in 10 minutes.", ru: "Через 10 минут." },
         due: { uz: `Vaqti keldi${goal ? `. Maqsad: ${goal}` : ""}.`, en: `It's time${goal ? `. Goal: ${goal}` : ""}.`, ru: `Пора${goal ? `. Цель: ${goal}` : ""}.` },
-        late1: { uz: "Hali bajarilmadi. Hoziroq boshlab qo‘y.", en: "Still not done. Start now.", ru: "Ещё не выполнено. Начни сейчас." },
-        late2: { uz: "Bu vazifa hali kutmoqda. Bugun unutib qoldirma.", en: "This task is still waiting. Don't let it slip today.", ru: "Задача всё ещё ждёт. Не упусти её сегодня." },
-      }[stage.id][language];
+        late1: { uz: "Hali kutib turibdi. Bugun ulgurasan.", en: "Still waiting for you. There's time today.", ru: "Всё ещё ждёт. Сегодня успеешь." },
+      }[stage][language];
       rows.push({
         user_id: profile.id, category: "productivity", title: task.title.slice(0, 120), message: copy,
-        data: { url: "/", activityId: task.id, kind: "task-reminder", stage: stage.id },
-        dedupe_key: `task-${stage.id}:${task.id}:${clock.date}`, scheduled_at: nowIso, expires_at: expiresAt,
+        data, dedupe_key: dedupe, scheduled_at: nowIso, expires_at: expiresAt,
       });
     }
     if (summaryTime !== undefined) {
       const left = today.filter((task) => !finished.has(task.id)).length;
-      if (left > 0) {
+      if (left > 0 && !isActiveNow && !isQuiet) {
         rows.push({
           user_id: profile.id, category: "productivity",
           title: { uz: "Bajarilmagan vazifalar", en: "Unfinished tasks", ru: "Невыполненные задачи" }[language],
-          message: { uz: `Bugun ${left} ta vazifa hali bajarilmadi. Hozir bittasini yop.`, en: `${left} tasks are still open today. Close one now.`, ru: `Сегодня не выполнено задач: ${left}. Закрой одну прямо сейчас.` }[language],
+          message: { uz: `Bugun ${left} ta vazifa ochiq turibdi. Bittasini tanlab, yopib qo‘y.`, en: `${left} tasks are still open today. Close one now.`, ru: `Сегодня не выполнено задач: ${left}. Закрой одну прямо сейчас.` }[language],
           data: { url: "/", kind: "task-reminder", stage: "summary" },
           dedupe_key: `pending-summary:${summaryTime}:${clock.date}`, scheduled_at: nowIso, expires_at: expiresAt,
         });

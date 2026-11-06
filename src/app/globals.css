@@ -8920,3 +8920,9 @@ textarea,
 .count-unit-select .life-select-trigger { min-height: 54px; padding: 6px 16px; border-radius: 9999px; }
 .count-unit-select .life-select-current-meta { display: none; }
 .count-unit-select .life-select-current-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Rapid taps must count as taps: no double-tap zoom, no text selection, no pull-to-refresh reload mid-form. */
+button, a, label, [role="tab"], [role="radio"] { touch-action: manipulation; }
+.btn-counter-inc, .btn-counter-undo, .checkbox-btn { -webkit-user-select: none; user-select: none; }
+html, body { overscroll-behavior-y: none; }
+.modal-form-scrollable { overscroll-behavior: contain; }

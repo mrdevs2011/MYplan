@@ -1,4 +1,4 @@
-import { dueStageIds, dueSummaryTime, planReminderMinutes } from "./reminders.ts";
+import { DAILY_NUDGE_LIMIT, dueStageIds, dueSummaryTime, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind } from "./reminders.ts";
 
 const eq = <T>(actual: T, expected: T) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`expected ${JSON.stringify(expected)} got ${JSON.stringify(actual)}`);
@@ -25,24 +25,57 @@ Deno.test("slots map to their own windows", () => {
   if (plan.get("e")! < 1050 || plan.get("e")! >= 1230) throw new Error("evening window");
 });
 
-Deno.test("the ladder fires pre, due, late1, late2 exactly once each over a day", () => {
+Deno.test("the ladder has one reminder at the moment and one follow-up", () => {
   const base = 600, seen: string[] = [];
   for (let minute = 0; minute < 1440; minute++) for (const id of dueStageIds(base, minute)) if (!seen.includes(id)) seen.push(id);
-  eq(seen, ["pre", "due", "late1", "late2"]);
+  eq(seen, ["pre", "due", "late1"]);
   eq(dueStageIds(base, 589), []);
   eq(dueStageIds(base, 590), ["pre"]);
   eq(dueStageIds(base, 600), ["due"]);
-  eq(dueStageIds(base, 620), ["late1"]);
-  eq(dueStageIds(base, 660), ["late2"]);
+  eq(dueStageIds(base, 625), []);
+  eq(dueStageIds(base, 645), ["late1"]);
 });
 
 Deno.test("a missed cron tick still catches up inside the window", () => {
   eq(dueStageIds(600, 612), ["due"]);
 });
 
-Deno.test("summary nags at 12:00, 15:00, 18:00 and 20:30 only", () => {
-  eq(dueSummaryTime(720), 720);
-  eq(dueSummaryTime(735), 720);
-  eq(dueSummaryTime(745), undefined);
-  eq(dueSummaryTime(1230), 1230);
+Deno.test("one summary a day, at 18:00", () => {
+  eq(dueSummaryTime(1080), 1080);
+  eq(dueSummaryTime(1095), 1080);
+  eq(dueSummaryTime(1101), undefined);
+  eq(dueSummaryTime(720), undefined);
+});
+
+Deno.test("reminders follow when the person really starts", () => {
+  const points = ["2026-11-01", "2026-11-02", "2026-11-03"].flatMap((date, i) => [
+    { activityId: "a", date, minute: 400 + i * 10 },
+    { activityId: "a", date, minute: 1200 },
+  ]);
+  const usual = learnUsualMinutes(points);
+  eq(usual.get("a"), 410);
+  eq(learnUsualMinutes(points.slice(0, 4)).has("a"), false);
+  eq(planReminderMinutes([{ id: "a", time_of_day: "evening", created_at: "1" }], usual).get("a"), 410);
+  eq(planReminderMinutes([{ id: "a", time_of_day: "evening", created_at: "1", reminder_time: "05:30:00" }], usual).get("a"), 330);
+});
+
+Deno.test("a chosen time always fires, even at night or mid-work", () => {
+  const context = { hasChosenTime: true, isQuiet: true, isActiveNow: true, nudgesToday: 99 };
+  eq(shouldRemind({ ...context, stage: "due" }), true);
+  eq(shouldRemind({ ...context, stage: "pre" }), true);
+  eq(shouldRemind({ ...context, stage: "late1" }), false);
+});
+
+Deno.test("unchosen reminders respect quiet hours, active work and the daily limit", () => {
+  const calm = { stage: "due" as const, hasChosenTime: false, isQuiet: false, isActiveNow: false, nudgesToday: 0 };
+  eq(shouldRemind(calm), true);
+  eq(shouldRemind({ ...calm, stage: "pre" }), false);
+  eq(shouldRemind({ ...calm, isQuiet: true }), false);
+  eq(shouldRemind({ ...calm, isActiveNow: true }), false);
+  eq(shouldRemind({ ...calm, nudgesToday: DAILY_NUDGE_LIMIT }), false);
+});
+
+Deno.test("plans in the same half hour share a slot", () => {
+  eq(reminderSlot(600), reminderSlot(629));
+  eq(reminderSlot(600) === reminderSlot(630), false);
 });

@@ -10,6 +10,30 @@ import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { getRecommendedFocusActivity } from "@/lib/focus-recommendation";
+import {
+  EMPTY_PROFILE,
+  buildHabitProfile,
+  formatMinute,
+  learnFormDefaults,
+  orderByHabit,
+  pickHabitualNow,
+  type HabitEvent,
+  type HabitProfile,
+} from "@/lib/adaptive";
+import {
+  isPermanentWriteError,
+  localProgressEvents,
+  localStatuses,
+  newEventId,
+  nextBatch,
+  readOutbox,
+  reconcileCount,
+  toLocalProgress,
+  writeOutbox,
+  ACK_PROGRESS_TTL_MS,
+  type AckedWrite,
+  type OutboxItem,
+} from "@/lib/progress-sync";
 import { translations, type Language } from "@/lib/translations";
 import { PRESETS, ALL_WEEKDAYS, type Preset } from "@/lib/presets";
 import {
@@ -167,6 +191,48 @@ interface Occurrence {
 
 const accountStorageKey = (userId: string, key: string) => `myplan_account_${userId}_${key}`;
 
+/** Everything typed into the plan form. Stored on every change so nothing typed is ever lost. */
+interface PlanDraft {
+  editingId: string | null;
+  kind: "check" | "count";
+  title: string;
+  description: string;
+  schedule: "daily" | "once";
+  target: string;
+  unit: string;
+  durationPreset: DurationPreset;
+  customValue: string;
+  customUnit: CustomDurationUnit;
+  weekdays: number[];
+  timeOfDay: string;
+  reminder: string;
+  savedAt: number;
+}
+
+const DRAFT_MAX_AGE_MS = 7 * 86_400_000;
+const TAB_STORAGE_KEY = "myplan_active_tab";
+const FORM_OPEN_STORAGE_KEY = "myplan_plan_form_open";
+const WORKSPACE_REFRESH_MIN_GAP_MS = 30_000;
+const HABIT_WINDOW_DAYS = 30;
+const SWIPE_ACTION_THRESHOLD = 70;
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage blocked or full: the app keeps working, it just remembers less.
+  }
+}
+
 const today = () => {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -313,6 +379,40 @@ function getNotificationTimeLabel(timestamp: number, language: Language) {
   return unit === "now" ? labels.now : `${value} ${labels[unit as "min" | "h" | "d"]}`;
 }
 
+interface NotificationRow {
+  id?: string;
+  category?: string | null;
+  title?: string | null;
+  message?: string | null;
+  created_at?: string | null;
+  scheduled_at?: string | null;
+  read_at?: string | null;
+}
+
+/**
+ * The only door into the notification list. Realtime can deliver a row without its columns, and that used to
+ * surface as an empty card and an empty toast. Anything without real text is refused here, on every path.
+ */
+function toNotification(row: NotificationRow | null | undefined): MyPlanNotification | null {
+  const title = row?.title?.trim();
+  const message = row?.message?.trim();
+  if (!row?.id || !title || !message) return null;
+  const parsed = row.created_at ? new Date(row.created_at).getTime() : NaN;
+  const createdAt = Number.isFinite(parsed) ? parsed : Date.now();
+  const language = ((typeof localStorage !== "undefined" && localStorage.getItem("myplan_lang")) || "uz") as Language;
+  return {
+    id: row.id,
+    sender: "MYplan shaxsiy yordamchisi",
+    category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
+    categoryLabel: (row.category || "system").toUpperCase(),
+    title,
+    message,
+    createdAt,
+    timeLabel: getNotificationTimeLabel(createdAt, language),
+    isRead: Boolean(row.read_at),
+  };
+}
+
 export default function Home() {
   const router = useRouter();
 
@@ -348,6 +448,15 @@ export default function Home() {
   const workspaceUserRef = useRef<string | null>(null);
   const workspaceLoadSequenceRef = useRef(0);
   const offlineQueueProcessingRef = useRef(false);
+  const workspaceHydratedRef = useRef<string | null>(null);
+  const lastWorkspaceLoadRef = useRef(0);
+  const bootedUserRef = useRef<string | null>(null);
+  const ackedWritesRef = useRef<AckedWrite[]>([]);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushRetryDelayRef = useRef(2000);
+  const progressRefreshTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // True while the person is editing their name/age: background data must not overwrite what they type.
+  const profileFormDirtyRef = useRef(false);
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
   const taskCountsRef = useRef<Record<string, number>>({});
   const progressSyncVersionsRef = useRef(new Map<string, number>());
@@ -360,6 +469,8 @@ export default function Home() {
   }, []);
   const [taskHistory, setTaskHistory] = useState<Record<string, number[]>>({});
   const [loadingData, setLoadingData] = useState(false);
+  // Learned once per session and then frozen: the list must never rearrange under a finger.
+  const [habits, setHabits] = useState<HabitProfile>(EMPTY_PROFILE);
 
   useEffect(() => {
     activitiesRef.current = activities;
@@ -504,7 +615,6 @@ export default function Home() {
     action: null,
   });
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const lastTapRef = useRef<{ id: string; time: number } | null>(null);
 
   // Zen Focus Mode States
   const [focusModalOpen, setFocusModalOpen] = useState(false);
@@ -549,20 +659,23 @@ export default function Home() {
     };
   }, [isFocusTimerRunning, focusTimerSeconds, soundEnabled]);
 
-  const startFocusSession = (act: Activity) => {
+  const startFocusSession = useCallback((act: Activity) => {
     setFocusActivity(act);
     setFocusCelebration(false);
     if (act.measurement_type === "count") {
       setFocusModeType("count");
     } else {
-      setFocusModeType("sprint");
-      setFocusTimerSeconds(300);
-      setFocusTimerInitial(300);
+      const remembered = userId
+        ? readJson<Record<string, { seconds: number; mode: "sprint" | "deep" | "pomodoro" }>>(accountStorageKey(userId, "focus_choice"))?.[act.id]
+        : undefined;
+      setFocusModeType(remembered?.mode ?? "sprint");
+      setFocusTimerSeconds(remembered?.seconds ?? 300);
+      setFocusTimerInitial(remembered?.seconds ?? 300);
     }
     setIsFocusTimerRunning(false);
     setFocusModalOpen(true);
     triggerHaptic("medium");
-  };
+  }, [userId]);
 
   const handleSelectFocusDuration = (seconds: number, mode: "sprint" | "deep" | "pomodoro" | "count") => {
     setFocusModeType(mode);
@@ -570,6 +683,10 @@ export default function Home() {
     setFocusTimerInitial(seconds);
     setIsFocusTimerRunning(false);
     triggerHaptic("light");
+    if (userId && focusActivity && mode !== "count") {
+      const key = accountStorageKey(userId, "focus_choice");
+      writeJson(key, { ...(readJson<Record<string, unknown>>(key) || {}), [focusActivity.id]: { seconds, mode } });
+    }
   };
 
   const completeFocusSession = async () => {
@@ -679,102 +796,118 @@ export default function Home() {
     [t]
   );
 
-  // Offline Sync Queue Helper
-  const enqueueOfflineMutation = useCallback((mutation: { type: string; payload: Record<string, unknown> }) => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = localStorage.getItem("myplan_offline_sync_queue");
-      const queue = raw ? JSON.parse(raw) : [];
-      queue.push({
-        ...mutation,
-        id: `mut_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        createdAt: Date.now(),
-      });
-      localStorage.setItem("myplan_offline_sync_queue", JSON.stringify(queue));
-      setTimeout(() => {
-        setPendingSyncCount(queue.length);
-      }, 0);
-    } catch {
-      // ignore
-    }
+  // Durable write path: every change lands in the outbox first, then uploads in order (see progress-sync.ts).
+  const pruneAckedWrites = useCallback(() => {
+    const now = Date.now();
+    ackedWritesRef.current = ackedWritesRef.current.filter((write) => now - write.at < ACK_PROGRESS_TTL_MS);
+    return now;
   }, []);
 
   const processOfflineQueue = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator.onLine || offlineQueueProcessingRef.current) return;
+    if (typeof window === "undefined" || offlineQueueProcessingRef.current) return;
+    if (!navigator.onLine) return;
     offlineQueueProcessingRef.current = true;
+    let retryLater = false;
     try {
-      const raw = localStorage.getItem("myplan_offline_sync_queue");
-      if (!raw) return;
-      const queue = JSON.parse(raw);
-      if (!Array.isArray(queue) || queue.length === 0) return;
-
       const supabase = createClient();
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) return;
-      // Offline mutations belong to the account that created them. Never replay
-      // another account's queued writes under the currently authenticated session.
-      const accountQueue = queue.filter((item) => item?.payload?.user_id === user.id);
-      const processedQueueIds = new Set(accountQueue.map((item) => item.id));
-      const remaining: typeof queue = queue.filter((item) => item?.payload?.user_id !== user.id);
-      for (const item of accountQueue) {
-        try {
-          let error = null;
-          if (item.type === "occurrence_status") {
-            const result = await supabase
-              .from("occurrences")
-              .update({ status: item.payload.status })
-              .eq("id", item.payload.id)
-              .eq("user_id", item.payload.user_id);
-            error = result.error;
-          } else if (item.type === "progress_event") {
-            const result = await supabase.from("progress_events").insert({
-              id: item.payload.id,
-              user_id: item.payload.user_id,
-              occurrence_id: item.payload.occurrence_id,
-              amount: item.payload.amount,
-              note: item.payload.note,
-            });
-            error = result.error;
-            // A retry after an ambiguous network response is safe: the same event ID
-            // means the original insert already reached PostgreSQL.
-            if (error?.code === "23505") error = null;
-          } else if (item.type === "update_streak") {
-            const result = await supabase
-              .from("profiles")
-              .update({
-                streak_count: item.payload.streak_count,
-                best_streak: item.payload.best_streak,
-                last_active_date: item.payload.last_active_date,
-              })
-              .eq("id", item.payload.user_id);
-            error = result.error;
+      // Read locally: a network call here would delay every tap and fail exactly when the connection is weak.
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user.id;
+      if (!uid) return;
+      let maxBatch = 50;
+      for (;;) {
+        // Offline writes belong to the account that made them; never replay them under another session.
+        const mine = readOutbox().filter((item) => item.payload?.user_id === uid);
+        const batch = nextBatch(mine, maxBatch);
+        if (batch.length === 0) break;
+
+        let error: { code?: string; message?: string } | null = null;
+        const head = batch[0];
+        if (head.type === "progress_event") {
+          // Stable ids make a retry after a lost response harmless: existing rows are simply skipped.
+          const rows = batch.map(({ payload }) => ({
+            id: payload.id,
+            user_id: payload.user_id,
+            occurrence_id: payload.occurrence_id,
+            amount: payload.amount,
+            note: payload.note,
+          }));
+          ({ error } = await supabase.from("progress_events").upsert(rows, { onConflict: "id", ignoreDuplicates: true }));
+        } else if (head.type === "occurrence_status") {
+          ({ error } = await supabase
+            .from("occurrences")
+            .update({ status: head.payload.status })
+            .eq("id", head.payload.id)
+            .eq("user_id", head.payload.user_id));
+        } else if (head.type === "update_streak") {
+          ({ error } = await supabase
+            .from("profiles")
+            .update({
+              streak_count: head.payload.streak_count,
+              best_streak: head.payload.best_streak,
+              last_active_date: head.payload.last_active_date,
+            })
+            .eq("id", head.payload.user_id));
+        }
+
+        if (error && !isPermanentWriteError(error.code)) {
+          retryLater = true;
+          break;
+        }
+        if (error && batch.length > 1) {
+          // One bad row must not sink the rest: retry the run one at a time to isolate it.
+          maxBatch = 1;
+          continue;
+        }
+        if (error) console.warn("Dropping a write the server can never accept:", error.message);
+
+        const done = new Set(batch.map((item) => item.id));
+        const now = pruneAckedWrites();
+        for (const item of batch) {
+          const progress = toLocalProgress(item);
+          if (progress) ackedWritesRef.current.push({ at: now, progress });
+          if (item.type === "occurrence_status" && typeof item.payload.id === "string") {
+            ackedWritesRef.current.push({ at: now, status: { occurrenceId: item.payload.id, status: String(item.payload.status) } });
           }
-          if (error) remaining.push(item);
-        } catch {
-          remaining.push(item);
+        }
+        const rest = readOutbox().filter((item) => !done.has(item.id));
+        writeOutbox(rest);
+        setPendingSyncCount(rest.length);
+
+        const stillCompleted = localStatuses(rest, [], now).get(String(head.payload.id)) !== "pending";
+        if (!error && head.notify && stillCompleted) {
+          void supabase.functions.invoke("notification-compose", { body: head.notify })
+            .then(({ error: notifyError }) => { if (notifyError) console.warn("Completion companion notification failed:", notifyError); })
+            .catch((notifyError) => console.warn("Completion companion notification failed:", notifyError));
         }
       }
-      // Preserve mutations enqueued while this batch was being uploaded.
-      const latestRaw = localStorage.getItem("myplan_offline_sync_queue");
-      const latestQueue = latestRaw ? JSON.parse(latestRaw) : [];
-      const retainedQueueIds = new Set(remaining.map((item) => item.id));
-      const newlyQueued = Array.isArray(latestQueue)
-        ? latestQueue.filter((item) => !processedQueueIds.has(item.id) && !retainedQueueIds.has(item.id))
-        : [];
-      const pendingQueue = [...remaining, ...newlyQueued];
-      if (pendingQueue.length > 0) {
-        localStorage.setItem("myplan_offline_sync_queue", JSON.stringify(pendingQueue));
-        setPendingSyncCount(pendingQueue.length);
-      } else {
-        localStorage.removeItem("myplan_offline_sync_queue");
-        setPendingSyncCount(0);
-      }
-    } catch {
-      // Keep the queue intact and retry on the next online/reconnect event.
+      flushRetryDelayRef.current = 2000;
+    } catch (err) {
+      console.warn("Sync paused, it will retry:", err);
+      retryLater = true;
     } finally {
       offlineQueueProcessingRef.current = false;
     }
-  }, []);
+    if (retryLater) {
+      const delay = flushRetryDelayRef.current;
+      flushRetryDelayRef.current = Math.min(delay * 2, 30_000);
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(() => void processOfflineQueue(), delay);
+    }
+  }, [pruneAckedWrites]);
+
+  const enqueueOfflineMutation = useCallback((mutation: Pick<OutboxItem, "type" | "payload" | "notify">) => {
+    if (typeof window === "undefined") return;
+    const queue = [
+      ...readOutbox(),
+      { ...mutation, id: `mut_${newEventId()}`, createdAt: Date.now() },
+    ];
+    writeOutbox(queue);
+    setPendingSyncCount(queue.length);
+    // A short pause lets a burst of taps travel as one request.
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(() => void processOfflineQueue(), 200);
+  }, [processOfflineQueue]);
 
   // Timer to keep session countdowns and timestamps reactive (RAM & CPU optimized: only on profile/settings)
   useEffect(() => {
@@ -923,6 +1056,7 @@ export default function Home() {
         setUserAge(parsedAge || "");
         triggerHaptic("success");
         setProfileActionMsg(t.profile_saved_success);
+        profileFormDirtyRef.current = false;
 
         // Update in accounts vault
         try {
@@ -988,7 +1122,9 @@ export default function Home() {
     workspaceUserRef.current = id;
     const loadSequence = ++workspaceLoadSequenceRef.current;
     const isCurrentLoad = () => workspaceUserRef.current === id && workspaceLoadSequenceRef.current === loadSequence;
-    setLoadingData(true);
+    lastWorkspaceLoadRef.current = Date.now();
+    // Only the very first load may show a spinner. A refresh happens quietly behind what the person is doing.
+    if (workspaceHydratedRef.current !== id) setLoadingData(true);
     const supabase = createClient();
     try {
       const [{ data: profile, error: profileError }, firstActivityResult] = await Promise.all([
@@ -1063,9 +1199,11 @@ export default function Home() {
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
         setAccountUsername(profile.username || "");
-        setEditFullName(profile.full_name || profile.username || "");
+        if (!profileFormDirtyRef.current) {
+          setEditFullName(profile.full_name || profile.username || "");
+          setEditAge(profile.age ?? "");
+        }
         setUserAge(profile.age ?? "");
-        setEditAge(profile.age ?? "");
         setUserCreatedAt(profile.created_at || "");
         setAvatarUrl(typeof profile.avatar_url === "string" && profile.avatar_url ? profile.avatar_url : null);
         if (!profile.avatar_url) localStorage.removeItem(`myplan_avatar_${id}`);
@@ -1108,20 +1246,20 @@ export default function Home() {
       if (occError) throw occError;
       if (!isCurrentLoad()) return;
 
-      const existingOccs = (occRows || []) as Occurrence[];
+      let todayOccs = (occRows || []) as Occurrence[];
 
       // Only generate occurrence for activities scheduled on today's weekday
       const missingActivities = acts.filter((a) => {
         if (!a.is_active) return false;
         // One-time tasks get exactly one occurrence on their start date; never regenerate them daily.
         if (a.schedule_type === "once") {
-          return a.starts_on === todayStr && !existingOccs.some((o) => o.activity_id === a.id);
+          return a.starts_on === todayStr && !todayOccs.some((o) => o.activity_id === a.id);
         }
         const weekdays = a.schedule_rule?.weekdays;
         if (weekdays && Array.isArray(weekdays) && weekdays.length > 0 && !weekdays.includes(todayDay)) {
           return false;
         }
-        return !existingOccs.some((o) => o.activity_id === a.id);
+        return !todayOccs.some((o) => o.activity_id === a.id);
       });
 
       if (missingActivities.length > 0) {
@@ -1132,74 +1270,115 @@ export default function Home() {
           period_end: todayStr,
           status: "pending" as const,
         }));
-        const { data: newOccs, error: insertError } = await supabase
+        // Another tab or device may create the same rows at the same moment. Skipping duplicates and reading back
+        // guarantees every plan keeps its row, otherwise its counter buttons would vanish.
+        const { error: insertError } = await supabase
           .from("occurrences")
-          .insert(inserts)
-          .select("id,activity_id,period_start,period_end,status");
+          .upsert(inserts, { onConflict: "activity_id,period_start", ignoreDuplicates: true });
+        if (insertError) console.warn("Could not create today's occurrences:", insertError);
+        const { data: freshOccs, error: freshError } = await supabase
+          .from("occurrences")
+          .select("id,activity_id,period_start,period_end,status")
+          .eq("user_id", id)
+          .eq("period_start", todayStr);
+        if (!freshError && freshOccs) todayOccs = freshOccs as Occurrence[];
         if (!isCurrentLoad()) return;
-        if (!insertError && newOccs) {
-          setOccurrences([...existingOccs, ...(newOccs as Occurrence[])]);
-        } else {
-          setOccurrences(existingOccs);
-        }
-      } else {
-        setOccurrences(existingOccs);
       }
 
-      // Restore saved counts from local storage & cloud progress events with strict target boundary clamping
-      const initialCounts: Record<string, number> = {};
-      existingOccs.forEach((occ) => {
-        const act = activityRows?.find((a) => a.id === occ.activity_id);
-        const target = act?.target || 0;
-        const saved = localStorage.getItem(`myplan_count_${occ.id}`);
-        if (saved !== null) {
-          const parsed = parseInt(saved, 10) || 0;
-          initialCounts[occ.id] = target > 0 ? Math.min(Math.max(0, parsed), target) : Math.max(0, parsed);
-        }
-      });
+      // Server rows plus whatever this device has not seen acknowledged yet.
+      const statusNow = localStatuses(readOutbox(), ackedWritesRef.current, Date.now());
+      setOccurrences(todayOccs.map((occ) => {
+        const local = statusNow.get(occ.id);
+        return local ? { ...occ, status: local as Occurrence["status"] } : occ;
+      }));
 
-      // Cloud progress events synchronization
+      const occIds = todayOccs.map((o) => o.id);
+      const progressRows: { id: string; occurrence_id: string; amount: number }[] = [];
+      let progressLoaded = true;
       try {
-        const occIds = existingOccs.map((o) => o.id);
-        if (occIds.length > 0) {
-          const pEvents: { occurrence_id: string; amount: number }[] = [];
-          for (let offset = 0; ; offset += 1000) {
-            const { data, error } = await supabase
-              .from("progress_events")
-              .select("occurrence_id, amount")
-              .in("occurrence_id", occIds)
-              .range(offset, offset + 999);
-            if (error) throw error;
-            const batch = (data || []) as { occurrence_id: string; amount: number }[];
-            pEvents.push(...batch);
-            if (batch.length < 1000) break;
-          }
-          if (pEvents.length > 0) {
-            const serverTotals: Record<string, number> = {};
-            pEvents.forEach((pe) => {
-              serverTotals[pe.occurrence_id] = (serverTotals[pe.occurrence_id] || 0) + Number(pe.amount);
-            });
-            Object.keys(serverTotals).forEach((occId) => {
-              const occ = existingOccs.find((o) => o.id === occId);
-              const act = activityRows?.find((a) => a.id === occ?.activity_id);
-              const cap = act?.target ? act.target : Infinity;
-              const serverVal = Math.max(0, serverTotals[occId]);
-              initialCounts[occId] = Math.min(serverVal, cap);
-            });
-          }
+        for (let offset = 0; occIds.length > 0; offset += 1000) {
+          const { data, error } = await supabase
+            .from("progress_events")
+            .select("id, occurrence_id, amount")
+            .in("occurrence_id", occIds)
+            .range(offset, offset + 999);
+          if (error) throw error;
+          const batch = (data || []) as typeof progressRows;
+          progressRows.push(...batch);
+          if (batch.length < 1000) break;
         }
-      } catch {
-        // Non-blocking progress sync fallback
+      } catch (error) {
+        progressLoaded = false;
+        console.warn("Progress could not refresh; keeping the numbers on screen:", error);
       }
 
       if (!isCurrentLoad()) return;
+      // Read after the last await, so a tap made during this load is included.
+      const localEvents = localProgressEvents(readOutbox(), ackedWritesRef.current, Date.now());
+      const initialCounts: Record<string, number> = {};
+      todayOccs.forEach((occ) => {
+        const act = acts.find((a) => a.id === occ.activity_id);
+        const cap = act?.target ? act.target : Infinity;
+        const rows = progressRows.filter((row) => row.occurrence_id === occ.id);
+        const hasLocal = localEvents.some((event) => event.occurrenceId === occ.id);
+        if (progressLoaded && (rows.length > 0 || hasLocal)) {
+          initialCounts[occ.id] = reconcileCount(rows, localEvents, occ.id, cap);
+          localStorage.setItem(`myplan_count_${occ.id}`, String(initialCounts[occ.id]));
+        } else if (!progressLoaded) {
+          const onScreen = taskCountsRef.current[occ.id];
+          const saved = localStorage.getItem(`myplan_count_${occ.id}`);
+          if (onScreen !== undefined) initialCounts[occ.id] = onScreen;
+          else if (saved !== null) initialCounts[occ.id] = Math.min(Math.max(0, parseInt(saved, 10) || 0), cap);
+        }
+      });
+
+      if (!isCurrentLoad()) return;
       updateTaskCounts(initialCounts);
+      workspaceHydratedRef.current = id;
     } catch (err) {
       if (isCurrentLoad()) console.error("Workspace loading error:", err);
     } finally {
       if (isCurrentLoad()) setLoadingData(false);
     }
   }, [updateTaskCounts]);
+
+  // Learns from the last month of real use. The result is stored for the next session rather than applied now,
+  // so nothing on screen moves while the person is using it.
+  const refreshHabits = useCallback(async (id: string) => {
+    try {
+      const supabase = createClient();
+      const since = new Date(Date.now() - HABIT_WINDOW_DAYS * 86_400_000);
+      const sinceDay = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
+      const [{ data: occRows, error: occError }, { data: eventRows, error: eventError }] = await Promise.all([
+        supabase.from("occurrences").select("id,activity_id").eq("user_id", id).gte("period_start", sinceDay).limit(1000),
+        supabase
+          .from("progress_events")
+          .select("occurrence_id,amount,note,recorded_at")
+          .eq("user_id", id)
+          .gte("recorded_at", since.toISOString())
+          .order("recorded_at", { ascending: false })
+          .limit(1000),
+      ]);
+      if (occError || eventError || !occRows || !eventRows) return;
+      const activityByOccurrence = new Map((occRows as { id: string; activity_id: string }[]).map((row) => [row.id, row.activity_id]));
+      const events: HabitEvent[] = [];
+      for (const row of eventRows as { occurrence_id: string; amount: number; note: string | null; recorded_at: string }[]) {
+        const activityId = activityByOccurrence.get(row.occurrence_id);
+        if (!activityId) continue;
+        const note = row.note || "";
+        events.push({
+          activityId,
+          amount: Number(row.amount) || 0,
+          at: new Date(row.recorded_at).getTime(),
+          isStep: note.startsWith("+") || note.startsWith("Qaytarish"),
+        });
+      }
+      const checkMinutes = readJson<Record<string, number[]>>(accountStorageKey(id, "check_minutes")) || {};
+      writeJson(accountStorageKey(id, "habits"), buildHabitProfile(events, checkMinutes));
+    } catch (error) {
+      console.warn("Habits could not refresh:", error);
+    }
+  }, []);
 
   // Auth Initialization & Session Listener
   useEffect(() => {
@@ -1266,6 +1445,57 @@ export default function Home() {
     let latestAuthEventUserId: string | null | undefined;
     let disposed = false;
 
+    const refreshOccurrenceProgress = async (uid: string, occurrenceId: string) => {
+      const syncVersion = (progressSyncVersionsRef.current.get(occurrenceId) || 0) + 1;
+      progressSyncVersionsRef.current.set(occurrenceId, syncVersion);
+      const rows: { id: string; amount: number }[] = [];
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error } = await supabase
+          .from("progress_events")
+          .select("id, amount")
+          .eq("user_id", uid)
+          .eq("occurrence_id", occurrenceId)
+          .range(offset, offset + 999);
+        if (error || !data) {
+          console.warn("Realtime progress reconciliation failed:", error);
+          return;
+        }
+        rows.push(...(data as { id: string; amount: number }[]));
+        if (data.length < 1000) break;
+      }
+      if (
+        activeRealtimeUid !== uid ||
+        workspaceUserRef.current !== uid ||
+        progressSyncVersionsRef.current.get(occurrenceId) !== syncVersion
+      ) return;
+      const occurrence = occurrencesRef.current.find((item) => item.id === occurrenceId);
+      if (!occurrence) {
+        void loadWorkspace(uid);
+        return;
+      }
+      const activity = activitiesRef.current.find((item) => item.id === occurrence.activity_id);
+      const cap = activity?.target && activity.target > 0 ? activity.target : Infinity;
+      const localEvents = localProgressEvents(readOutbox(), ackedWritesRef.current, Date.now());
+      const count = reconcileCount(rows, localEvents, occurrenceId, cap);
+      updateTaskCounts((prev) => ({ ...prev, [occurrenceId]: count }));
+      localStorage.setItem(`myplan_count_${occurrenceId}`, String(count));
+    };
+
+    // Starts a signed-in session exactly once. Supabase repeats auth events on every token refresh and tab focus;
+    // tearing the workspace down for those is what made the screen jump while someone was working.
+    const startWorkspace = (uid: string) => {
+      if (bootedUserRef.current === uid) return;
+      bootedUserRef.current = uid;
+      profileFormDirtyRef.current = false;
+      setHabits(readJson<HabitProfile>(accountStorageKey(uid, "habits")) || EMPTY_PROFILE);
+      void loadWorkspace(uid);
+      setupRealtime(uid);
+      void syncCurrentDeviceSession(supabase, uid);
+      void loadActiveDevices(uid);
+      void refreshHabits(uid);
+      void processOfflineQueue();
+    };
+
     const setupRealtime = (uid: string) => {
       activeRealtimeUid = uid;
       if (realtimeChannel) {
@@ -1300,10 +1530,14 @@ export default function Home() {
             if (activeRealtimeUid !== uid) return;
             if (payload.eventType === "INSERT") {
               const row = payload.new as Occurrence;
+              if (row.period_start !== today()) return;
               setOccurrences((prev) => (prev.some((o) => o.id === row.id) ? prev : [row, ...prev]));
             } else if (payload.eventType === "UPDATE") {
               const row = payload.new as Occurrence;
-              setOccurrences((prev) => prev.map((o) => (o.id === row.id ? row : o)));
+              // An echo of an older write from this device must not flip a checkbox back.
+              const local = localStatuses(readOutbox(), ackedWritesRef.current, Date.now()).get(row.id);
+              const next = local ? { ...row, status: local as Occurrence["status"] } : row;
+              setOccurrences((prev) => prev.map((o) => (o.id === row.id ? next : o)));
             } else if (payload.eventType === "DELETE") {
               const row = payload.old as { id: string };
               setOccurrences((prev) => prev.filter((o) => o.id !== row.id));
@@ -1315,47 +1549,19 @@ export default function Home() {
           { event: "INSERT", schema: "public", table: "progress_events", filter: `user_id=eq.${uid}` },
           async (payload) => {
             if (activeRealtimeUid !== uid) return;
-            const event = payload.new as { occurrence_id?: string };
+            const event = payload.new as { id?: string; occurrence_id?: string };
             if (!event.occurrence_id) return;
             const occurrenceId = event.occurrence_id;
-            const syncVersion = (progressSyncVersionsRef.current.get(occurrenceId) || 0) + 1;
-            progressSyncVersionsRef.current.set(occurrenceId, syncVersion);
-            const progressRows: { amount: number }[] = [];
-            for (let offset = 0; ; offset += 1000) {
-              const { data, error } = await supabase
-                .from("progress_events")
-                .select("amount")
-                .eq("user_id", uid)
-                .eq("occurrence_id", event.occurrence_id)
-                .range(offset, offset + 999);
-              if (error || !data) {
-                console.warn("Realtime progress reconciliation failed:", error);
-                return;
-              }
-              const batch = data as { amount: number }[];
-              progressRows.push(...batch);
-              if (batch.length < 1000) break;
-            }
-            if (
-              activeRealtimeUid !== uid ||
-              workspaceUserRef.current !== uid ||
-              progressSyncVersionsRef.current.get(occurrenceId) !== syncVersion
-            ) return;
-            const occurrence = occurrencesRef.current.find((item) => item.id === occurrenceId);
-            if (!occurrence) {
-              void loadWorkspace(uid);
-              return;
-            }
-            const activity = occurrence
-              ? activitiesRef.current.find((item) => item.id === occurrence.activity_id)
-              : undefined;
-            const total = progressRows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-            const cap = activity?.target && activity.target > 0 ? activity.target : Infinity;
-            const count = Math.min(Math.max(0, total), cap);
-            updateTaskCounts((prev) => ({ ...prev, [occurrenceId]: count }));
-            if (typeof window !== "undefined") {
-              localStorage.setItem(`myplan_count_${occurrenceId}`, String(count));
-            }
+            // This device already shows its own taps; only another device's event needs a refresh.
+            const ownEvents = localProgressEvents(readOutbox(), ackedWritesRef.current, Date.now());
+            if (ownEvents.some((item) => item.id === event.id)) return;
+            const timers = progressRefreshTimersRef.current;
+            const pendingTimer = timers.get(occurrenceId);
+            if (pendingTimer) clearTimeout(pendingTimer);
+            timers.set(occurrenceId, setTimeout(() => {
+              timers.delete(occurrenceId);
+              void refreshOccurrenceProgress(uid, occurrenceId);
+            }, 300));
           }
         )
         .on(
@@ -1374,8 +1580,10 @@ export default function Home() {
               const steps = (p.counter_steps as number[])
                 .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
                 .sort((a, b) => b - a);
-              setCounterSteps(steps);
-              localStorage.setItem("myplan_counter_steps", JSON.stringify(steps));
+              if (steps.length > 0) {
+                setCounterSteps(steps);
+                localStorage.setItem("myplan_counter_steps", JSON.stringify(steps));
+              }
             }
             if (typeof p.streak_count === "number") setStreakCount(p.streak_count);
             if (typeof p.best_streak === "number") setBestStreak(p.best_streak);
@@ -1390,7 +1598,7 @@ export default function Home() {
             if (typeof p.auto_archive_delay === "number") setAutoArchiveDelay(p.auto_archive_delay);
             if (typeof p.full_name === "string") {
               setAccountName(p.full_name);
-              setEditFullName(p.full_name);
+              if (!profileFormDirtyRef.current) setEditFullName(p.full_name);
             }
             if (typeof p.avatar_url === "string") {
               setAvatarUrl(p.avatar_url);
@@ -1401,7 +1609,7 @@ export default function Home() {
             }
             if (typeof p.age === "number" || p.age === null) {
               setUserAge(p.age ?? "");
-              setEditAge(p.age ?? "");
+              if (!profileFormDirtyRef.current) setEditAge(p.age ?? "");
             }
             if (typeof p.username === "string") setAccountUsername(p.username);
           }
@@ -1437,55 +1645,42 @@ export default function Home() {
           { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` },
           (payload) => {
             if (activeRealtimeUid !== uid) return;
-            if (payload.eventType === "INSERT") {
-              const row = payload.new as { id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null };
-              const item: MyPlanNotification = {
-                id: row.id,
-                sender: "MYplan shaxsiy yordamchisi",
-                category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-                categoryLabel: (row.category || "system").toUpperCase(),
-                title: row.title,
-                message: row.message,
-                createdAt: new Date(row.created_at).getTime(),
-                timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
-                isRead: Boolean(row.read_at),
-              };
-              const isDue = !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now();
-              if (isDue) {
-                setNotifications((prev) => prev.some((n) => n.id === item.id) ? prev : [item, ...prev].slice(0, 100));
-              }
-              if (document.visibilityState === "visible" && isDue && !toastedNotificationIdsRef.current.has(item.id)) {
+            if (payload.eventType === "DELETE") {
+              const row = payload.old as { id: string };
+              setNotifications((prev) => prev.filter((item) => item.id !== row.id));
+              return;
+            }
+            const row = payload.new as NotificationRow;
+            if (!row?.id) return;
+            const known = notificationsRef.current.some((item) => item.id === row.id);
+            if (payload.eventType === "UPDATE" && known && "read_at" in row) {
+              setNotifications((prev) => prev.map((item) => item.id === row.id ? { ...item, isRead: Boolean(row.read_at) } : item));
+              return;
+            }
+            if (known) return;
+            const show = (source: NotificationRow) => {
+              const item = toNotification(source);
+              if (!item) return;
+              if (source.scheduled_at && new Date(source.scheduled_at).getTime() > Date.now()) return;
+              setNotifications((prev) => prev.some((n) => n.id === item.id) ? prev : [item, ...prev].slice(0, 100));
+              if (document.visibilityState === "visible" && !toastedNotificationIdsRef.current.has(item.id)) {
                 toastedNotificationIdsRef.current.add(item.id);
                 setActiveToast(item);
               }
-            } else if (payload.eventType === "UPDATE") {
-              const row = payload.new as { id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null };
-              const isDue = !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now();
-              const exists = notificationsRef.current.some((item) => item.id === row.id);
-              if (!exists && isDue) {
-                const item: MyPlanNotification = {
-                  id: row.id,
-                  sender: "MYplan shaxsiy yordamchisi",
-                  category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-                  categoryLabel: (row.category || "system").toUpperCase(),
-                  title: row.title,
-                  message: row.message,
-                  createdAt: new Date(row.created_at).getTime(),
-                  timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
-                  isRead: Boolean(row.read_at),
-                };
-                setNotifications((prev) => prev.some((current) => current.id === item.id) ? prev : [item, ...prev].slice(0, 100));
-                if (document.visibilityState === "visible" && !toastedNotificationIdsRef.current.has(item.id)) {
-                  toastedNotificationIdsRef.current.add(item.id);
-                  setActiveToast(item);
-                }
-              } else {
-                setNotifications((prev) => prev.map((item) => item.id === row.id ? { ...item, isRead: Boolean(row.read_at) } : item));
-              }
-            } else if (payload.eventType === "DELETE") {
-              const row = payload.old as { id: string };
-              setNotifications((prev) => prev.filter((item) => item.id !== row.id));
+            };
+            if (row.title?.trim() && row.message?.trim()) {
+              show(row);
+              return;
             }
+            // The event arrived without its text: read the real row instead of showing a blank.
+            void supabase
+              .from("notifications")
+              .select("id,category,title,message,created_at,scheduled_at,read_at")
+              .eq("id", row.id)
+              .maybeSingle()
+              .then(({ data }) => {
+                if (activeRealtimeUid === uid && data) show(data as NotificationRow);
+              });
           }
         )
         .subscribe((status) => {
@@ -1576,10 +1771,7 @@ export default function Home() {
         setUserCreatedAt(session.user.created_at || new Date().toISOString());
 
         setAuthReady(true);
-        void loadWorkspace(currentId);
-        setupRealtime(currentId);
-        void syncCurrentDeviceSession(supabase, currentId);
-        void loadActiveDevices(currentId);
+        startWorkspace(currentId);
 
         const savedAvatar = localStorage.getItem(`myplan_avatar_${currentId}`);
         if (savedAvatar) setAvatarUrl(savedAvatar);
@@ -1617,13 +1809,17 @@ export default function Home() {
       }
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       authStateRevision += 1;
       latestAuthEventUserId = session?.user.id ?? null;
       if (disposed) return;
       if (session?.user) {
         const nextUserId = session.user.id;
         saveAccountSession(session);
+        // The getSession() path above runs the device check and starts the workspace.
+        if (event === "INITIAL_SESSION") return;
+        // Same person, new token: keep the saved tokens fresh and leave the screen alone.
+        if (bootedUserRef.current === nextUserId) return;
         if (workspaceUserRef.current && workspaceUserRef.current !== nextUserId) {
           setActivities([]);
           setOccurrences([]);
@@ -1652,10 +1848,7 @@ export default function Home() {
         setAvatarUrl(savedAvatar);
         setTimeout(() => {
           if (disposed) return;
-          void loadWorkspace(nextUserId);
-          setupRealtime(nextUserId);
-          void syncCurrentDeviceSession(supabase, nextUserId);
-          void loadActiveDevices(nextUserId);
+          startWorkspace(nextUserId);
           try {
             const rawVault = localStorage.getItem("myplan_accounts_vault");
             const vault: UserAccount[] = rawVault ? JSON.parse(rawVault) : [];
@@ -1682,6 +1875,8 @@ export default function Home() {
           realtimeChannel = null;
         }
         workspaceUserRef.current = null;
+        workspaceHydratedRef.current = null;
+        bootedUserRef.current = null;
         workspaceLoadSequenceRef.current += 1;
         setUserId(null);
         setActivities([]);
@@ -1717,10 +1912,12 @@ export default function Home() {
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && activeRealtimeUid) {
-        void loadWorkspace(activeRealtimeUid);
-        void loadActiveDevices(activeRealtimeUid);
-      }
+      if (document.visibilityState !== "visible" || !activeRealtimeUid) return;
+      void processOfflineQueue();
+      // Hopping to another app and back is not a reason to reload; realtime already kept this screen current.
+      if (Date.now() - lastWorkspaceLoadRef.current < WORKSPACE_REFRESH_MIN_GAP_MS) return;
+      void loadWorkspace(activeRealtimeUid);
+      void loadActiveDevices(activeRealtimeUid);
     };
 
     const handleOffline = () => {
@@ -1730,18 +1927,8 @@ export default function Home() {
     const handleServiceWorkerMessage = (event: MessageEvent) => {
       if (event.data?.type !== "MYPLAN_PUSH") return;
       const payload = event.data.payload as { id?: string; title?: string; body?: string; category?: string };
-      if (!payload?.id || !payload.title || !payload.body) return;
-      const item: MyPlanNotification = {
-        id: payload.id,
-        sender: "MYplan shaxsiy yordamchisi",
-        category: (payload.category === "system" ? "daily" : payload.category || "daily") as MyPlanNotification["category"],
-        categoryLabel: (payload.category || "daily").toUpperCase(),
-        title: payload.title,
-        message: payload.body,
-        createdAt: Date.now(),
-        timeLabel: getNotificationTimeLabel(Date.now(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
-        isRead: false,
-      };
+      const item = toNotification({ id: payload.id, category: payload.category, title: payload.title, message: payload.body });
+      if (!item) return;
       if (!notificationsRef.current.some((notification) => notification.id === item.id)) {
         setNotifications((prev) => [item, ...prev].slice(0, 100));
       }
@@ -1801,17 +1988,9 @@ export default function Home() {
         .then(({ data, error }) => {
           if (error || !data) return;
           const payload = data as { notifications?: Array<{ id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null }> };
-          const rows = (payload.notifications || []).filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now()).map((row) => ({
-            id: row.id,
-            sender: "MYplan shaxsiy yordamchisi",
-            category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
-            categoryLabel: (row.category || "system").toUpperCase(),
-            title: row.title,
-            message: row.message,
-            createdAt: new Date(row.created_at).getTime(),
-            timeLabel: getNotificationTimeLabel(new Date(row.created_at).getTime(), ((localStorage.getItem("myplan_lang") as Language) || "uz")),
-            isRead: Boolean(row.read_at),
-          } satisfies MyPlanNotification));
+          const rows = (payload.notifications || [])
+            .filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now())
+            .flatMap((row) => toNotification(row) ?? []);
           setNotifications((prev) => {
             const byId = new Map(prev.map((item) => [item.id, item]));
             const serverIds = new Set(rows.map((item) => item.id));
@@ -1836,15 +2015,7 @@ export default function Home() {
 
       setTimeout(() => {
         setIsOnline(navigator.onLine);
-        const rawQ = localStorage.getItem("myplan_offline_sync_queue");
-        if (rawQ) {
-          try {
-            const q = JSON.parse(rawQ);
-            setPendingSyncCount(Array.isArray(q) ? q.length : 0);
-          } catch {
-            // ignore
-          }
-        }
+        setPendingSyncCount(readOutbox().length);
         void processOfflineQueue();
       }, 0);
 
@@ -1871,8 +2042,12 @@ export default function Home() {
     }
 
     const activeTimers = counterTimersRef.current;
+    const progressTimers = progressRefreshTimersRef.current;
     return () => {
       disposed = true;
+      bootedUserRef.current = null;
+      progressTimers.forEach(clearTimeout);
+      progressTimers.clear();
       listener.subscription.unsubscribe();
       if (realtimeChannel) {
         void supabase.removeChannel(realtimeChannel);
@@ -1891,7 +2066,7 @@ export default function Home() {
         }
       }
     };
-  }, [loadWorkspace, router, processOfflineQueue, loadActiveDevices, updateTaskCounts]);
+  }, [loadWorkspace, refreshHabits, router, processOfflineQueue, loadActiveDevices, updateTaskCounts]);
 
   const handleAddCustomTimeSlot = useCallback(() => {
     const trimmed = customTimeInput.trim();
@@ -1927,57 +2102,183 @@ export default function Home() {
     setActiveTimeFilter((prev) => (prev === id ? "all" : prev));
   }, [userId]);
 
-  const resetModalState = useCallback(() => {
-    setEditingActivity(null);
-    setNewTitle("");
-    setNewDescription("");
-    setCountTarget("");
-    setCountUnit("marta");
-    setDurationPreset("unlimited");
-    setCustomDurationValue("");
-    setSelectedWeekdays([1, 2, 3, 4, 5, 6, 7]);
-    setNewTimeOfDay("anytime");
-    setNewReminderTime("");
+  const applyPlanForm = useCallback((draft: Partial<PlanDraft>) => {
+    setCreateTaskKind(draft.kind ?? "check");
+    setNewTitle(draft.title ?? "");
+    setNewDescription(draft.description ?? "");
+    setNewSchedule(draft.schedule ?? "daily");
+    setCountTarget(draft.target ?? "");
+    setCountUnit(draft.unit ?? "marta");
+    setDurationPreset(draft.durationPreset ?? "unlimited");
+    setCustomDurationValue(draft.customValue ?? "");
+    setCustomDurationUnit(draft.customUnit ?? "kun");
+    setSelectedWeekdays(draft.weekdays ?? [1, 2, 3, 4, 5, 6, 7]);
+    setNewTimeOfDay(draft.timeOfDay ?? "anytime");
+    setNewReminderTime(draft.reminder ?? "");
     setDebouncedDurationError("");
     setDebouncedCountError("");
-    setCreateTaskKind("check");
-    setShowCreateModal(false);
+    setMessage("");
   }, []);
+
+  const readPlanDraft = useCallback((editingId: string | null): PlanDraft | null => {
+    if (!userId) return null;
+    const draft = readJson<PlanDraft>(accountStorageKey(userId, "plan_draft"));
+    if (!draft || draft.editingId !== editingId || Date.now() - draft.savedAt > DRAFT_MAX_AGE_MS) return null;
+    return draft;
+  }, [userId]);
+
+  // Tapping outside, Esc and the phone's back button only hide the form. The text waits for the person's return.
+  const closeCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+    setEditingActivity(null);
+  }, []);
+
+  // Cancel and a successful save are the only two things that clear what was typed.
+  const discardPlanForm = useCallback(() => {
+    if (userId) {
+      try {
+        localStorage.removeItem(accountStorageKey(userId, "plan_draft"));
+      } catch {
+        // Nothing stored, nothing to clear.
+      }
+    }
+    applyPlanForm({});
+    closeCreateModal();
+  }, [userId, applyPlanForm, closeCreateModal]);
 
   const openCreateModal = useCallback(() => {
-    resetModalState();
+    setEditingActivity(null);
+    const draft = readPlanDraft(null);
+    if (draft) {
+      applyPlanForm(draft);
+    } else {
+      // A new plan starts from how this person usually sets plans up.
+      const learned = learnFormDefaults(activitiesRef.current);
+      const unit = learned.unit ?? "marta";
+      const target = learned.targetByUnit[unit];
+      applyPlanForm({
+        kind: learned.kind,
+        unit,
+        target: learned.kind === "count" && target ? String(target) : "",
+        timeOfDay: learned.timeOfDay,
+        weekdays: learned.weekdays,
+        durationPreset: learned.durationPreset as DurationPreset | undefined,
+      });
+    }
     setShowCreateModal(true);
-  }, [resetModalState]);
+  }, [applyPlanForm, readPlanDraft]);
 
   const openEditModal = useCallback((act: Activity) => {
+    const label = act.schedule_rule?.duration_label?.match(/^(\d+) (kun|hafta|oy|yil)$/);
+    applyPlanForm({
+      kind: act.measurement_type,
+      title: act.title,
+      description: act.description || "",
+      schedule: act.schedule_type || "daily",
+      target: act.target ? String(act.target) : "",
+      unit: act.unit || "marta",
+      durationPreset: (act.schedule_rule?.duration_preset as DurationPreset | undefined) ?? "unlimited",
+      customValue: label?.[1] ?? "",
+      customUnit: (label?.[2] as CustomDurationUnit | undefined) ?? "kun",
+      weekdays: Array.isArray(act.schedule_rule?.weekdays) ? act.schedule_rule.weekdays : undefined,
+      timeOfDay: act.time_of_day || "anytime",
+      reminder: act.reminder_time ? act.reminder_time.slice(0, 5) : "",
+      ...(readPlanDraft(act.id) ?? {}),
+    });
     setEditingActivity(act);
-    setNewTitle(act.title);
-    setNewDescription(act.description || "");
-    setCreateTaskKind(act.measurement_type);
-    setCountTarget(act.target ? String(act.target) : "");
-    setCountUnit(act.unit || "marta");
-    setNewTimeOfDay(act.time_of_day || "anytime");
-    setNewReminderTime(act.reminder_time ? act.reminder_time.slice(0, 5) : "");
-    if (act.schedule_rule?.duration_preset) {
-      setDurationPreset(act.schedule_rule.duration_preset as DurationPreset);
-    }
-    if (act.schedule_rule?.weekdays && Array.isArray(act.schedule_rule.weekdays)) {
-      setSelectedWeekdays(act.schedule_rule.weekdays);
-    }
-    setNewSchedule(act.schedule_type || "daily");
     setShowCreateModal(true);
-  }, []);
+  }, [applyPlanForm, readPlanDraft]);
 
-  // Close modal on Escape
+  // Every keystroke is saved, so a reload, a crash or the phone killing the app costs nothing.
+  useEffect(() => {
+    if (!showCreateModal || !userId) return;
+    const hasContent = Boolean(newTitle.trim() || newDescription.trim() || countTarget);
+    if (!hasContent) return;
+    writeJson(accountStorageKey(userId, "plan_draft"), {
+      editingId: editingActivity?.id ?? null,
+      kind: createTaskKind,
+      title: newTitle,
+      description: newDescription,
+      schedule: newSchedule,
+      target: countTarget,
+      unit: countUnit,
+      durationPreset,
+      customValue: customDurationValue,
+      customUnit: customDurationUnit,
+      weekdays: selectedWeekdays,
+      timeOfDay: newTimeOfDay,
+      reminder: newReminderTime,
+      savedAt: Date.now(),
+    } satisfies PlanDraft);
+  }, [
+    showCreateModal, userId, editingActivity, createTaskKind, newTitle, newDescription, newSchedule, countTarget,
+    countUnit, durationPreset, customDurationValue, customDurationUnit, selectedWeekdays, newTimeOfDay, newReminderTime,
+  ]);
+
+  // The session resumes where it stopped: same tab, and the form still open if it was open.
+  const sessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!userId || sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+    const timer = setTimeout(() => {
+      try {
+        const tab = sessionStorage.getItem(TAB_STORAGE_KEY) as TabType | null;
+        if (tab) setActiveTab(tab);
+        if (sessionStorage.getItem(FORM_OPEN_STORAGE_KEY) === "1" && readPlanDraft(null)) openCreateModal();
+      } catch {
+        // sessionStorage unavailable: start on the default tab
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [userId, readPlanDraft, openCreateModal]);
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return;
+    try {
+      sessionStorage.setItem(TAB_STORAGE_KEY, activeTab);
+      sessionStorage.setItem(FORM_OPEN_STORAGE_KEY, showCreateModal && !editingActivity ? "1" : "0");
+    } catch {
+      // not persisted: acceptable
+    }
+  }, [activeTab, showCreateModal, editingActivity]);
+
+  // Esc closes the top layer only, and never while a dropdown inside the form is the thing being closed.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && showCreateModal) {
-        resetModalState();
-      }
+      if (e.key !== "Escape" || !showCreateModal || document.querySelector(".life-select-popover")) return;
+      if (showCustomTimeModal) setShowCustomTimeModal(false);
+      else closeCreateModal();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showCreateModal, resetModalState]);
+  }, [showCreateModal, showCustomTimeModal, closeCreateModal]);
+
+  // The phone's back button/gesture closes the open layer instead of leaving the app.
+  const anyOverlayOpen =
+    showCreateModal || focusModalOpen || showInstallGuideModal || showCustomTimeModal || showEveningReview || showPresetModal;
+  const overlayHistoryRef = useRef(false);
+  useEffect(() => {
+    if (anyOverlayOpen && !overlayHistoryRef.current) {
+      overlayHistoryRef.current = true;
+      window.history.pushState({ myplanOverlay: true }, "", window.location.href);
+    } else if (!anyOverlayOpen && overlayHistoryRef.current) {
+      overlayHistoryRef.current = false;
+      window.history.back();
+    }
+  }, [anyOverlayOpen]);
+  useEffect(() => {
+    const handlePopState = () => {
+      if (!overlayHistoryRef.current) return;
+      overlayHistoryRef.current = false;
+      if (showCustomTimeModal) setShowCustomTimeModal(false);
+      else if (showPresetModal) setShowPresetModal(false);
+      else if (showInstallGuideModal) setShowInstallGuideModal(false);
+      else if (showEveningReview) setShowEveningReview(false);
+      else if (focusModalOpen) setFocusModalOpen(false);
+      else closeCreateModal();
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [showCustomTimeModal, showPresetModal, showInstallGuideModal, showEveningReview, focusModalOpen, closeCreateModal]);
 
   // The "turn notifications on" prompt wakes exactly when it may (re)appear. No interval: a timer that
   // set state every few seconds re-rendered this whole page for nothing.
@@ -2004,7 +2305,7 @@ export default function Home() {
   }, [userId, pushChecked, loadingData, nagArmedAt]);
 
   const pushNagMode: "ask" | "denied" | "ios-install" | "unsupported" | null = (() => {
-    if (typeof window === "undefined" || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
+    if (typeof window === "undefined" || anyOverlayOpen || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
     if (process.env.NODE_ENV !== "production") return null;
     if (pushSubscribed && pushPermission === "granted") return null;
     if (nagNow < nagSnoozedUntil) return null;
@@ -2084,7 +2385,7 @@ export default function Home() {
 
     // Ticking a counter task fills it to the target; un-ticking resets it. The change must also reach the cloud
     // as a progress event, otherwise a reload or another device shows the old number next to the new status.
-    let countCorrection: { id: string; user_id: string; occurrence_id: string; amount: number; note: string } | null = null;
+    let countCorrection: Record<string, unknown> | null = null;
     if (activity.measurement_type === "count" && activity.target) {
       const before = Math.min(taskCountsRef.current[occ.id] || 0, activity.target);
       const newCount = nextStatus === "completed" ? activity.target : 0;
@@ -2093,7 +2394,7 @@ export default function Home() {
       localStorage.setItem(`myplan_count_${occ.id}`, String(newCount));
       if (newCount !== before) {
         countCorrection = {
-          id: crypto.randomUUID(),
+          id: newEventId(),
           user_id: userId,
           occurrence_id: occ.id,
           amount: newCount - before,
@@ -2102,29 +2403,19 @@ export default function Home() {
       }
     }
 
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
-      if (error) throw error;
-      if (countCorrection) {
-        const { error: progressError } = await supabase.from("progress_events").insert(countCorrection);
-        if (progressError) enqueueOfflineMutation({ type: "progress_event", payload: countCorrection });
-      }
-      if (nextStatus === "completed") {
-        void supabase.functions.invoke("notification-compose", { body: {
-          category: "productivity",
-          dedupeKey: `task-completed:${occ.id}`,
-          context: { event: "task_completed", taskTitle: activity.title, taskType: activity.measurement_type },
-          url: "/",
-        } }).then(({ error }) => { if (error) console.warn("Completion companion notification failed:", error); });
-      }
-    } catch (err) {
-      console.warn("Occ status update queued offline:", err);
-      enqueueOfflineMutation({
-        type: "occurrence_status",
-        payload: { id: occ.id, user_id: userId, status: nextStatus },
-      });
-      if (countCorrection) enqueueOfflineMutation({ type: "progress_event", payload: countCorrection });
+    if (countCorrection) enqueueOfflineMutation({ type: "progress_event", payload: countCorrection });
+    enqueueOfflineMutation({
+      type: "occurrence_status",
+      payload: { id: occ.id, user_id: userId, status: nextStatus },
+    });
+
+    if (nextStatus === "completed" && activity.measurement_type === "check") {
+      // Ticks carry no timestamp on the server, so the usual time of check plans is learned on this device.
+      const key = accountStorageKey(userId, "check_minutes");
+      const minutes = readJson<Record<string, number[]>>(key) || {};
+      const now = new Date();
+      minutes[activity.id] = [...(minutes[activity.id] || []), now.getHours() * 60 + now.getMinutes()].slice(-14);
+      writeJson(key, minutes);
     }
   }
 
@@ -2177,50 +2468,16 @@ export default function Home() {
       }
     }
 
-    // Cloud persistence with offline fallback. Keep one stable ID across retries.
-    const progressEvent = {
-      id: crypto.randomUUID(),
-      user_id: userId,
-      occurrence_id: occurrence.id,
-      amount: actualAdd,
-      note: `+${actualAdd}`,
-    };
-    try {
-      const supabase = createClient();
-      const { error: progressError } = await supabase.from("progress_events").insert(progressEvent);
-      if (progressError) throw progressError;
-      if (reachedTarget) {
-        const { error: completionError } = await supabase
-          .from("occurrences")
-          .update({ status: "completed" })
-          .eq("id", occurrence.id)
-          .eq("user_id", userId);
-        if (completionError) throw completionError;
-        void supabase.functions.invoke("notification-compose", { body: {
-          category: "productivity",
-          dedupeKey: `task-completed:${occurrence.id}`,
-          context: { event: "task_completed", taskTitle: activity.title, taskType: "count", targetReached: true },
-          url: "/",
-        } }).then(({ error }) => { if (error) console.warn("Completion companion notification failed:", error); });
-      }
-    } catch (err) {
-      console.warn("Background progress queued offline:", err);
+    // Durable first, uploaded after. One stable id per tap makes every retry safe.
+    enqueueOfflineMutation({
+      type: "progress_event",
+      payload: { id: newEventId(), user_id: userId, occurrence_id: occurrence.id, amount: actualAdd, note: `+${actualAdd}` },
+    });
+    if (reachedTarget) {
       enqueueOfflineMutation({
-        type: "progress_event",
-        payload: {
-          id: progressEvent.id,
-          user_id: userId,
-          occurrence_id: occurrence.id,
-          amount: actualAdd,
-          note: `+${actualAdd}`,
-        },
+        type: "occurrence_status",
+        payload: { id: occurrence.id, user_id: userId, status: "completed" },
       });
-      if (reachedTarget) {
-        enqueueOfflineMutation({
-          type: "occurrence_status",
-          payload: { id: occurrence.id, user_id: userId, status: "completed" },
-        });
-      }
     }
   }
 
@@ -2257,53 +2514,31 @@ export default function Home() {
       );
     }
 
-    const progressEvent = {
-      id: crypto.randomUUID(),
-      user_id: userId,
-      occurrence_id: occurrence.id,
-      amount: -lastAdd,
-      note: `Qaytarish (-${lastAdd})`,
-    };
-    try {
-      const supabase = createClient();
-      const { error: progressError } = await supabase.from("progress_events").insert(progressEvent);
-      if (progressError) throw progressError;
-      if (needsStatusRevert) {
-        await supabase
-          .from("occurrences")
-          .update({ status: "pending" })
-          .eq("id", occurrence.id)
-          .eq("user_id", userId);
-      }
-    } catch (err) {
-      console.warn("Background undo queued offline:", err);
+    enqueueOfflineMutation({
+      type: "progress_event",
+      payload: { id: newEventId(), user_id: userId, occurrence_id: occurrence.id, amount: -lastAdd, note: `Qaytarish (-${lastAdd})` },
+    });
+    if (needsStatusRevert) {
       enqueueOfflineMutation({
-        type: "progress_event",
-        payload: {
-          id: progressEvent.id,
-          user_id: userId,
-          occurrence_id: occurrence.id,
-          amount: -lastAdd,
-          note: `Qaytarish (-${lastAdd})`,
-        },
+        type: "occurrence_status",
+        payload: { id: occurrence.id, user_id: userId, status: "pending" },
       });
-      if (needsStatusRevert) {
-        enqueueOfflineMutation({
-          type: "occurrence_status",
-          payload: { id: occurrence.id, user_id: userId, status: "pending" },
-        });
-      }
     }
   }
 
   // Archive activity
   async function archiveActivity(id: string, newActiveState = false) {
     if (!userId) return;
+    const previous = activitiesRef.current.find((item) => item.id === id)?.is_active;
+    setActivities((curr) => curr.map((item) => (item.id === id ? { ...item, is_active: newActiveState } : item)));
     const supabase = createClient();
     const { error } = await supabase.from("activities").update({ is_active: newActiveState }).eq("id", id).eq("user_id", userId);
-    if (!error) {
-      await loadWorkspace(userId);
+    if (error) {
+      setActivities((curr) => curr.map((item) => (item.id === id && previous !== undefined ? { ...item, is_active: previous } : item)));
+      setMessage(t.save_failed_kept);
+      return;
     }
+    void loadWorkspace(userId);
   }
 
   // Multi-Account Operations (Switch Account & Add Account, max 5)
@@ -2311,6 +2546,7 @@ export default function Home() {
     if (!targetAccount.id || targetAccount.id === userId || typeof window === "undefined" || switchingAccount) return;
 
     setSwitchingAccount(true);
+    await processOfflineQueue(); // this account's last taps go up before its session is replaced
     const supabase = createClient();
     // The vault keeps a real Supabase session per account (see account-sessions.ts),
     // so switching restores that account's own tokens: no password prompt, and no
@@ -2361,6 +2597,7 @@ export default function Home() {
   // Sign out (Switches to another connected account if present, or logs out to /login)
   async function handleSignOut() {
     try {
+      await processOfflineQueue();
       if (typeof window !== "undefined") {
         const rawVault = localStorage.getItem("myplan_accounts_vault");
         const vault: UserAccount[] = rawVault ? JSON.parse(rawVault) : [];
@@ -2687,7 +2924,7 @@ export default function Home() {
 
     if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 12) {
       const clamped = Math.max(-90, Math.min(90, diffX));
-      const action = clamped > 45 ? "complete" : clamped < -45 ? "undo" : null;
+      const action = clamped > SWIPE_ACTION_THRESHOLD ? "complete" : clamped < -SWIPE_ACTION_THRESHOLD ? "undo" : null;
       setSwipeState({ id: taskId, offset: clamped, action });
     }
   };
@@ -2710,27 +2947,17 @@ export default function Home() {
     touchStartRef.current = null;
   };
 
-  const handleCardDoubleTap = useCallback(
-    (activity: Activity, occ: Occurrence | undefined) => {
-      if (activity.measurement_type !== "count" || !occ || occ.status === "completed") return;
-      const now = typeof performance !== "undefined" ? performance.now() : 0;
-      if (lastTapRef.current && lastTapRef.current.id === activity.id && now - lastTapRef.current.time < 350) {
-        const step = counterSteps.length > 0 ? Math.min(...counterSteps) : 1;
-        triggerHaptic("light");
-        void incrementTaskCount(activity, occ, step);
-        lastTapRef.current = null;
-      } else {
-        lastTapRef.current = { id: activity.id, time: now };
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [counterSteps]
-  );
+  // Double-tapping a counter card adds the step this person actually uses most.
+  const handleCardDoubleTap = (activity: Activity, occ: Occurrence | undefined) => {
+    if (activity.measurement_type !== "count" || !occ || occ.status === "completed") return;
+    const step = habits.favoriteStep[activity.id] ?? (counterSteps.length > 0 ? Math.min(...counterSteps) : 1);
+    void incrementTaskCount(activity, occ, step);
+  };
 
   // Create new activity
   async function createActivity(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!userId || !newTitle.trim()) return;
+    if (!userId || !newTitle.trim() || busy) return;
 
     let targetValue: number | null = null;
     let unitValue = "";
@@ -2770,8 +2997,10 @@ export default function Home() {
       }
     }
 
-    let endsOnStr: string | null = null;
-    if (durationDays !== null) {
+    // Fixing a typo must not push the deadline forward: an unchanged duration keeps its original end date.
+    const keepsDeadline = editingActivity && (editingActivity.schedule_rule?.duration_label ?? null) === durationLabel;
+    let endsOnStr: string | null = keepsDeadline ? editingActivity.ends_on ?? null : null;
+    if (durationDays !== null && !keepsDeadline) {
       const startDate = new Date();
       const endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + durationDays);
@@ -2807,7 +3036,7 @@ export default function Home() {
           .eq("user_id", userId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("activities").insert({
+        const { data: created, error } = await supabase.from("activities").insert({
           user_id: userId,
           title: newTitle.trim(),
           description: newDescription.trim(),
@@ -2825,14 +3054,21 @@ export default function Home() {
           unit: unitValue,
           starts_on: today(),
           ends_on: endsOnStr,
-        });
+        }).select().single();
         if (error) throw error;
+        // Visible at once; its row for today follows from the quiet refresh below.
+        if (created) {
+          const row = created as Activity;
+          setActivities((prev) => (prev.some((a) => a.id === row.id) ? prev : [row, ...prev]));
+        }
       }
 
-      resetModalState();
-      await loadWorkspace(userId);
+      discardPlanForm();
+      void loadWorkspace(userId);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Faoliyatni saqlashda xatolik yuz berdi.");
+      // The form stays open with everything still in it.
+      console.warn("Plan could not be saved:", err);
+      setMessage(t.save_failed_kept);
     } finally {
       setBusy(false);
     }
@@ -2867,7 +3103,7 @@ export default function Home() {
       const { error } = await supabase.from("activities").insert(rows);
       if (error) throw error;
       setShowPresetModal(false);
-      await loadWorkspace(userId);
+      void loadWorkspace(userId);
       setMessage(`${t.preset_import_success}: ${preset.name[language]}`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : t.preset_import_error);
@@ -2959,9 +3195,10 @@ export default function Home() {
   }, [activeActivities]);
 
   const displayedActivities = useMemo(() => {
-    if (activeTimeFilter === "all") return activeActivities;
-    return activeActivities.filter((a) => a.time_of_day === activeTimeFilter);
-  }, [activeActivities, activeTimeFilter]);
+    const ordered = orderByHabit(activeActivities, habits.usualMinute);
+    if (activeTimeFilter === "all") return ordered;
+    return ordered.filter((a) => a.time_of_day === activeTimeFilter);
+  }, [activeActivities, activeTimeFilter, habits]);
 
   // Streak Verification: When all today's plans are completed, strengthen the chain!
   useEffect(() => {
@@ -2976,29 +3213,23 @@ export default function Home() {
     const timer = setTimeout(() => {
       setStreakCount(newStreak);
       setBestStreak(newBest);
+      enqueueOfflineMutation({
+        type: "update_streak",
+        payload: { user_id: userId, streak_count: newStreak, best_streak: newBest, last_active_date: todayStr },
+        // One warm word for finishing the whole day. A push after every single tick was just noise.
+        notify: {
+          category: "streak",
+          dedupeKey: `day-complete:${todayStr}`,
+          context: { event: "day_completed", streak: newStreak },
+          url: "/",
+        },
+      });
     }, 0);
 
     if (typeof window !== "undefined") {
       localStorage.setItem(`myplan_last_streak_date_${userId}`, todayStr);
     }
     triggerHaptic("success");
-
-    try {
-      const supabase = createClient();
-      void supabase
-        .from("profiles")
-        .update({
-          streak_count: newStreak,
-          best_streak: newBest,
-          last_active_date: todayStr,
-        })
-        .eq("id", userId);
-    } catch {
-      enqueueOfflineMutation({
-        type: "update_streak",
-        payload: { user_id: userId, streak_count: newStreak, best_streak: newBest, last_active_date: todayStr },
-      });
-    }
 
     return () => clearTimeout(timer);
   }, [userId, percent, activeActivities.length, streakCount, bestStreak, enqueueOfflineMutation]);
@@ -3021,8 +3252,13 @@ export default function Home() {
   // Exact time windows have priority; all-day tasks are fallback only.
   const recommendedFocusActivity = useMemo(() => {
     if (focusClockMinute === null) return null;
-    return getRecommendedFocusActivity(activeActivities, occurrences, customTimeSlots, focusClockMinute);
-  }, [activeActivities, occurrences, customTimeSlots, focusClockMinute]);
+    const doneIds = new Set(occurrences.filter((item) => item.status === "completed").map((item) => item.activity_id));
+    const pending = activeActivities.filter((activity) => !doneIds.has(activity.id));
+    return (
+      pickHabitualNow(pending, habits.usualMinute, focusClockMinute) ??
+      getRecommendedFocusActivity(activeActivities, occurrences, customTimeSlots, focusClockMinute)
+    );
+  }, [activeActivities, occurrences, customTimeSlots, focusClockMinute, habits]);
 
   // Discipline Momentum Index (Consistency rolling calculation)
   const momentumScore = useMemo(() => {
@@ -3045,12 +3281,14 @@ export default function Home() {
       }
 
       if (e.key === "Escape") {
-        setShowCreateModal(false);
-        setEditingActivity(null);
+        // The plan form has its own Esc handling, which keeps sub-dialogs and typed text safe.
+        if (showCreateModal) return;
         setFocusModalOpen(false);
         setShowInstallGuideModal(false);
-        setShowCustomTimeModal(false);
         setShowEveningReview(false);
+      } else if (anyOverlayOpen) {
+        // A stray letter or digit must never reset or leave the dialog in front of the person.
+        return;
       } else if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         openCreateModal();
@@ -3071,7 +3309,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [openCreateModal, recommendedFocusActivity]);
+  }, [openCreateModal, startFocusSession, recommendedFocusActivity, anyOverlayOpen, showCreateModal]);
 
   // Focus Modal Active Details
   const focusOcc = useMemo(() => {
@@ -3141,7 +3379,7 @@ export default function Home() {
   return (
     <div className={`app-layout ${sidebarOpen ? "sidebar-expanded" : "sidebar-collapsed"}`}>
       {/* Floating In-App Realtime Toast */}
-      {activeToast && (() => {
+      {activeToast && !showCreateModal && (() => {
         const locToast = getLocalizedNotification(activeToast, t);
         return (
           <aside className="floating-inapp-toast" role="alert" aria-live="polite">
@@ -3343,7 +3581,7 @@ export default function Home() {
           className="floating-modal-backdrop"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              resetModalState();
+              closeCreateModal();
             }
           }}
           role="dialog"
@@ -3361,7 +3599,7 @@ export default function Home() {
               <button
                 type="button"
                 className="modal-close-btn"
-                onClick={resetModalState}
+                onClick={closeCreateModal}
                 aria-label={t.btn_cancel}
                 title={`${t.btn_cancel} (Esc)`}
               >
@@ -3387,7 +3625,13 @@ export default function Home() {
                   role="tab"
                   aria-selected={createTaskKind === "count"}
                   className={`modal-tab-btn ${createTaskKind === "count" ? "active" : ""}`}
-                  onClick={() => setCreateTaskKind("count")}
+                  onClick={() => {
+                    setCreateTaskKind("count");
+                    if (!countTarget) {
+                      const remembered = learnFormDefaults(activitiesRef.current).targetByUnit[countUnit];
+                      if (remembered) setCountTarget(String(remembered));
+                    }
+                  }}
                 >
                   <IconHash className="icon-sm" />
                   <span>{t.tab_countable}</span>
@@ -3435,7 +3679,13 @@ export default function Home() {
                     <LifeSelect
                       className="count-unit-select"
                       value={countUnit}
-                      onChange={setCountUnit}
+                      onChange={(unit) => {
+                        setCountUnit(unit);
+                        if (!countTarget) {
+                          const remembered = learnFormDefaults(activitiesRef.current).targetByUnit[unit];
+                          if (remembered) setCountTarget(String(remembered));
+                        }
+                      }}
                       ariaLabel={t.label_target_count}
                       options={[
                         { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: "Mashq, odat va kundalik takrorlar", icon: <IconRepeat className="life-select-svg-icon" /> },
@@ -3593,6 +3843,16 @@ export default function Home() {
                   {newReminderTime && (
                     <button type="button" className="time-choice-btn" onClick={() => setNewReminderTime("")}>
                       <span>{t.btn_clear_reminder}</span>
+                    </button>
+                  )}
+                  {!newReminderTime && editingActivity && habits.usualMinute[editingActivity.id] !== undefined && (
+                    <button
+                      type="button"
+                      className="time-choice-btn"
+                      onClick={() => setNewReminderTime(formatMinute(habits.usualMinute[editingActivity.id]))}
+                    >
+                      <IconClock className="icon-xs" />
+                      <span>{t.habit_usual_time} {formatMinute(habits.usualMinute[editingActivity.id])}</span>
                     </button>
                   )}
                 </div>
@@ -3773,11 +4033,17 @@ export default function Home() {
               </div>
             </div>
 
+            {message && (
+              <p className="count-validation-error" role="alert">
+                <IconAlertTriangle className="icon-xs inline-icon" /> {message}
+              </p>
+            )}
+
             <div className="modal-actions">
                 <button
                   type="button"
                   className="btn-modal-cancel"
-                  onClick={resetModalState}
+                  onClick={discardPlanForm}
                 >
                   {t.btn_cancel}
                 </button>
@@ -4873,7 +5139,7 @@ export default function Home() {
                                               <button
                                                 key={step}
                                                 type="button"
-                                                className={`btn-counter-inc ${step === 1 ? "primary" : ""} ${
+                                                className={`btn-counter-inc ${step === (habits.favoriteStep[activity.id] ?? 1) ? "primary" : ""} ${
                                                   isVisible
                                                     ? "btn-visible"
                                                     : isSpaceCollapsed
@@ -4887,6 +5153,20 @@ export default function Home() {
                                               </button>
                                             );
                                           })}
+                                        {/* The amount this person usually logs in one sitting, as a single tap */}
+                                        {!isDone &&
+                                          habits.usualChunk[activity.id] !== undefined &&
+                                          habits.usualChunk[activity.id] <= remaining &&
+                                          !counterSteps.includes(habits.usualChunk[activity.id]) && (
+                                            <button
+                                              type="button"
+                                              className="btn-counter-inc primary btn-visible"
+                                              onClick={() => void incrementTaskCount(activity, occ, habits.usualChunk[activity.id])}
+                                              title={`+${habits.usualChunk[activity.id]}`}
+                                            >
+                                              +{habits.usualChunk[activity.id]}
+                                            </button>
+                                          )}
                                       </div>
 
                                       {/* Undo Button - ALWAYS ON THE RIGHT SIDE */}
@@ -5314,7 +5594,10 @@ export default function Home() {
                           type="text"
                           className="profile-input"
                           value={editFullName}
-                          onChange={(e) => setEditFullName(e.target.value)}
+                          onChange={(e) => {
+                            profileFormDirtyRef.current = true;
+                            setEditFullName(e.target.value);
+                          }}
                           placeholder="To‘liq ismingiz"
                           disabled={!canChangeNameAge || isSavingProfile}
                           maxLength={60}
@@ -5328,7 +5611,10 @@ export default function Home() {
                           type="number"
                           className="profile-input"
                           value={editAge}
-                          onChange={(e) => setEditAge(e.target.value)}
+                          onChange={(e) => {
+                            profileFormDirtyRef.current = true;
+                            setEditAge(e.target.value);
+                          }}
                           placeholder="Yoshingiz (masalan: 22)"
                           disabled={!canChangeNameAge || isSavingProfile}
                           min={6}

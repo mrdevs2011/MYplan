@@ -136,6 +136,19 @@ export function localClock(date: Date, timezone: string) {
   return { date: `${part("year")}-${part("month")}-${part("day")}`, minutes: Number(part("hour")) * 60 + Number(part("minute")) };
 }
 
+function parseClockMinutes(value: string) {
+  const match = value.slice(0, 5).match(/^(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]), minutes = Number(match[2]);
+  return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+}
+
+export function isQuietTime(current: number, quietStart: string, quietEnd: string) {
+  const start = parseClockMinutes(quietStart), end = parseClockMinutes(quietEnd);
+  if (start === null || end === null || start === end) return false;
+  return start < end ? current >= start && current < end : current >= start || current < end;
+}
+
 export function scheduleAfterQuietHours(
   date: Date,
   timezone: string,
@@ -144,13 +157,7 @@ export function scheduleAfterQuietHours(
   quietEnd: string,
 ) {
   if (!enabled) return date;
-  const parseMinutes = (value: string) => {
-    const match = value.slice(0, 5).match(/^(\d{2}):(\d{2})$/);
-    if (!match) return null;
-    const hours = Number(match[1]), minutes = Number(match[2]);
-    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
-  };
-  const start = parseMinutes(quietStart), end = parseMinutes(quietEnd);
+  const start = parseClockMinutes(quietStart), end = parseClockMinutes(quietEnd);
   if (start === null || end === null || start === end) return date;
   const current = localClock(date, safeTimeZone(timezone)).minutes;
   const isQuiet = start < end ? current >= start && current < end : current >= start || current < end;

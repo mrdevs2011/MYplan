@@ -1,5 +1,5 @@
 // MYplan service worker: offline shell + standards-based Web Push.
-const CACHE_NAME = "myplan-v11-reminders-pwa";
+const CACHE_NAME = "myplan-v12-calm-notifications";
 const PRECACHE = ["/", "/manifest.json", "/pwa-192.png", "/pwa-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -21,17 +21,19 @@ self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch { payload = { body: event.data?.text() || "" }; }
-    const title = typeof payload.title === "string" ? payload.title : "MYplan";
+    const title = typeof payload.title === "string" && payload.title.trim() ? payload.title : "MYplan";
     const openClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const visibleClient = openClients.find((client) => client.visibilityState === "visible");
     if (visibleClient) {
       visibleClient.postMessage({ type: "MYPLAN_PUSH", payload });
     }
+    // The person is looking at the app: the in-app card is enough, a second system alert is only noise.
+    if (openClients.some((client) => client.focused)) return;
     // Task reminders are urgent: one slot per task (later stages replace earlier ones but still alert),
     // they stay on screen until dealt with and vibrate.
     const isTaskReminder = payload.kind === "task-reminder";
     const options = {
-      body: typeof payload.body === "string" ? payload.body : "Senga yangi eslatma bor.",
+      body: typeof payload.body === "string" && payload.body.trim() ? payload.body : "Senga yangi eslatma bor.",
       icon: "/pwa-192.png",
       badge: "/pwa-192.png",
       tag: isTaskReminder && typeof payload.activityId === "string"
