@@ -549,6 +549,8 @@ export default function Home() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushChecked, setPushChecked] = useState(false);
+  // True only when permission is granted but the silent re-subscription failed: then (and only then) the prompt returns.
+  const [pushSyncFailed, setPushSyncFailed] = useState(false);
   const [nagSnoozedUntil, setNagSnoozedUntil] = useState(0);
   const [nagNow, setNagNow] = useState(0);
   const [nagArmedAt, setNagArmedAt] = useState(0);
@@ -2311,7 +2313,7 @@ export default function Home() {
   const pushNagMode: "ask" | "denied" | "ios-install" | "unsupported" | null = (() => {
     if (typeof window === "undefined" || anyOverlayOpen || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
     if (process.env.NODE_ENV !== "production") return null;
-    if (pushSubscribed && pushPermission === "granted") return null;
+    if (pushPermission === "granted" && (pushSubscribed || !pushSyncFailed)) return null;
     if (nagNow < nagSnoozedUntil) return null;
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
@@ -2779,7 +2781,10 @@ export default function Home() {
     if (pushPermission !== "granted") return;
     if (pushSyncedUserRef.current === userId) return;
     pushSyncedUserRef.current = userId;
-    void enablePushForThisDevice(true).catch((error) => console.warn("Push re-sync failed:", error));
+    void enablePushForThisDevice(true).catch((error) => {
+      console.warn("Push re-sync failed:", error);
+      setPushSyncFailed(true);
+    });
   }, [userId, pushChecked, pushPermission, enablePushForThisDevice]);
 
   const snoozeNag = () => {
