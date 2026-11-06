@@ -9514,3 +9514,19 @@ html, body { overscroll-behavior-y: none; }
   height: 100%;
   object-fit: cover;
 }
+
+/* Clock page: larger digital time and date. */
+.time-digital {
+  font-size: clamp(30px, 3.8vw, 52px);
+}
+.time-clock-info .time-note {
+  font-size: 15px;
+}
+.time-clock-info .time-tz {
+  font-size: 12px;
+}
+@media (max-width: 768px) {
+  .time-digital {
+    font-size: 48px;
+  }
+}
