@@ -37,6 +37,7 @@
     "**/*.mts"
   ],
   "exclude": [
+    "src/**/*.test.ts",
     "node_modules",
     "supabase/functions",
     "tests"
