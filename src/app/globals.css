@@ -9345,7 +9345,16 @@ html, body { overscroll-behavior-y: none; }
     position: fixed;
     right: 24px;
     bottom: 24px;
+    width: 56px;
+    height: 56px;
     z-index: 60;
+  }
+  .tasbeh-float.is-dragging {
+    user-select: none;
+  }
+  .tasbeh-float.is-dragging * {
+    cursor: grabbing !important;
+    transition: none !important;
   }
   .tasbeh-fab {
     position: relative;
@@ -9357,6 +9366,8 @@ html, body { overscroll-behavior-y: none; }
     background: var(--accent-lime);
     color: var(--text-inverse);
     box-shadow: 0 8px 28px rgba(180, 240, 76, 0.35), 0 2px 10px rgba(0, 0, 0, 0.4);
+    cursor: grab;
+    touch-action: none;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
   .tasbeh-fab:hover {
@@ -9364,11 +9375,6 @@ html, body { overscroll-behavior-y: none; }
   }
   .tasbeh-fab:active {
     transform: scale(0.95);
-  }
-  .tasbeh-fab.is-open {
-    background: var(--bg-surface-elevated);
-    color: var(--accent-lime);
-    border: 1px solid var(--border-active);
   }
   .tasbeh-fab-badge {
     position: absolute;
@@ -9390,7 +9396,7 @@ html, body { overscroll-behavior-y: none; }
   .tasbeh-float-panel {
     position: absolute;
     right: 0;
-    bottom: 68px;
+    bottom: 0;
     width: 340px;
     max-height: calc(100dvh - 120px);
     overflow-y: auto;
@@ -9405,7 +9411,11 @@ html, body { overscroll-behavior-y: none; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin: -4px -6px 10px;
+    padding: 4px 6px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
   }
   .tasbeh-float-title {
     font-size: 12px;
