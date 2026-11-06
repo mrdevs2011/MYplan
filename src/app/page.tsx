@@ -240,6 +240,18 @@ interface WorkspaceSnapshot {
   recent?: StatOccurrence[];
 }
 
+/** The browser's notification permission. Sources can disagree (the Permissions API may say "prompt" while
+ *  Notification.permission says "granted"); a grant seen in either one is a grant. */
+function readBrowserPermission(apiState?: string): NotificationPermission {
+  const own = typeof Notification !== "undefined" ? Notification.permission : "default";
+  if (own === "granted" || apiState === "granted") return "granted";
+  if (own === "denied" || apiState === "denied") return "denied";
+  return "default";
+}
+
+const NAG_SNOOZE_KEY = "myplan_nag_snooze_until";
+const NAG_SNOOZE_MS = 24 * 60 * 60 * 1000;
+
 const accountStorageKey = (userId: string, key: string) => `myplan_account_${userId}_${key}`;
 
 /** Everything typed into the plan form. Stored on every change so nothing typed is ever lost. */
@@ -2506,7 +2518,7 @@ export default function Home() {
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        const stored = Number(sessionStorage.getItem("myplan_nag_snooze_until") || 0);
+        const stored = Number(localStorage.getItem(NAG_SNOOZE_KEY) || 0);
         if (stored > Date.now()) setNagSnoozedUntil(stored);
       } catch {
         // sessionStorage unavailable: snooze simply is not remembered across reloads
@@ -2529,7 +2541,8 @@ export default function Home() {
     if (typeof window === "undefined" || anyOverlayOpen || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
     if (process.env.NODE_ENV !== "production") return null;
     // Permission is a browser-level choice: once granted, never ask again, whichever account is open.
-    if (pushPermission === "granted") return null;
+    // A subscription can only exist with permission, so having one is proof of a grant too.
+    if (pushPermission === "granted" || pushSubscribed) return null;
     if (nagNow < nagSnoozedUntil) return null;
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
@@ -3012,7 +3025,7 @@ export default function Home() {
     let status: PermissionStatus | null = null;
     let disposed = false;
     const apply = () => {
-      if (status) setPushPermission(status.state === "prompt" ? "default" : (status.state as NotificationPermission));
+      if (status) setPushPermission(readBrowserPermission(status.state));
     };
     navigator.permissions.query({ name: "notifications" as PermissionName }).then((result) => {
       if (disposed) return;
@@ -3026,6 +3039,18 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    const reread = () => {
+      if (document.visibilityState === "visible") setPushPermission(readBrowserPermission());
+    };
+    document.addEventListener("visibilitychange", reread);
+    window.addEventListener("focus", reread);
+    return () => {
+      document.removeEventListener("visibilitychange", reread);
+      window.removeEventListener("focus", reread);
+    };
+  }, []);
+
   // Keep this device registered for the signed-in account: runs silently once per account while permission is granted.
   useEffect(() => {
     if (!userId || !pushChecked || process.env.NODE_ENV !== "production") return;
@@ -3036,10 +3061,10 @@ export default function Home() {
   }, [userId, pushChecked, pushPermission, enablePushForThisDevice]);
 
   const snoozeNag = () => {
-    const until = Date.now() + 60_000;
+    const until = Date.now() + NAG_SNOOZE_MS;
     setNagSnoozedUntil(until);
     try {
-      sessionStorage.setItem("myplan_nag_snooze_until", String(until));
+      localStorage.setItem(NAG_SNOOZE_KEY, String(until));
     } catch {
       // not persisted: acceptable
     }
