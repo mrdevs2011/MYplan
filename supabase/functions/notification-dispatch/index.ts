@@ -1,5 +1,5 @@
 import webpush from "npm:web-push@3.6.7";
-import { ACTIVE_WINDOW_MS, dueStageIds, dueSummaryTime, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind, type ProgressPoint, type StageId } from "../_shared/reminders.ts";
+import { ACTIVE_WINDOW_MS, dueStageIds, dueSummaryTime, followsAnotherPlan, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind, type ProgressPoint, type StageId } from "../_shared/reminders.ts";
 import { adminClient, composeNotificationBatch, corsHeaders, isCronAuthorized, isQuietTime, json, localClock, safeTimeZone, scheduleAfterQuietHours } from "../_shared/notifications.ts";
 
 // Habits change slowly and this runs every minute, so each warm instance reuses what it learned for an hour.
@@ -202,6 +202,7 @@ Deno.serve(async (req) => {
       if (finished.has(task.id)) continue;
       const hasChosenTime = Boolean(task.reminder_time);
       const base = at.get(task.id)!;
+      if (stage.id === "pre" && followsAnotherPlan(base, today.filter((other) => !finished.has(other.id)).map((other) => at.get(other.id)!))) continue;
       // A time learned from the person's own mornings is not an intrusion, even inside default quiet hours.
       const quietForTask = isQuiet && !(stage.id === "due" && habit.usual.has(task.id));
       if (!shouldRemind({ stage: stage.id, hasChosenTime, isQuiet: quietForTask, isActiveNow, nudgesToday })) continue;
@@ -236,7 +237,7 @@ Deno.serve(async (req) => {
       const done = Math.round(Math.max(0, doneByActivity.get(task.id) ?? 0) * 100) / 100;
       const left = Math.round((target - done) * 100) / 100;
       const unit = task.unit ? ` ${task.unit}` : "";
-      const progress = target > 0 && done > 0
+      const progress = stage !== "pre" && target > 0 && done > 0
         ? { uz: `${done}/${target}${unit}. Yana ${left} qoldi.`, en: `${done}/${target}${unit}. ${left} to go.`, ru: `${done}/${target}${unit}. Осталось ${left}.` }[language]
         : null;
       const goal = target > 0 ? `${target}${unit}` : "";

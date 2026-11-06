@@ -13,6 +13,7 @@ export const DAILY_NUDGE_LIMIT = 6;
 export const ACTIVE_WINDOW_MS = 15 * 60_000;
 const MIN_LEARNED_DAYS = 3;
 const SLOT_MINUTES = 30;
+const CHAIN_GAP_MINUTES = 20;
 
 export const SLOT_WINDOWS: Record<string, [number, number]> = { morning: [480, 690], afternoon: [720, 990], evening: [1050, 1230] };
 export const OTHER_WINDOW: [number, number] = [540, 1200];
@@ -62,9 +63,17 @@ export interface ReminderContext {
 
 /** Whether this reminder is worth interrupting the person for right now. */
 export function shouldRemind({ stage, hasChosenTime, isQuiet, isActiveNow, nudgesToday }: ReminderContext): boolean {
-  if (hasChosenTime) return stage === "late1" ? !isActiveNow && !isQuiet : true;
+  if (hasChosenTime) {
+    if (stage === "pre") return !isActiveNow;
+    return stage === "late1" ? !isActiveNow && !isQuiet : true;
+  }
   if (stage === "pre" || isQuiet || isActiveNow) return false;
   return nudgesToday < DAILY_NUDGE_LIMIT;
+}
+
+/** True inside a run of back-to-back plans: the person is already there, so "starts in 10 minutes" says nothing new. */
+export function followsAnotherPlan(base: number, otherBases: number[]): boolean {
+  return otherBases.some((other) => other < base && base - other <= CHAIN_GAP_MINUTES);
 }
 
 /** Plans due within the same half hour travel in one notification. */

@@ -1,4 +1,4 @@
-import { DAILY_NUDGE_LIMIT, dueStageIds, dueSummaryTime, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind } from "./reminders.ts";
+import { DAILY_NUDGE_LIMIT, dueStageIds, followsAnotherPlan, dueSummaryTime, learnUsualMinutes, planReminderMinutes, reminderSlot, shouldRemind } from "./reminders.ts";
 
 const eq = <T>(actual: T, expected: T) => {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`expected ${JSON.stringify(expected)} got ${JSON.stringify(actual)}`);
@@ -62,8 +62,21 @@ Deno.test("reminders follow when the person really starts", () => {
 Deno.test("a chosen time always fires, even at night or mid-work", () => {
   const context = { hasChosenTime: true, isQuiet: true, isActiveNow: true, nudgesToday: 99 };
   eq(shouldRemind({ ...context, stage: "due" }), true);
-  eq(shouldRemind({ ...context, stage: "pre" }), true);
   eq(shouldRemind({ ...context, stage: "late1" }), false);
+});
+
+Deno.test("the heads-up is for someone not yet working", () => {
+  const context = { stage: "pre" as const, hasChosenTime: true, isQuiet: true, nudgesToday: 0 };
+  eq(shouldRemind({ ...context, isActiveNow: false }), true);
+  eq(shouldRemind({ ...context, isActiveNow: true }), false);
+});
+
+Deno.test("only the first plan of a back-to-back run gets a heads-up", () => {
+  const run = [420, 430, 440, 450];
+  eq(followsAnotherPlan(420, run), false);
+  eq(followsAnotherPlan(430, run), true);
+  eq(followsAnotherPlan(450, run), true);
+  eq(followsAnotherPlan(600, run), false);
 });
 
 Deno.test("unchosen reminders respect quiet hours, active work and the daily limit", () => {
