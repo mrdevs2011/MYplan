@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock } from "@/components/icons";
+import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock, IconBell } from "@/components/icons";
+import { playMelody, type MelodyHandle } from "@/lib/timer-melody";
 import type { Language, translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
@@ -156,6 +157,45 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
     soundRef.current = soundEnabled;
   }, [soundEnabled]);
 
+  // The melody can be switched off for good; the choice is remembered per account.
+  const [musicOn, setMusicOn] = useState(() => load<{ on: boolean }>(scope, "music", { on: true }).on);
+  const musicRef = useRef(musicOn);
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<AudioContext | null>(null);
+  const melodyRef = useRef<MelodyHandle | null>(null);
+
+  // Browsers only let a page make sound after a tap. Starting the timer is that tap, so the audio is unlocked
+  // silently here and reused when the time is up, minutes later. Nothing plays at this point.
+  const unlockAudio = useCallback(() => {
+    try {
+      if (!audioRef.current) {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) audioRef.current = new AudioCtx();
+      }
+      void audioRef.current?.resume();
+    } catch {
+      // Sound is optional.
+    }
+  }, []);
+
+  const stopMelody = useCallback(() => {
+    melodyRef.current?.stop();
+    melodyRef.current = null;
+    setPlaying(false);
+  }, []);
+
+  const toggleMusic = () => {
+    const next = !musicOn;
+    musicRef.current = next;
+    setMusicOn(next);
+    save(scope, "music", { on: next });
+    if (!next) stopMelody();
+  };
+
+  useEffect(() => () => melodyRef.current?.stop(), []);
+
   useEffect(() => {
     save(scope, "timer", state);
   }, [scope, state]);
@@ -168,7 +208,19 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
     if (running && remaining <= 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setState((s) => ({ ...s, endAt: null, remaining: 0, done: true }));
-      if (soundRef.current) beep();
+      if (soundRef.current && musicRef.current) {
+        const ctx = audioRef.current;
+        void ctx?.resume();
+        const handle = ctx ? playMelody(ctx, () => { melodyRef.current = null; setPlaying(false); }) : null;
+        if (handle) {
+          melodyRef.current = handle;
+          setPlaying(true);
+        } else {
+          beep();
+        }
+      } else if (soundRef.current) {
+        beep();
+      }
       try {
         navigator.vibrate?.([200, 100, 200]);
       } catch {
@@ -183,6 +235,8 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
   };
 
   const toggle = () => {
+    stopMelody();
+    unlockAudio();
     if (running) {
       setState((s) => ({ ...s, endAt: null, remaining: Math.max(0, s.endAt! - Date.now()) }));
     } else {
@@ -191,7 +245,10 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
     }
   };
 
-  const reset = () => setState((s) => ({ ...s, endAt: null, remaining: s.duration, done: false }));
+  const reset = () => {
+    stopMelody();
+    setState((s) => ({ ...s, endAt: null, remaining: s.duration, done: false }));
+  };
   const idle = !running && remaining === state.duration && !state.done;
   const pristine = !running && !state.done && remaining === state.duration;
 
@@ -225,6 +282,13 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
         ) : null}
       </div>
 
+      {playing ? (
+        <button type="button" className="time-btn music-stop-btn" onClick={stopMelody}>
+          <IconBell className="icon-xs" />
+          <span>{t.clk_music_stop}</span>
+        </button>
+      ) : null}
+
       <div className="time-controls">
         <button type="button" className="time-btn primary" onClick={toggle}>
           {running ? <IconPause className="icon-xs" /> : <IconPlay className="icon-xs" />}
@@ -235,6 +299,17 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
           <span>{t.clk_reset}</span>
         </button>
       </div>
+
+      <button
+        type="button"
+        className={`time-chip music-toggle ${musicOn ? "active" : ""}`}
+        onClick={toggleMusic}
+        aria-pressed={musicOn}
+        disabled={!soundEnabled}
+      >
+        <IconBell className="icon-xs" />
+        <span>{musicOn ? t.clk_music_on : t.clk_music_off}</span>
+      </button>
     </>
   );
 }

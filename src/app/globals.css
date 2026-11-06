@@ -9079,3 +9079,8 @@ html, body { overscroll-behavior-y: none; }
 @container st (min-width: 1180px) {
   .st-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
+
+/* Timer melody: a clear way to stop it while it plays, and a calm switch to turn it off for good. */
+.music-stop-btn { align-self: center; margin-top: 12px; animation: toastSlideIn 0.3s ease-out; }
+.music-toggle { align-self: center; margin-top: 14px; gap: 8px; display: inline-flex; align-items: center; }
+.music-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
