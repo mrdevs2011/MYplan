@@ -233,10 +233,11 @@ Deno.serve(async (req) => {
       }
       const task = tasks[0];
       const target = task.measurement_type === "count" && task.target ? Number(task.target) : 0;
-      const done = Math.max(0, doneByActivity.get(task.id) ?? 0);
+      const done = Math.round(Math.max(0, doneByActivity.get(task.id) ?? 0) * 100) / 100;
+      const left = Math.round((target - done) * 100) / 100;
       const unit = task.unit ? ` ${task.unit}` : "";
       const progress = target > 0 && done > 0
-        ? { uz: `${done}/${target}${unit}. Yana ${target - done} qoldi.`, en: `${done}/${target}${unit}. ${target - done} to go.`, ru: `${done}/${target}${unit}. Осталось ${target - done}.` }[language]
+        ? { uz: `${done}/${target}${unit}. Yana ${left} qoldi.`, en: `${done}/${target}${unit}. ${left} to go.`, ru: `${done}/${target}${unit}. Осталось ${left}.` }[language]
         : null;
       const goal = target > 0 ? `${target}${unit}` : "";
       const copy = progress ?? {

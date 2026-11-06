@@ -10,6 +10,7 @@ import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { getRecommendedFocusActivity } from "@/lib/focus-recommendation";
+import { formatCount, formatStep, formatTimeLeft, isMinuteUnit, roundAmount, stepsFor } from "@/lib/counter-steps";
 import {
   EMPTY_PROFILE,
   buildHabitProfile,
@@ -492,6 +493,7 @@ export default function Home() {
   const [autoArchiveDelay, setAutoArchiveDelay] = useState(7);
 
   const t = translations[language] || translations.uz;
+  const timeLabels = { sec: t.step_sec, min: t.step_min };
 
   const durationPresets = useMemo(
     () => [
@@ -1328,7 +1330,7 @@ export default function Home() {
           const onScreen = taskCountsRef.current[occ.id];
           const saved = localStorage.getItem(`myplan_count_${occ.id}`);
           if (onScreen !== undefined) initialCounts[occ.id] = onScreen;
-          else if (saved !== null) initialCounts[occ.id] = Math.min(Math.max(0, parseInt(saved, 10) || 0), cap);
+          else if (saved !== null) initialCounts[occ.id] = Math.min(Math.max(0, parseFloat(saved) || 0), cap);
         }
       });
 
@@ -2397,7 +2399,7 @@ export default function Home() {
           id: newEventId(),
           user_id: userId,
           occurrence_id: occ.id,
-          amount: newCount - before,
+          amount: roundAmount(newCount - before),
           note: nextStatus === "completed" ? "Belgilandi (to‘ldirildi)" : "Belgi olib tashlandi",
         };
       }
@@ -2424,10 +2426,10 @@ export default function Home() {
     if (!userId) return;
     const target = activity.target || 0;
     const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
-    const actualAdd = target > 0 ? Math.min(amount, Math.max(0, target - current)) : amount;
+    const actualAdd = roundAmount(target > 0 ? Math.min(amount, Math.max(0, target - current)) : amount);
     if (actualAdd <= 0) return;
 
-    const next = target > 0 ? Math.min(current + actualAdd, target) : current + actualAdd;
+    const next = roundAmount(target > 0 ? Math.min(current + actualAdd, target) : current + actualAdd);
 
     // Reset collapsed state so hidden buttons retain their space
     setCollapsedCounters((prev) => ({ ...prev, [occurrence.id]: false }));
@@ -2492,7 +2494,7 @@ export default function Home() {
     const newHistory = history.slice(0, -1);
     const target = activity.target || 0;
     const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
-    const next = Math.max(0, current - lastAdd);
+    const next = roundAmount(Math.max(0, current - lastAdd));
 
     // Cancel 10s timer and un-collapse space immediately on undo
     if (counterTimersRef.current[occurrence.id]) {
@@ -2950,7 +2952,8 @@ export default function Home() {
   // Double-tapping a counter card adds the step this person actually uses most.
   const handleCardDoubleTap = (activity: Activity, occ: Occurrence | undefined) => {
     if (activity.measurement_type !== "count" || !occ || occ.status === "completed") return;
-    const step = habits.favoriteStep[activity.id] ?? (counterSteps.length > 0 ? Math.min(...counterSteps) : 1);
+    const fallback = isMinuteUnit(activity.unit) ? 1 : counterSteps.length > 0 ? Math.min(...counterSteps) : 1;
+    const step = habits.favoriteStep[activity.id] ?? fallback;
     void incrementTaskCount(activity, occ, step);
   };
 
@@ -3473,7 +3476,7 @@ export default function Home() {
               {focusActivity.measurement_type === "count" ? (
                 <div className="focus-counter-hub">
                   <div className="focus-rep-display">
-                    <span className="focus-rep-current">{focusCurrent}</span>
+                    <span className="focus-rep-current">{formatCount(focusCurrent, focusActivity.unit, timeLabels)}</span>
                     <span className="focus-rep-sep">/</span>
                     <span className="focus-rep-target">{focusTarget}</span>
                     <span className="focus-rep-unit">{formatUnit(focusActivity.unit)}</span>
@@ -3489,7 +3492,7 @@ export default function Home() {
                           if (focusOcc) void incrementTaskCount(focusActivity, focusOcc, 1);
                         }}
                       >
-                        +1
+                        {formatStep(1, focusActivity.unit, timeLabels)}
                       </button>
                     )}
                   </div>
@@ -5045,10 +5048,12 @@ export default function Home() {
                       const target = activity.target || 0;
                       const rawCount = taskCounts[occ?.id || ""] ?? (isDone ? target : 0);
                       const current = target > 0 ? Math.min(Math.max(0, rawCount), target) : Math.max(0, rawCount);
-                      const remaining = Math.max(target - current, 0);
+                      const remaining = roundAmount(Math.max(target - current, 0));
+                      const steps = stepsFor(activity.unit, counterSteps);
 
                       // 10s inactivity collapse state
-                      const isSpaceCollapsed = Boolean(collapsedCounters[occ?.id || ""]);
+                      // Space is held only right after a tap, so buttons never shift under a finger; otherwise it is released.
+                      const isSpaceCollapsed = collapsedCounters[occ?.id || ""] !== false;
                       const offset = swipeState?.id === activity.id ? swipeState.offset : 0;
 
                       return (
@@ -5110,10 +5115,14 @@ export default function Home() {
                                 <div className="task-count-progress-wrap">
                                   <div className="task-count-info-row">
                                     <span className="task-count-text">
-                                      <strong>{current}</strong> / {target} {formatUnit(activity.unit)}
+                                      <strong>{formatCount(current, activity.unit, timeLabels)}</strong> / {target} {formatUnit(activity.unit)}
                                     </span>
                                     <span className="task-remaining-text">
-                                      {isDone ? t.done : `${remaining} ${t.stat_remaining_footer}`}
+                                      {isDone
+                                        ? t.done
+                                        : isMinuteUnit(activity.unit)
+                                        ? `${formatTimeLeft(remaining, timeLabels)} ${t.step_left}`
+                                        : `${remaining} ${t.stat_remaining_footer}`}
                                     </span>
                                   </div>
                                   <div className="task-mini-progress-track">
@@ -5125,14 +5134,14 @@ export default function Home() {
 
                                   {/* Increment buttons (+10, +5, +1) + Undo */}
                                   {occ && (
-                                    <div className="count-actions-row">
+                                    <div className={`count-actions-row ${isMinuteUnit(activity.unit) ? "is-time" : ""}`}>
                                       <div className="count-buttons-cluster">
-                                        {counterSteps
+                                        {steps
                                           .slice()
                                           .sort((a, b) => b - a)
                                           .map((step) => {
-                                            const smallestStep = Math.min(...counterSteps);
-                                            const anyStepFits = counterSteps.some((st) => st <= remaining);
+                                            const smallestStep = Math.min(...steps);
+                                            const anyStepFits = steps.some((st) => st <= remaining);
                                             const isVisible =
                                               !isDone && (step <= remaining || (!anyStepFits && step === smallestStep));
                                             return (
@@ -5147,9 +5156,9 @@ export default function Home() {
                                                     : "btn-hidden-hold-space"
                                                 }`}
                                                 onClick={() => void incrementTaskCount(activity, occ, step)}
-                                                title={`+${step}`}
+                                                title={formatStep(step, activity.unit, timeLabels)}
                                               >
-                                                +{step}
+                                                {formatStep(step, activity.unit, timeLabels)}
                                               </button>
                                             );
                                           })}
@@ -5157,14 +5166,14 @@ export default function Home() {
                                         {!isDone &&
                                           habits.usualChunk[activity.id] !== undefined &&
                                           habits.usualChunk[activity.id] <= remaining &&
-                                          !counterSteps.includes(habits.usualChunk[activity.id]) && (
+                                          !steps.includes(habits.usualChunk[activity.id]) && (
                                             <button
                                               type="button"
                                               className="btn-counter-inc primary btn-visible"
                                               onClick={() => void incrementTaskCount(activity, occ, habits.usualChunk[activity.id])}
-                                              title={`+${habits.usualChunk[activity.id]}`}
+                                              title={formatStep(habits.usualChunk[activity.id], activity.unit, timeLabels)}
                                             >
-                                              +{habits.usualChunk[activity.id]}
+                                              {formatStep(habits.usualChunk[activity.id], activity.unit, timeLabels)}
                                             </button>
                                           )}
                                       </div>
@@ -5175,7 +5184,7 @@ export default function Home() {
                                           type="button"
                                           className="btn-counter-undo"
                                           onClick={() => void undoTaskCount(activity, occ)}
-                                          title={`${t.undo} (-${taskHistory[occ.id].slice(-1)[0]})`}
+                                          title={`${t.undo} (${formatStep(taskHistory[occ.id].slice(-1)[0], activity.unit, timeLabels).replace("+", "-")})`}
                                           aria-label={t.undo}
                                         >
                                           <IconUndo className="icon-sm" />

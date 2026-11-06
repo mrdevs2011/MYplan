@@ -111,7 +111,8 @@ export function reconcileCount(
   for (const event of localEvents) {
     if (event.occurrenceId === occurrenceId && !seen.has(event.id)) total += event.amount;
   }
-  return Math.min(Math.max(0, total), cap);
+  // Minute plans hold fractions; the database keeps two decimals, so the sum must too.
+  return Math.min(Math.max(0, Math.round(total * 100) / 100), cap);
 }
 
 /** The next upload: a run of consecutive progress events travels as one request, anything else alone. */

@@ -37,6 +37,11 @@ test("counts stay inside 0..target and ignore other occurrences", () => {
   assert.equal(reconcileCount([{ id: "a", amount: 30 }], [], "occ", 10), 10);
 });
 
+test("fractions of a minute add up without float noise", () => {
+  const rows = [{ id: "a", amount: "0.10" }, { id: "b", amount: 0.2 }];
+  assert.equal(reconcileCount(rows, [{ id: "c", occurrenceId: "occ", amount: 0.5 }], "occ", Infinity), 0.8);
+});
+
 test("the newest local status wins over an old echo", () => {
   const acked = [{ at: 100, status: { occurrenceId: "occ", status: "completed" } }];
   assert.equal(localStatuses([status("occ", "pending")], acked, 200).get("occ"), "pending");

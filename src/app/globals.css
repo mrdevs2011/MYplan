@@ -8926,3 +8926,15 @@ button, a, label, [role="tab"], [role="radio"] { touch-action: manipulation; }
 .btn-counter-inc, .btn-counter-undo, .checkbox-btn { -webkit-user-select: none; user-select: none; }
 html, body { overscroll-behavior-y: none; }
 .modal-form-scrollable { overscroll-behavior: contain; }
+
+/* Minute plans have five steps: one compact row, with undo beside them, even on a narrow phone. */
+.count-actions-row.is-time { flex-wrap: nowrap; gap: 4px; }
+.count-actions-row.is-time .count-buttons-cluster { flex-wrap: nowrap; gap: 4px; min-width: 0; }
+.count-actions-row.is-time .btn-counter-inc:not(.btn-hidden-collapsed),
+.count-actions-row.is-time .btn-counter-undo { width: 40px !important; height: 40px !important; min-width: 40px !important; min-height: 40px !important; max-width: 40px !important; max-height: 40px !important; }
+.count-actions-row.is-time .btn-counter-inc { font-size: 12px; letter-spacing: 0; }
+
+/* A released step takes no room at all, so a finished card closes up instead of keeping an empty band. */
+.btn-counter-inc.btn-hidden-collapsed { height: 0 !important; min-height: 0 !important; max-height: 0 !important; box-shadow: none !important; }
+.count-buttons-cluster:not(:has(.btn-visible, .btn-hidden-hold-space)) { display: none; }
+.count-actions-row:not(:has(.btn-visible, .btn-hidden-hold-space, .btn-counter-undo)) { display: none; }

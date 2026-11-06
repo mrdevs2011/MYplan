@@ -80,7 +80,8 @@ export function buildHabitProfile(events: HabitEvent[], checkMinutes: Record<str
     for (const event of ordered) {
       if (!event.isStep) continue;
       if (event.at - lastAt > SITTING_GAP_MS) sittings.push({ total: 0, day: dayKey(event.at) });
-      sittings[sittings.length - 1].total += event.amount;
+      const sitting = sittings[sittings.length - 1];
+      sitting.total = Math.round((sitting.total + event.amount) * 100) / 100;
       lastAt = event.at;
     }
     const daysPerTotal = new Map<number, Set<string>>();
