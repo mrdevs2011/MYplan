@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock, IconBell } from "@/components/icons";
 import { playMelody, type MelodyHandle } from "@/lib/timer-melody";
 import { useSyncedState } from "@/lib/use-synced-state";
+import { formatTimeLeft } from "@/lib/counter-steps";
+import { defaultMinutesFor, minutesToLog, smartPresets, type TimeTask } from "@/lib/time-tasks";
 import type { Language, translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
@@ -15,6 +17,60 @@ interface TimeTabProps {
   /** Signed-in account: timer, stopwatch and melody choice follow it across devices. */
   userId: string | null;
   soundEnabled: boolean;
+  /** Today's plans the timer and stopwatch can be linked to (already in the best order). */
+  tasks: TimeTask[];
+  /** The plan the app would pick right now; offered as one tap, never forced. */
+  suggestedTaskId: string | null;
+  /** This browser. The device that started a session is the one that books its time. */
+  deviceId: string;
+  /** "Start a timer for this plan" from a task card. */
+  launch: { activityId: string; nonce: number } | null;
+  onLogMinutes: (activityId: string, minutes: number) => void;
+  onCompleteTask: (activityId: string) => void;
+}
+
+interface TaskLinkProps {
+  t: T;
+  tasks: TimeTask[];
+  suggestedTaskId: string | null;
+  value: string | null;
+  disabled: boolean;
+  onChange: (activityId: string | null) => void;
+}
+
+/** Which plan this session is for. Quiet by default: the suggestion is one chip, nothing is chosen for the person. */
+function TaskLink({ t, tasks, suggestedTaskId, value, disabled, onChange }: TaskLinkProps) {
+  const labels = { sec: t.step_sec, min: t.step_min };
+  const current = tasks.find((task) => task.id === value) ?? null;
+  const suggested = !value ? tasks.find((task) => task.id === suggestedTaskId && !task.done) ?? null : null;
+  const describe = (task: TimeTask) =>
+    task.minuteBased && task.remainingMin !== null && !task.done
+      ? `${task.title} · ${formatTimeLeft(task.remainingMin, labels)} ${t.step_left}`
+      : task.title;
+  return (
+    <div className="time-task-link">
+      <select
+        className="time-task-select"
+        value={value ?? ""}
+        disabled={disabled}
+        aria-label={t.clk_task_label}
+        onChange={(event) => onChange(event.target.value || null)}
+      >
+        <option value="">{t.clk_task_none}</option>
+        {tasks.map((task) => (
+          <option key={task.id} value={task.id}>
+            {describe(task)}
+          </option>
+        ))}
+        {value && !current ? <option value={value}>…</option> : null}
+      </select>
+      {suggested && !disabled ? (
+        <button type="button" className="time-task-suggest" onClick={() => onChange(suggested.id)}>
+          {t.clk_task_suggest}: {suggested.title}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 const LOCALES: Record<Language, string> = { uz: "uz-UZ", en: "en-US", ru: "ru-RU" };
@@ -118,9 +174,20 @@ interface TimerState {
   endAt: number | null; // epoch ms while running
   remaining: number; // ms while paused / idle
   done: boolean;
+  activityId: string | null; // the plan this session is for
+  owner: string | null; // the browser that started it: only that one books the time
+  logged: boolean; // the time has been put on the plan
 }
 
-const DEFAULT_TIMER: TimerState = { duration: 5 * 60000, endAt: null, remaining: 5 * 60000, done: false };
+const DEFAULT_TIMER: TimerState = {
+  duration: 5 * 60000,
+  endAt: null,
+  remaining: 5 * 60000,
+  done: false,
+  activityId: null,
+  owner: null,
+  logged: false,
+};
 
 function normalizeTimer(raw: unknown): TimerState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<TimerState>;
@@ -130,12 +197,19 @@ function normalizeTimer(raw: unknown): TimerState {
       : DEFAULT_TIMER.duration;
   const endAt = typeof r.endAt === "number" && Number.isFinite(r.endAt) ? r.endAt : null;
   const remaining = typeof r.remaining === "number" && r.remaining >= 0 ? Math.min(r.remaining, duration) : duration;
+  const link = {
+    activityId: typeof r.activityId === "string" ? r.activityId : null,
+    owner: typeof r.owner === "string" ? r.owner : null,
+    logged: Boolean(r.logged),
+  };
   // Finished while nobody was looking: show it as finished, without beeping.
-  if (endAt !== null && endAt <= Date.now()) return { duration, endAt: null, remaining: 0, done: true };
-  return { duration, endAt, remaining, done: Boolean(r.done) };
+  if (endAt !== null && endAt <= Date.now()) return { duration, endAt: null, remaining: 0, done: true, ...link };
+  return { duration, endAt, remaining, done: Boolean(r.done), ...link };
 }
 
-function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userId" | "soundEnabled">) {
+function TimerPanel({
+  t, userId, soundEnabled, tasks, suggestedTaskId, deviceId, launch, onLogMinutes, onCompleteTask,
+}: Pick<TimeTabProps, "t" | "userId" | "soundEnabled" | "tasks" | "suggestedTaskId" | "deviceId" | "launch" | "onLogMinutes" | "onCompleteTask">) {
   // This panel only mounts client-side (after login), so the device copy can be read right away.
   const { value: state, set: setState } = useSyncedState<TimerState>(userId, "timer", DEFAULT_TIMER, normalizeTimer, {
     lazyLocal: true,
@@ -197,6 +271,74 @@ function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userI
   const now = useNow(running, 100);
   const remaining = running ? Math.max(0, state.endAt! - Math.max(now, state.endAt! - state.duration)) : state.remaining;
 
+  const linked = tasks.find((task) => task.id === state.activityId) ?? null;
+  const [logNote, setLogNote] = useState("");
+  const noteTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(noteTimer.current), []);
+  const labels = { sec: t.step_sec, min: t.step_min };
+
+  /** Put `ms` of work on the linked minute plan (once), and say so quietly. */
+  const bookTime = (ms: number) => {
+    if (!state.activityId || !linked?.minuteBased) return;
+    const minutes = minutesToLog(ms, 0, linked.remainingMin);
+    if (minutes <= 0) return;
+    onLogMinutes(state.activityId, minutes);
+    setLogNote(`✓ ${linked.title}: +${formatTimeLeft(minutes, labels)}`);
+    window.clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setLogNote(""), 7000);
+  };
+
+  // A finished session books its time, once, on the browser that started it. This also catches up when the page
+  // was closed while the time ran out: the work is counted as soon as the person is back.
+  const booked = useRef(false);
+  useEffect(() => {
+    if (!state.done) booked.current = false;
+  }, [state.done]);
+  useEffect(() => {
+    if (!state.done || state.logged || !state.activityId || state.owner !== deviceId) return;
+    if (tasks.length === 0) return; // today's plans are still loading
+    if (booked.current) return; // never twice, even if this runs again before the state is saved
+    booked.current = true;
+    const task = tasks.find((item) => item.id === state.activityId);
+    if (task?.minuteBased) {
+      const minutes = minutesToLog(state.duration, 0, task.remainingMin);
+      if (minutes > 0) {
+        onLogMinutes(state.activityId, minutes);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setLogNote(`✓ ${task.title}: +${formatTimeLeft(minutes, { sec: t.step_sec, min: t.step_min })}`);
+        window.clearTimeout(noteTimer.current);
+        noteTimer.current = window.setTimeout(() => setLogNote(""), 7000);
+      }
+    }
+    setState((s) => ({ ...s, logged: true }));
+  }, [state.done, state.logged, state.activityId, state.owner, state.duration, deviceId, tasks, onLogMinutes, setState, t.step_sec, t.step_min]);
+
+  const pickTask = (activityId: string | null) => {
+    const task = tasks.find((item) => item.id === activityId) ?? null;
+    const minutes = defaultMinutesFor(task);
+    setState((s) => {
+      const fresh = s.endAt === null && !s.done && s.remaining === s.duration;
+      const duration = fresh && minutes ? minutes * 60000 : s.duration;
+      return { ...s, activityId, owner: null, logged: false, duration, remaining: fresh ? duration : s.remaining };
+    });
+  };
+
+  // "Start a timer for this plan" from a task card: the plan is chosen and the length is what is left (or what
+  // this person usually does). Starting stays one tap away, because browsers only allow sound after a tap.
+  const handledLaunch = useRef(0);
+  useEffect(() => {
+    if (!launch || launch.nonce === handledLaunch.current || running) return;
+    const task = tasks.find((item) => item.id === launch.activityId);
+    if (!task) return;
+    handledLaunch.current = launch.nonce;
+    const minutes = defaultMinutesFor(task);
+    const duration = (minutes ?? 5) * 60000;
+    const timer = window.setTimeout(() => {
+      setState({ duration, endAt: null, remaining: duration, done: false, activityId: task.id, owner: null, logged: false });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [launch, tasks, running, setState]);
+
   useEffect(() => {
     if (running && remaining <= 0) {
       setState((s) => ({ ...s, endAt: null, remaining: 0, done: true }));
@@ -223,7 +365,7 @@ function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userI
 
   const setDuration = (ms: number) => {
     const duration = Math.min(99 * 60000, Math.max(60000, ms));
-    setState({ duration, endAt: null, remaining: duration, done: false });
+    setState((s) => ({ ...s, duration, endAt: null, remaining: duration, done: false, owner: null, logged: false }));
   };
 
   const toggle = () => {
@@ -233,19 +375,22 @@ function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userI
       setState((s) => ({ ...s, endAt: null, remaining: Math.max(0, s.endAt! - Date.now()) }));
     } else {
       const left = state.done || state.remaining <= 0 ? state.duration : state.remaining;
-      setState((s) => ({ ...s, done: false, remaining: left, endAt: Date.now() + left }));
+      setState((s) => ({ ...s, done: false, logged: false, owner: deviceId, remaining: left, endAt: Date.now() + left }));
     }
   };
 
   const reset = () => {
     stopMelody();
-    setState((s) => ({ ...s, endAt: null, remaining: s.duration, done: false }));
+    // Stopping early still counts the work done so far.
+    if (!state.done && !state.logged && state.owner === deviceId) bookTime(state.duration - remaining);
+    setState((s) => ({ ...s, endAt: null, remaining: s.duration, done: false, owner: null, logged: false }));
   };
   const idle = !running && remaining === state.duration && !state.done;
   const pristine = !running && !state.done && remaining === state.duration;
 
   return (
     <>
+      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} onChange={pickTask} />
       <Ring progress={state.duration ? remaining / state.duration : 0} done={state.done}>
         <span className="time-digits">{state.done ? "00:00" : formatClock(remaining)}</span>
         <span className="time-note">{state.done ? t.clk_up : `${Math.round(state.duration / 60000)} ${t.clk_min}`}</span>
@@ -257,7 +402,7 @@ function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userI
             <button type="button" className="time-chip" onClick={() => setDuration(state.duration - 60000)} aria-label="−1">
               −
             </button>
-            {[1, 5, 10, 25].map((m) => (
+            {smartPresets(linked).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -273,6 +418,13 @@ function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userI
           </div>
         ) : null}
       </div>
+
+      {logNote ? <span className="time-note time-task-note">{logNote}</span> : null}
+      {state.done && linked && !linked.minuteBased && !linked.done ? (
+        <button type="button" className="time-btn time-task-mark" onClick={() => onCompleteTask(linked.id)}>
+          <span>{t.clk_task_mark}</span>
+        </button>
+      ) : null}
 
       {playing ? (
         <button type="button" className="time-btn music-stop-btn" onClick={stopMelody}>
@@ -312,9 +464,11 @@ interface StopwatchState {
   startedAt: number | null; // epoch ms while running
   base: number; // accumulated ms before the current run
   laps: number[]; // cumulative ms at each lap
+  activityId: string | null; // the plan this session is for
+  loggedMs: number; // how much of `base` is already on that plan
 }
 
-const DEFAULT_STOPWATCH: StopwatchState = { startedAt: null, base: 0, laps: [] };
+const DEFAULT_STOPWATCH: StopwatchState = { startedAt: null, base: 0, laps: [], activityId: null, loggedMs: 0 };
 
 function normalizeStopwatch(raw: unknown): StopwatchState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<StopwatchState>;
@@ -322,10 +476,14 @@ function normalizeStopwatch(raw: unknown): StopwatchState {
     startedAt: typeof r.startedAt === "number" && Number.isFinite(r.startedAt) ? r.startedAt : null,
     base: typeof r.base === "number" && r.base >= 0 ? r.base : 0,
     laps: Array.isArray(r.laps) ? r.laps.filter((lap): lap is number => typeof lap === "number" && lap >= 0) : [],
+    activityId: typeof r.activityId === "string" ? r.activityId : null,
+    loggedMs: typeof r.loggedMs === "number" && r.loggedMs >= 0 ? r.loggedMs : 0,
   };
 }
 
-function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
+function StopwatchPanel({
+  t, userId, tasks, suggestedTaskId, onLogMinutes,
+}: Pick<TimeTabProps, "t" | "userId" | "tasks" | "suggestedTaskId" | "onLogMinutes">) {
   const { value: state, set: setState } = useSyncedState<StopwatchState>(
     userId,
     "stopwatch",
@@ -339,12 +497,35 @@ function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
   const elapsed = state.base + (running ? Math.max(0, now - state.startedAt!) : 0);
   const { main, cs } = formatStopwatch(elapsed);
 
-  const toggle = () =>
-    setState((s) =>
-      s.startedAt !== null
-        ? { ...s, startedAt: null, base: s.base + (Date.now() - s.startedAt) }
-        : { ...s, startedAt: Date.now() },
-    );
+  const linked = tasks.find((task) => task.id === state.activityId) ?? null;
+  const [logNote, setLogNote] = useState("");
+  const noteTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(noteTimer.current), []);
+
+  /** Time since the last booking goes onto the linked minute plan; a pause or a reset is the moment to do it. */
+  const bookTime = (totalMs: number): number => {
+    if (!state.activityId || !linked?.minuteBased) return state.loggedMs;
+    const minutes = minutesToLog(totalMs, state.loggedMs, linked.remainingMin);
+    if (minutes <= 0) return state.loggedMs;
+    onLogMinutes(state.activityId, minutes);
+    setLogNote(`✓ ${linked.title}: +${formatTimeLeft(minutes, { sec: t.step_sec, min: t.step_min })}`);
+    window.clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setLogNote(""), 7000);
+    return totalMs;
+  };
+
+  const toggle = () => {
+    if (state.startedAt !== null) {
+      const total = state.base + (Date.now() - state.startedAt);
+      const loggedMs = bookTime(total);
+      setState((s) => ({ ...s, startedAt: null, base: total, loggedMs }));
+    } else {
+      setState((s) => ({ ...s, startedAt: Date.now() }));
+    }
+  };
+  const pickTask = (activityId: string | null) =>
+    // What was already measured belongs to the previous plan.
+    setState((s) => ({ ...s, activityId, loggedMs: s.base }));
   const lap = () =>
     setState((s) => {
       const total = s.base + (s.startedAt ? Date.now() - s.startedAt : 0);
@@ -353,7 +534,10 @@ function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
       if (total - prev < 250) return s;
       return { ...s, laps: [...s.laps, total].slice(-99) };
     });
-  const reset = () => setState({ startedAt: null, base: 0, laps: [] });
+  const reset = () => {
+    bookTime(state.base);
+    setState((s) => ({ startedAt: null, base: 0, laps: [], activityId: s.activityId, loggedMs: 0 }));
+  };
 
   // Full history (up to 99 laps), newest first so the lap you just took is always on top; the list scrolls.
   const lastLaps = state.laps
@@ -362,6 +546,7 @@ function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
 
   return (
     <>
+      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} onChange={pickTask} />
       <Ring progress={(elapsed % 60000) / 60000}>
         <span className="time-digits">{main}</span>
         <span className="time-note time-cs">.{cs}</span>
@@ -382,6 +567,8 @@ function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
           )}
         </ul>
       </div>
+
+      {logNote ? <span className="time-note time-task-note">{logNote}</span> : null}
 
       <div className="time-controls">
         <button type="button" className="time-btn primary" onClick={toggle}>
@@ -458,7 +645,7 @@ function ClockPanel({ language }: Pick<TimeTabProps, "language">) {
 
 /* ------------------------------------------------------------------ Tab */
 
-export default function TimeTab({ t, language, userId, soundEnabled }: TimeTabProps) {
+export default function TimeTab({ t, language, userId, soundEnabled, tasks, suggestedTaskId, deviceId, launch, onLogMinutes, onCompleteTask }: TimeTabProps) {
   const [sub, setSub] = useState<SubTab>("timer");
   const tabs: Array<{ id: SubTab; label: string }> = [
     { id: "timer", label: t.clk_timer },
@@ -466,6 +653,13 @@ export default function TimeTab({ t, language, userId, soundEnabled }: TimeTabPr
     { id: "clock", label: t.clk_clock },
   ];
   const select = useCallback((id: SubTab) => setSub(id), []);
+  // A task card opened the timer: show it (on phones only one tool is visible at a time).
+  const launchNonce = launch?.nonce;
+  useEffect(() => {
+    if (!launchNonce) return;
+    const timer = window.setTimeout(() => setSub("timer"), 0);
+    return () => window.clearTimeout(timer);
+  }, [launchNonce]);
 
   return (
     <div className="time-view">
@@ -488,11 +682,21 @@ export default function TimeTab({ t, language, userId, soundEnabled }: TimeTabPr
       <div className="time-grid">
         <section className="time-card" data-active={sub === "timer"}>
           <h2 className="time-card-title">{t.clk_timer}</h2>
-          <TimerPanel t={t} userId={userId} soundEnabled={soundEnabled} />
+          <TimerPanel
+            t={t}
+            userId={userId}
+            soundEnabled={soundEnabled}
+            tasks={tasks}
+            suggestedTaskId={suggestedTaskId}
+            deviceId={deviceId}
+            launch={launch}
+            onLogMinutes={onLogMinutes}
+            onCompleteTask={onCompleteTask}
+          />
         </section>
         <section className="time-card" data-active={sub === "stopwatch"}>
           <h2 className="time-card-title">{t.clk_stopwatch}</h2>
-          <StopwatchPanel t={t} userId={userId} />
+          <StopwatchPanel t={t} userId={userId} tasks={tasks} suggestedTaskId={suggestedTaskId} onLogMinutes={onLogMinutes} />
         </section>
         <section className="time-card" data-active={sub === "clock"}>
           <h2 className="time-card-title">{t.clk_clock}</h2>

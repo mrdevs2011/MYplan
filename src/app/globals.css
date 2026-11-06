@@ -9484,7 +9484,8 @@ html, body { overscroll-behavior-y: none; }
     gap: 6px;
   }
 }
-@media (max-width: 340px) {
+@media (max-width: 420px) {
+  /* five header buttons: the logo alone is enough */
   .mobile-brand-btn .brand-title {
     display: none;
   }
@@ -9529,4 +9530,64 @@ html, body { overscroll-behavior-y: none; }
   .time-digital {
     font-size: 48px;
   }
+}
+
+/* Profile page: a single, full-width sign-out button (Settings now lives in the header and the side menu). */
+.profile-actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Timer and stopwatch linked to today's plans */
+.time-task-link {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.time-task-select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+.time-task-select:disabled {
+  opacity: 0.7;
+}
+.time-task-suggest {
+  align-self: center;
+  max-width: 100%;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  border: 1px dashed var(--border-active);
+  color: var(--accent-lime);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-task-note {
+  color: var(--accent-lime);
+  font-weight: 700;
+  text-align: center;
+}
+.time-task-mark {
+  flex: none;
+  width: 100%;
+}
+.btn-counter-timer {
+  color: var(--accent-lime);
+}
+
+/* Room for the plan picker above the ring on every screen height. */
+.time-card {
+  --ring: clamp(110px, 30dvh, 250px);
 }

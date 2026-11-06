@@ -12,6 +12,7 @@ import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { changedFields } from "@/lib/patch";
 import { addDays, average, buildDays, buildStatusMap, type StatActivity, type StatOccurrence } from "@/lib/stats";
 import { formatLongDate } from "@/lib/date-format";
+import { orderTasksForTimer, type TimeTask } from "@/lib/time-tasks";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
@@ -2682,7 +2683,7 @@ export default function Home() {
   }
 
   // Counter Increment (+1, +5, +10...) with 10-Second Inactivity Collapse Logic
-  async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number) {
+  async function incrementTaskCount(activity: Activity, occurrence: Occurrence, amount: number, options: { silent?: boolean } = {}) {
     if (!userId) return;
     const target = activity.target || 0;
     const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
@@ -2715,17 +2716,17 @@ export default function Home() {
 
     // Auto complete when target is reached
     const reachedTarget = next >= target && occurrence.status !== "completed";
-    triggerHaptic(reachedTarget ? "success" : "light");
+    if (!options.silent) triggerHaptic(reachedTarget ? "success" : "light");
 
     if (reachedTarget) {
       setOccurrences((curr) =>
         curr.map((item) => (item.id === occurrence.id ? { ...item, status: "completed" } : item))
       );
-      if (soundEnabled) {
+      if (soundEnabled && !options.silent) {
         playCompletionSound();
       }
     } else {
-      if (soundEnabled) {
+      if (soundEnabled && !options.silent) {
         playIncrementSound(actualAdd);
       }
     }
@@ -3612,6 +3613,55 @@ export default function Home() {
       getRecommendedFocusActivity(activeActivities, occurrences, customTimeSlots, focusClockMinute)
     );
   }, [activeActivities, occurrences, customTimeSlots, focusClockMinute, habits]);
+
+  // ---- Timer and stopwatch know about today's plans ----
+  // Minute plans get the time spent logged on them by the timer itself; every open plan can be linked.
+  const timeTasks = useMemo<TimeTask[]>(() => {
+    const list: TimeTask[] = [];
+    for (const activity of activeActivities) {
+      const occ = occurrences.find((item) => item.activity_id === activity.id);
+      if (!occ) continue;
+      const target = activity.target || 0;
+      const minuteBased = activity.measurement_type === "count" && isMinuteUnit(activity.unit) && target > 0;
+      const done = occ.status === "completed";
+      const count = taskCounts[occ.id] ?? (done ? target : 0);
+      list.push({
+        id: activity.id,
+        title: activity.title,
+        minuteBased,
+        remainingMin: minuteBased ? roundAmount(Math.max(target - count, 0)) : null,
+        usualMin: minuteBased ? habits.usualChunk[activity.id] ?? null : null,
+        done,
+      });
+    }
+    return orderTasksForTimer(list, recommendedFocusActivity?.id ?? null);
+  }, [activeActivities, occurrences, taskCounts, habits, recommendedFocusActivity]);
+
+  const [timeLaunch, setTimeLaunch] = useState<{ activityId: string; nonce: number } | null>(null);
+  // The request is used once: leaving the tab forgets it, so coming back never resets a running timer.
+  useEffect(() => {
+    if (activeTab === "time") return;
+    const timer = setTimeout(() => setTimeLaunch(null), 0);
+    return () => clearTimeout(timer);
+  }, [activeTab]);
+  const launchTimerFor = (activityId: string) => {
+    setTimeLaunch({ activityId, nonce: Date.now() });
+    setActiveTab("time");
+  };
+
+  /** Time spent by the timer or stopwatch lands on the plan like a +N tap, silently. */
+  const logTaskMinutes = (activityId: string, minutes: number) => {
+    const activity = activitiesRef.current.find((item) => item.id === activityId);
+    const occ = occurrences.find((item) => item.activity_id === activityId);
+    if (!activity || !occ || minutes <= 0) return;
+    if (!(activity.measurement_type === "count" && isMinuteUnit(activity.unit))) return;
+    void incrementTaskCount(activity, occ, minutes, { silent: true });
+  };
+  const completeTaskFromTimer = (activityId: string) => {
+    const activity = activitiesRef.current.find((item) => item.id === activityId);
+    const occ = occurrences.find((item) => item.activity_id === activityId);
+    if (activity && occ && occ.status !== "completed") void toggleComplete(activity);
+  };
 
   // Weekly momentum is the Statistics page's 7-day average, computed by the same functions from the same rows.
   const momentumScore = useMemo(() => {
@@ -4946,7 +4996,7 @@ export default function Home() {
 
             <button
               type="button"
-              className={`nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
+              className={`nav-item ${activeTab === "profile" ? "active" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setActiveTab("profile");
@@ -4955,9 +5005,22 @@ export default function Home() {
             >
               <IconUser className="nav-icon" />
               <span className="nav-label">{t.tab_profile}</span>
-              {(activeTab === "profile" || activeTab === "settings") && <span className="active-indicator" />}
+              {activeTab === "profile" && <span className="active-indicator" />}
             </button>
 
+            <button
+              type="button"
+              className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab("settings");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <IconSettings className="nav-icon" />
+              <span className="nav-label">{t.tab_settings}</span>
+              {activeTab === "settings" && <span className="active-indicator" />}
+            </button>
           </nav>
         </div>
 
@@ -5073,6 +5136,15 @@ export default function Home() {
             >
               <IconBell className="icon-sm" />
               {unreadNotifsCount > 0 && <span className="mobile-icon-badge">{unreadNotifsCount > 9 ? "9+" : unreadNotifsCount}</span>}
+            </button>
+            <button
+              type="button"
+              className={`mobile-icon-btn ${activeTab === "settings" ? "active" : ""}`}
+              onClick={() => setActiveTab("settings")}
+              aria-label={t.tab_settings}
+              title={t.tab_settings}
+            >
+              <IconSettings className="icon-sm" />
             </button>
           </div>
         </header>
@@ -5528,6 +5600,18 @@ export default function Home() {
                                               {formatStep(habits.usualChunk[activity.id], activity.unit, timeLabels)}
                                             </button>
                                           )}
+                                        {/* Minute plans: start the timer for exactly what is left */}
+                                        {!isDone && isMinuteUnit(activity.unit) && (
+                                          <button
+                                            type="button"
+                                            className="btn-counter-inc btn-visible btn-counter-timer"
+                                            onClick={() => launchTimerFor(activity.id)}
+                                            title={t.clk_task_timer}
+                                            aria-label={t.clk_task_timer}
+                                          >
+                                            <IconTimer className="icon-sm" />
+                                          </button>
+                                        )}
                                       </div>
 
                                       {/* Undo Button - ALWAYS ON THE RIGHT SIDE */}
@@ -5819,7 +5903,18 @@ export default function Home() {
           {/* TAB 4: PROFIL (READ-ONLY) */}
           {activeTab === "time" && (
             <div key="tab-time" className="tab-pane-container time-pane">
-              <TimeTab t={t} language={language} userId={userId} soundEnabled={soundEnabled} />
+              <TimeTab
+                t={t}
+                language={language}
+                userId={userId}
+                soundEnabled={soundEnabled}
+                tasks={timeTasks}
+                suggestedTaskId={recommendedFocusActivity?.id ?? null}
+                deviceId={getOrCreateSessionToken()}
+                launch={timeLaunch}
+                onLogMinutes={logTaskMinutes}
+                onCompleteTask={completeTaskFromTimer}
+              />
             </div>
           )}
 
@@ -6101,10 +6196,6 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="profile-actions">
-                  <button type="button" className="profile-action-btn" onClick={() => setActiveTab("settings")}>
-                    <IconSettings className="icon-sm" />
-                    <span>{t.tab_settings}</span>
-                  </button>
                   <button type="button" className="profile-action-btn danger" onClick={() => void handleSignOut()}>
                     <IconLogOut className="icon-sm" />
                     <span>{t.logout}</span>
@@ -6516,7 +6607,7 @@ export default function Home() {
 
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
+            className={`bottom-nav-item ${activeTab === "profile" ? "active" : ""}`}
             onClick={() => setActiveTab("profile")}
           >
             <span className="bottom-nav-avatar">
