@@ -138,7 +138,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       } else if (parsed > 122) {
         setDebouncedAgeError("Kiritilgan yosh qiymati haqiqatga mos kelmaydi. Iltimos, amaldagi yoshingizni kiriting.");
       } else if (parsed < 6 && age !== "") {
-        setDebouncedAgeError("MyPlan tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
+        setDebouncedAgeError("MyLife tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
       } else {
         setDebouncedAgeError("");
       }
@@ -174,7 +174,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
   const handleInstallApp = async () => {
     if (!deferredPrompt) {
-      alert("Bu brauzer MyPlan’ni bevosita o‘rnatish oynasini qo‘llab-quvvatlamaydi. Chrome yoki Edge’ning so‘nggi versiyasida ochib, manzil panelidagi o‘rnatish belgisidan foydalan.");
+      alert("Bu brauzer MyLife’ni bevosita o‘rnatish oynasini qo‘llab-quvvatlamaydi. Chrome yoki Edge’ning so‘nggi versiyasida ochib, manzil panelidagi o‘rnatish belgisidan foydalan.");
       return;
     }
     try {
@@ -183,7 +183,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       // Wait for the browser's appinstalled event before showing installed state.
       setDeferredPrompt(null);
     } catch (error) {
-      console.error("MyPlan PWA installation failed:", error);
+      console.error("MyLife PWA installation failed:", error);
     }
   };
 
@@ -204,7 +204,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         return;
       }
       if (isNaN(parsedAge) || parsedAge < 6) {
-        setMessage("MyPlan tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
+        setMessage("MyLife tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
         return;
       }
       if (parsedAge > 122) {
@@ -366,17 +366,17 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       {/* Top Navigation Bar: Minimal & Corporate */}
       <header className="landing-navbar">
         <div className="navbar-container">
-          <Link href="/" className="brand-link" aria-label="MyPlan bosh sahifasi">
+          <Link href="/" className="brand-link" aria-label="MyLife bosh sahifasi">
             <Image
               className="brand-logo"
               src="/myplan-logo-192.png" unoptimized
-              alt="MyPlan"
+              alt="MyLife"
               width={38}
               height={38}
               priority
             />
             <span className="brand-title">
-              <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+              <span className="brand-my">My</span><span className="brand-plan">Life</span>
             </span>
           </Link>
 
@@ -406,7 +406,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           <div className="auth-hero-centered-container">
             <div className="auth-glass-card auth-card-elevated">
               <div className="auth-card-top-bar">
-                <span className="auth-badge">MYPLAN SHAXSIY HISOB</span>
+                <span className="auth-badge">MYLIFE SHAXSIY HISOB</span>
                 <span className="auth-security">
                   <IconShield className="icon-xs" /> XAVFSIZ VA MAXFIY
                 </span>
@@ -623,7 +623,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
               <div className="auth-terms-notice">
                 <span>
-                  Davom etish orqali siz MyPlan xizmatidan foydalanish qoidalariga rozilik bildirasiz.
+                  Davom etish orqali siz MyLife xizmatidan foydalanish qoidalariga rozilik bildirasiz.
                 </span>
               </div>
             </div>
@@ -635,7 +635,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           <div className="onboarding-container">
             <div className="onboarding-header-center">
               <span className="onboarding-badge">
-                <IconSparkles className="icon-xs" /> MYPLAN METODOLOGIYASI
+                <IconSparkles className="icon-xs" /> MYLIFE METODOLOGIYASI
               </span>
               <h2 className="onboarding-title">Plan your day. Own your time.</h2>
               <p className="onboarding-subtitle">
@@ -709,12 +709,12 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       <footer className="landing-footer">
         <div className="footer-container">
           <Link href="/" className="footer-brand">
-            <Image src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={32} height={32} priority />
-            <span>MyPlan</span>
+            <Image src="/myplan-logo-192.png" unoptimized alt="MyLife" width={32} height={32} priority />
+            <span>MyLife</span>
           </Link>
           <span className="footer-center-tag">PLAN YOUR DAY. OWN YOUR TIME.</span>
           <span className="footer-copyright">
-            © 2026 MyPlan Inc. Barcha huquqlar himoyalangan.
+            © 2026 MyLife Inc. Barcha huquqlar himoyalangan.
           </span>
         </div>
       </footer>

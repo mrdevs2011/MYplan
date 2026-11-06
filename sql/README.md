@@ -1,4 +1,4 @@
-# MYPLAN database deployment
+# MYLIFE database deployment
 
 The SQL files in this directory are the canonical schema scripts. Matching Supabase CLI migrations are mirrored in `supabase/migrations/` and the project is linked in `supabase/config.toml`.
 
@@ -39,7 +39,7 @@ The scripts use `IF NOT EXISTS`/replace patterns where practical, but they are n
 - Test signup, login, session refresh, logout, password update, and device revocation against a non-production project first.
 - Configure Auth rate limits, CAPTCHA/abuse protection, backup/PITR policy, database alerts, and Realtime only for tables that need it.
 - Do not delete Auth users or application rows until the target project and the intended data scope have been independently verified.
-- A browser clean-slate epoch only signs out/clears browser-local MYplan state on the next visit; it does not delete Auth users, database rows, or Storage objects.
+- A browser clean-slate epoch only signs out/clears browser-local MyLife state on the next visit; it does not delete Auth users, database rows, or Storage objects.
 
 ## Important current limitations
 

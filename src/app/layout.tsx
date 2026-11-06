@@ -9,7 +9,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "MyPlan — Plan your day. Own your time.",
+  title: "MyLife — Plan your day. Own your time.",
   description:
     "Shaxsiy rejalashtirish, unumdorlik va odatlarni barqaror rivojlantirish platformasi.",
   manifest: "/manifest.json",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "MyPlan",
+    title: "MyLife",
   },
 };
 

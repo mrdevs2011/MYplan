@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   MYPLAN DESIGN SYSTEM TOKENS
+   MYLIFE DESIGN SYSTEM TOKENS
    ========================================================================== */
 :root {
   color-scheme: dark;
@@ -8330,7 +8330,7 @@ select optgroup {
 .custom-duration-unit-select, .schedule-select { min-width: 0; }
 
 /* ==========================================================================
-   SOFT INTERACTION FINISH — MYPLAN AUTH + APP CONTROLS
+   SOFT INTERACTION FINISH — MYLIFE AUTH + APP CONTROLS
    ========================================================================== */
 :root {
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -8397,7 +8397,7 @@ textarea,
 }
 
 /* ==========================================================================
-   MYPLAN — REFINED DROPDOWN SYSTEM
+   MYLIFE — REFINED DROPDOWN SYSTEM
    Visual-only layer: keeps LifeSelect state, events and data flow unchanged.
    ========================================================================== */
 .life-select { isolation: isolate; }

@@ -1,4 +1,4 @@
-// MYplan service worker: offline shell + standards-based Web Push.
+// MyLife service worker: offline shell + standards-based Web Push.
 const CACHE_NAME = "myplan-v13-offline-first";
 const PRECACHE = ["/", "/login", "/manifest.json", "/pwa-192.png", "/pwa-512.png", "/apple-touch-icon.png", "/myplan-logo-192.png"];
 
@@ -21,7 +21,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch { payload = { body: event.data?.text() || "" }; }
-    const title = typeof payload.title === "string" && payload.title.trim() ? payload.title : "MYplan";
+    const title = typeof payload.title === "string" && payload.title.trim() ? payload.title : "MyLife";
     const openClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const visibleClient = openClients.find((client) => client.visibilityState === "visible");
     if (visibleClient) {

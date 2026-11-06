@@ -446,7 +446,7 @@ function toNotification(row: NotificationRow | null | undefined): MyPlanNotifica
   const language = ((typeof localStorage !== "undefined" && localStorage.getItem("myplan_lang")) || "uz") as Language;
   return {
     id: row.id,
-    sender: "MYplan shaxsiy yordamchisi",
+    sender: "MyLife shaxsiy yordamchisi",
     category: (!row.category || row.category === "system" ? "daily" : row.category) as MyPlanNotification["category"],
     categoryLabel: (row.category || "system").toUpperCase(),
     title,
@@ -464,6 +464,7 @@ export default function Home() {
   const [userId, setUserId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const tasbeh = useTasbeh(userId);
+  const [tasbehFloatOpen, setTasbehFloatOpen] = useState(false);
   const [accountName, setAccountName] = useState("");
   const [accountUsername, setAccountUsername] = useState("");
   const [userAge, setUserAge] = useState<string | number>("");
@@ -1495,7 +1496,7 @@ export default function Home() {
         status: "LATEST_VERSION_ACTIVE",
       };
       console.log(
-        "%c MYPLAN ACTIVE %c v2.7.0 (LATEST) %c Full Light/Dark & Zero Mix Languages ",
+        "%c MYLIFE ACTIVE %c v2.7.0 (LATEST) %c Full Light/Dark & Zero Mix Languages ",
         "background: #b4f04c; color: #000; font-weight: 800; padding: 4px 8px; border-radius: 4px 0 0 4px;",
         "background: #1e293b; color: #38bdf8; font-weight: 700; padding: 4px 8px;",
         "background: #0f172a; color: #a3e635; font-weight: 600; padding: 4px 8px; border-radius: 0 4px 4px 0;"
@@ -1791,7 +1792,7 @@ export default function Home() {
             hasSubscribedBefore = true;
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
             if (hasSubscribedBefore) needsResyncAfterReconnect = true;
-            console.warn(`MYplan Realtime ${status}; waiting for automatic reconnect.`);
+            console.warn(`MyLife Realtime ${status}; waiting for automatic reconnect.`);
           }
         });
     };
@@ -1811,7 +1812,7 @@ export default function Home() {
           try {
             await supabase.auth.signOut({ scope: "local" });
           } catch {}
-          // Remove every MYplan-owned browser value plus Supabase auth tokens.
+          // Remove every MyLife-owned browser value plus Supabase auth tokens.
           // Keep only the epoch marker written below so this purge runs once per release.
           for (let i = localStorage.length - 1; i >= 0; i--) {
             const key = localStorage.key(i);
@@ -2441,11 +2442,15 @@ export default function Home() {
   }, [showCustomTimeModal, showPresetModal, showInstallGuideModal, showEveningReview, focusModalOpen, closeCreateModal]);
 
   // The Sanash tab exists only in the phone/tablet layout. On a wide window the counter is the floating button,
-  // so widening the window while the tab is open (or restoring it from a saved session) goes back to Today.
+  // so widening the window while the tab is open (or restoring it from a saved session) goes back to Today
+  // and the counter carries on as the open floating panel.
   useEffect(() => {
     const wide = window.matchMedia("(min-width: 769px)");
     const leaveCounterTab = () => {
-      if (wide.matches) setActiveTab((tab) => (tab === "counter" ? "today" : tab));
+      if (wide.matches && activeTab === "counter") {
+        setActiveTab("today");
+        setTasbehFloatOpen(true);
+      }
     };
     const timer = setTimeout(leaveCounterTab, 0);
     wide.addEventListener("change", leaveCounterTab);
@@ -2944,7 +2949,7 @@ export default function Home() {
     if (sessionData.session?.user.id) void registerPushForSavedAccounts(sessionData.session.user.id, subscription.toJSON(), navigator.userAgent);
     if (!silent) {
       // Prove the whole chain works on this device: show a real OS notification right away.
-      void registration.showNotification("MYplan", {
+      void registration.showNotification("MyLife", {
         body: t.nag_enabled_body,
         icon: "/pwa-192.png",
         badge: "/pwa-192.png",
@@ -3643,12 +3648,12 @@ export default function Home() {
   // Splash Screen: 100% Guaranteed Preload & Display before fade-out
   if (!authReady || !splashReady) {
     return (
-      <main className={`loading-screen ${splashFading ? "is-fading-out" : ""}`} aria-busy="true" aria-label="MyPlan">
+      <main className={`loading-screen ${splashFading ? "is-fading-out" : ""}`} aria-busy="true" aria-label="MyLife">
         <div className="loading-card">
           <Image
             className="loading-logo"
             src="/myplan-logo-192.png" unoptimized
-            alt="MyPlan"
+            alt="MyLife"
             width={96}
             height={96}
             priority
@@ -4493,7 +4498,7 @@ export default function Home() {
       {/* PWA Install Guide Modal */}
       {switchingAccount && (
         <div className="switching-overlay" role="status" aria-live="polite">
-          <Image className="loading-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={72} height={72} priority />
+          <Image className="loading-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={72} height={72} priority />
           <span className="switching-spinner" aria-hidden="true" />
           <p>{overlayText || t.switching_account}</p>
         </div>
@@ -4730,9 +4735,9 @@ export default function Home() {
                 }}
                 aria-label="Bosh sahifa"
               >
-                <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={34} height={34} priority />
+                <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={34} height={34} priority />
                 <span className="brand-title">
-                  <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+                  <span className="brand-my">My</span><span className="brand-plan">Life</span>
                 </span>
               </button>
               <button
@@ -4759,7 +4764,7 @@ export default function Home() {
               aria-label="Sidebarni ochish"
               title="Sidebarni ochish"
             >
-              <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={36} height={36} priority />
+              <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={36} height={36} priority />
               <span className="collapsed-open-hint" aria-hidden="true">
                 <IconChevronRight className="icon-sm" />
               </span>
@@ -4939,7 +4944,7 @@ export default function Home() {
         </div>
       </aside>
 
-      {userId && <TasbehFloat t={t} tasbeh={tasbeh} />}
+      {userId && <TasbehFloat t={t} tasbeh={tasbeh} open={tasbehFloatOpen} onOpenChange={setTasbehFloatOpen} />}
 
       {/* Main Workspace Wrapper */}
       <div className="main-wrapper">
@@ -4951,9 +4956,9 @@ export default function Home() {
             onClick={() => setActiveTab("today")}
             aria-label="Bosh sahifa"
           >
-            <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyPlan" width={32} height={32} priority />
+            <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={32} height={32} priority />
             <span className="brand-title">
-              <span className="brand-my">My</span><span className="brand-plan">Plan</span>
+              <span className="brand-my">My</span><span className="brand-plan">Life</span>
             </span>
           </button>
 
@@ -6396,12 +6401,12 @@ export default function Home() {
           {/* Workspace Footer */}
           <footer className={`app-footer ${activeTab === "time" || activeTab === "counter" ? "is-hidden-time" : ""}`}>
             <div className="footer-left">
-              <span className="footer-brand">MyPlan</span>
+              <span className="footer-brand">MyLife</span>
               <span className="footer-separator">•</span>
               <span className="footer-tagline">{t.footer_tagline}</span>
             </div>
             <div className="footer-right">
-              <span>© 2026 MyPlan Inc.</span>
+              <span>© 2026 MyLife Inc.</span>
             </div>
           </footer>
         </main>

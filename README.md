@@ -1,4 +1,4 @@
-# MYPLAN
+# MYLIFE
 
 A personal activity planner built around flexible schedules, measurable progress, and meaningful streaks.
 

@@ -86,8 +86,7 @@ interface Offset {
 
 /** Desktop only (hidden by CSS on phones): a round button that opens the counter over any page.
  *  Both the button and the panel's title bar can be dragged; the spot is kept until the page reloads. */
-export function TasbehFloat({ t, tasbeh }: TasbehProps) {
-  const [open, setOpen] = useState(false);
+export function TasbehFloat({ t, tasbeh, open, onOpenChange }: TasbehProps & { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -98,11 +97,11 @@ export function TasbehFloat({ t, tasbeh }: TasbehProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") onOpenChange(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, onOpenChange]);
 
   // A smaller window must not strand the button off-screen.
   useEffect(() => {
@@ -161,7 +160,7 @@ export function TasbehFloat({ t, tasbeh }: TasbehProps) {
         <section ref={panelRef} className="tasbeh-float-panel" role="dialog" aria-label={t.cnt_title}>
           <header className="tasbeh-float-head" onPointerDown={(e) => startDrag(e, panelRef.current)}>
             <span className="tasbeh-float-title">{t.cnt_title}</span>
-            <button type="button" data-no-drag className="tasbeh-float-close" onClick={() => setOpen(false)} aria-label="×">
+            <button type="button" data-no-drag className="tasbeh-float-close" onClick={() => onOpenChange(false)} aria-label="×">
               <IconClose className="icon-sm" />
             </button>
           </header>
@@ -178,7 +177,7 @@ export function TasbehFloat({ t, tasbeh }: TasbehProps) {
               moved.current = false;
               return;
             }
-            setOpen(true);
+            onOpenChange(true);
           }}
           aria-label={t.cnt_title}
           title={t.cnt_title}
