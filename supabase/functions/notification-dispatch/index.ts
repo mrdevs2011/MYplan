@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
       if (finished.has(task.id)) continue;
       const hasChosenTime = Boolean(task.reminder_time);
       const base = at.get(task.id)!;
-      if (stage.id === "pre" && followsAnotherPlan(base, today.filter((other) => !finished.has(other.id)).map((other) => at.get(other.id)!))) continue;
+      if (stage.id === "pre" && followsAnotherPlan(base, today.map((other) => at.get(other.id)!))) continue;
       // A time learned from the person's own mornings is not an intrusion, even inside default quiet hours.
       const quietForTask = isQuiet && !(stage.id === "due" && habit.usual.has(task.id));
       if (!shouldRemind({ stage: stage.id, hasChosenTime, isQuiet: quietForTask, isActiveNow, nudgesToday })) continue;

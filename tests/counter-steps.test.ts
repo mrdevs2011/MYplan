@@ -13,7 +13,7 @@ test("only minute plans get time steps; other units keep Settings", () => {
 });
 
 test("steps read as time", () => {
-  assert.deepEqual(MINUTE_STEPS.map((step) => formatStep(step, "daqiqa", labels)), ["+10d", "+5d", "+1d", "+30s", "+12s"]);
+  assert.deepEqual(MINUTE_STEPS.map((step) => formatStep(step, "daqiqa", labels)), ["+10d", "+1d", "+30s"]);
   assert.equal(formatStep(1.5, "daqiqa", labels), "+1d 30s");
   assert.equal(formatStep(5, "marta", labels), "+5");
 });

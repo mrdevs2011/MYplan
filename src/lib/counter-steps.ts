@@ -3,7 +3,7 @@
  * hold fractions of a minute. Every other unit keeps the whole-number steps from Settings.
  */
 
-export const MINUTE_STEPS = [10, 5, 1, 0.5, 0.2];
+export const MINUTE_STEPS = [10, 1, 0.5];
 
 const MINUTE_UNITS = new Set(["daqiqa", "minut", "min", "minute", "minutes", "минут", "мин", "минута", "минуты"]);
 
