@@ -9,3 +9,4 @@ demo/frames/
 .vercel
 supabase/.temp/
 *.tsbuildinfo
+public/version.json

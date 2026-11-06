@@ -1,5 +1,5 @@
 /**
- * Minute plans count in time, not in repetitions: their steps are fixed and read as +30s or +1d, and progress can
+ * Minute plans count in time, not in repetitions: their steps are fixed and read as +30s or +1m, and progress can
  * hold fractions of a minute. Every other unit keeps the whole-number steps from Settings.
  */
 
@@ -25,7 +25,7 @@ export function roundAmount(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/** 12.5 reads as "12d 30s", 0.5 as "30s", 12 as "12d". */
+/** 12.5 reads as "12m 30s", 0.5 as "30s", 12 as "12m". */
 function formatTime(minutes: number, labels: TimeLabels): string {
   const totalSeconds = Math.round(minutes * 60);
   const wholeMinutes = Math.floor(totalSeconds / 60);
@@ -38,7 +38,7 @@ export function formatStep(step: number, unit: string | null | undefined, labels
   return `+${isMinuteUnit(unit) ? formatTime(step, labels) : step}`;
 }
 
-/** Time still to go, always with its unit: "2d 30s". */
+/** Time still to go, always with its unit: "2m 30s". */
 export function formatTimeLeft(minutes: number, labels: TimeLabels): string {
   return formatTime(minutes, labels);
 }

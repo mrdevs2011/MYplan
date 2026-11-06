@@ -10,6 +10,7 @@ import { useTasbeh } from "@/lib/use-tasbeh";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { changedFields } from "@/lib/patch";
+import { addDays, average, buildDays, buildStatusMap, type StatActivity, type StatOccurrence } from "@/lib/stats";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -236,6 +237,7 @@ interface WorkspaceSnapshot {
   notifications: MyPlanNotification[];
   streak: number;
   best: number;
+  recent?: StatOccurrence[];
 }
 
 const accountStorageKey = (userId: string, key: string) => `myplan_account_${userId}_${key}`;
@@ -421,7 +423,7 @@ function getNotificationTimeLabel(timestamp: number, language: Language) {
   const days = Math.floor(hours / 24);
   const [value, unit] = diffMinutes < 1 ? [0, "now"] : diffMinutes < 60 ? [diffMinutes, "min"] : hours < 24 ? [hours, "h"] : [days, "d"];
   const labels = {
-    uz: { now: "hozir", min: "daqiqa oldin", h: "soat oldin", d: "kun oldin" },
+    uz: { now: "hozir", min: "minut oldin", h: "soat oldin", d: "kun oldin" },
     ru: { now: "только что", min: "мин. назад", h: "ч. назад", d: "дн. назад" },
     en: { now: "just now", min: "min ago", h: "h ago", d: "d ago" },
   }[language];
@@ -649,6 +651,10 @@ export default function Home() {
   const [newStepError, setNewStepError] = useState("");
 
   // Pocket Companion: Streak & Momentum Engine
+  // The six days before today (statuses only): the weekly average on the Today page is computed from them.
+  // Today as "YYYY-MM-DD"; set after mount (the clock must not be read while the page is pre-rendered).
+  const [todayKey, setTodayKey] = useState("");
+  const [recentOccurrences, setRecentOccurrences] = useState<StatOccurrence[]>([]);
   const [streakCount, setStreakCount] = useState<number>(0);
   const [bestStreak, setBestStreak] = useState<number>(0);
 
@@ -1042,9 +1048,9 @@ export default function Home() {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     if (hours > 0) {
-      return `${hours} soat ${minutes} daqiqa`;
+      return `${hours} soat ${minutes} minut`;
     }
-    return `${Math.max(1, minutes)} daqiqa`;
+    return `${Math.max(1, minutes)} minut`;
   }, []);
 
   const formatDeviceTime = useCallback((isoString: string): string => {
@@ -1054,7 +1060,7 @@ export default function Home() {
       const hours = Math.floor(minutes / 60);
       const days = Math.floor(hours / 24);
       if (minutes < 2) return "Hozirgina faol";
-      if (minutes < 60) return `${minutes} daqiqa oldin`;
+      if (minutes < 60) return `${minutes} minut oldin`;
       if (hours < 24) return `${hours} soat oldin`;
       return `${days} kun oldin`;
     } catch {
@@ -1123,6 +1129,7 @@ export default function Home() {
     setNotifications(Array.isArray(snap.notifications) ? snap.notifications : []);
     setStreakCount(snap.streak || 0);
     setBestStreak(snap.best || 0);
+    setRecentOccurrences(Array.isArray(snap.recent) ? snap.recent : []);
     workspaceHydratedRef.current = uid;
     setLoadingData(false);
     return true;
@@ -1409,6 +1416,15 @@ export default function Home() {
         const local = statusNow.get(occ.id);
         return local ? { ...occ, status: local as Occurrence["status"] } : occ;
       }));
+
+      // The six days before today feed the weekly average (the same numbers the Statistics page uses).
+      const { data: recentRows, error: recentError } = await supabase
+        .from("occurrences")
+        .select("activity_id,period_start,status")
+        .eq("user_id", id)
+        .gte("period_start", addDays(todayStr, -6))
+        .lt("period_start", todayStr);
+      if (!recentError && recentRows && isCurrentLoad()) setRecentOccurrences(recentRows as StatOccurrence[]);
 
       const occIds = todayOccs.map((o) => o.id);
       const progressRows: { id: string; occurrence_id: string; amount: number }[] = [];
@@ -2058,6 +2074,7 @@ export default function Home() {
     };
 
     const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") setTodayKey(today());
       if (document.visibilityState !== "visible" || !activeRealtimeUid) return;
       void processOfflineQueue();
       // Hopping to another app and back is not a reason to reload; realtime already kept this screen current.
@@ -2118,7 +2135,10 @@ export default function Home() {
       colorSchemeMedia.addEventListener("change", handleSystemThemeChange);
 
       const currentD = new Date().getDay();
-      setTimeout(() => setTodayDayOfWeek(currentD === 0 ? 7 : currentD), 0);
+      setTimeout(() => {
+        setTodayDayOfWeek(currentD === 0 ? 7 : currentD);
+        setTodayKey(today());
+      }, 0);
 
       // Notifications are loaded from Supabase; never synthesize fake history in the browser.
       const notificationClient = createClient();
@@ -2240,11 +2260,12 @@ export default function Home() {
       notifications: notifications.slice(0, 100),
       streak: streakCount,
       best: bestStreak,
+      recent: recentOccurrences,
     };
     snapshotRef.current = { uid: userId, data };
     const timer = setTimeout(() => writeJson(accountStorageKey(userId, "snapshot"), data), 300);
     return () => clearTimeout(timer);
-  }, [userId, loadingData, activities, occurrences, notifications, streakCount, bestStreak]);
+  }, [userId, loadingData, activities, occurrences, notifications, streakCount, bestStreak, recentOccurrences]);
   useEffect(() => {
     const saveNow = () => {
       const snap = snapshotRef.current;
@@ -3481,23 +3502,16 @@ export default function Home() {
       return true;
     });
   }, [activities, todayDayOfWeek]);
+  // ONE definition of "done" for the whole app: a plan scheduled today counts when its row for today is completed.
+  // The same rule feeds the numbers here and on the Statistics page, so they can never disagree.
   const completedCount = useMemo(
-    () => occurrences.filter((item) => item.status === "completed").length,
-    [occurrences]
+    () =>
+      activeActivities.filter((activity) =>
+        occurrences.some((item) => item.activity_id === activity.id && item.status === "completed")
+      ).length,
+    [activeActivities, occurrences]
   );
-  const percent = activeActivities.length
-    ? Math.round(
-        (activeActivities.reduce((total, activity) => {
-          const occurrence = occurrences.find((item) => item.activity_id === activity.id);
-          if (!occurrence) return total;
-          if (activity.measurement_type === "count" && activity.target && activity.target > 0) {
-            const count = taskCounts[occurrence.id] ?? (occurrence.status === "completed" ? activity.target : 0);
-            return total + Math.min(Math.max(count, 0) / activity.target, 1);
-          }
-          return total + (occurrence.status === "completed" ? 1 : 0);
-        }, 0) / activeActivities.length) * 100
-      )
-    : 0;
+  const percent = activeActivities.length ? Math.round((completedCount / activeActivities.length) * 100) : 0;
 
   const timeCounts = useMemo(() => {
     return {
@@ -3574,13 +3588,17 @@ export default function Home() {
     );
   }, [activeActivities, occurrences, customTimeSlots, focusClockMinute, habits]);
 
-  // Discipline Momentum Index (Consistency rolling calculation)
+  // Weekly momentum is the Statistics page's 7-day average, computed by the same functions from the same rows.
   const momentumScore = useMemo(() => {
-    if (activeActivities.length === 0) return 100;
-    const dailyRatio = percent;
-    const streakBonus = Math.min(streakCount * 5, 25);
-    return Math.min(100, Math.max(35, Math.round(dailyRatio * 0.75 + streakBonus)));
-  }, [activeActivities.length, percent, streakCount]);
+    if (!todayKey) return 0;
+    const statuses = buildStatusMap(
+      recentOccurrences,
+      occurrences.map((item) => ({ activity_id: item.activity_id, status: item.status })),
+      todayKey,
+    );
+    const scheduled = activities.filter((activity) => activity.is_active) as unknown as StatActivity[];
+    return average(buildDays(scheduled, statuses, todayKey, 7)) ?? 0;
+  }, [activities, occurrences, recentOccurrences, todayKey]);
 
   // Executive Keyboard Shortcuts (N: New, F: Focus, 1-5: Tabs, Esc: Close)
   useEffect(() => {

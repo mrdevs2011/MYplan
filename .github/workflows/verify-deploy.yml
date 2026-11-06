@@ -1,0 +1,30 @@
+name: Verify deployment
+
+# Vercel reports every finished deployment to GitHub. Once production is ready, check that the live site really
+# serves this commit. The app itself then updates every open and returning user (see src/components/app-updater.tsx).
+on:
+  deployment_status
+
+jobs:
+  live-version:
+    name: Production serves this commit
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Compare /version.json with the deployed commit
+        env:
+          SITE_URL: ${{ github.event.deployment_status.environment_url }}
+          EXPECTED: ${{ github.event.deployment.sha }}
+        run: |
+          for attempt in $(seq 1 12); do
+            live="$(curl -fsS -H 'Cache-Control: no-cache' "${SITE_URL}/version.json?ts=$(date +%s)" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))' || true)"
+            echo "attempt ${attempt}: live=${live} expected=${EXPECTED}"
+            if [ "${live}" = "${EXPECTED}" ]; then
+              echo "Production is on the new version; open apps will reload themselves."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Production does not serve ${EXPECTED} yet." >&2
+          exit 1

@@ -251,7 +251,10 @@ export function prayerStats(activities: StatActivity[], status: StatusMap, today
   const { current, best } = perfectStreak(days);
   const past = days.slice(0, -1).filter((d) => d.expected > 0);
   const perfectDays = past.filter((d) => d.done === d.expected).length;
-  return { count: prayers.length, avg: average(days), perfectDays, trackedDays: past.length, current, best, days };
+  // The ring and the "x / y days" line must describe the same days: finished days only. Today is still open, so it
+  // only stands in while there is no finished day yet.
+  const avg = past.length > 0 ? average(past) : average(days);
+  return { count: prayers.length, avg, perfectDays, trackedDays: past.length, current, best, days };
 }
 
 // ---------- heatmap ----------

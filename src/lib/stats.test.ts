@@ -1,7 +1,7 @@
 // Run with: node --experimental-strip-types --test src/lib/stats.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addDays, buildDays, buildStatusMap, computeStats, heatLevel, heatmapGrid, isScheduled, perfectStreak, statusKey, taskStats, weekdayOf, type StatActivity, type StatOccurrenceWithId } from "./stats.ts";
+import { addDays, buildDays, buildStatusMap, computeStats, heatLevel, heatmapGrid, isScheduled, perfectStreak, prayerStats, statusKey, taskStats, weekdayOf, type StatActivity, type StatOccurrenceWithId } from "./stats.ts";
 
 const act = (over: Partial<StatActivity> = {}): StatActivity => ({
   id: "a1", title: "Task", schedule_type: "daily", time_of_day: "morning", schedule_rule: { weekdays: [1, 2, 3, 4, 5, 6, 7] },
@@ -102,4 +102,21 @@ test("no activities: everything is empty but safe", () => {
   assert.equal(s.prayers, null);
   assert.deepEqual(s.tasks, []);
   assert.equal(s.streak.current, 0);
+});
+
+test("prayer ring and its 'x / y days' line describe the same finished days", () => {
+  const prayer = (id: string, title: string) => ({
+    id, title, schedule_type: "daily" as const, measurement_type: "check" as const, target: null, unit: null,
+    is_active: true, starts_on: "2026-11-01", ends_on: null, schedule_rule: null,
+  });
+  const acts = [prayer("a", "Bomdod"), prayer("b", "Peshin")];
+  const status = new Map<string, "pending" | "completed" | "skipped">([
+    ["a|2026-11-05", "completed"], ["b|2026-11-05", "completed"], // yesterday: everything done
+    ["a|2026-11-06", "completed"],                                 // today: half done so far
+  ]);
+  const r = prayerStats(acts, status, "2026-11-06", 30)!;
+  assert.equal(r.trackedDays, 5);
+  assert.equal(r.perfectDays, 1);
+  // Only finished days feed the ring, so a half-done today cannot pull it below what the text says.
+  assert.equal(r.avg, 20); // 1 perfect day out of 5 finished days (4 days with nothing done)
 });

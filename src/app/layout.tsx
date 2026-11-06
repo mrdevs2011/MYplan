@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import AppUpdater from "@/components/app-updater";
 
 export const viewport: Viewport = {
   themeColor: "#b4f04c",
@@ -58,7 +59,10 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
-      <body>{children}</body>
+      <body>
+        <AppUpdater />
+        {children}
+      </body>
     </html>
   );
 }
