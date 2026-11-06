@@ -9,12 +9,6 @@ Deno.serve(async (req) => {
   if (!body || typeof body.endpoint !== "string" || body.endpoint.length > 4096) return json({ error: "Invalid endpoint" }, 400);
   const isUnsubscribe = req.method === "DELETE" || body.action === "unsubscribe";
   const admin = adminClient();
-  const { data: existingSubscription, error: lookupError } = await admin.from("push_subscriptions").select("id,user_id").eq("endpoint", body.endpoint).maybeSingle();
-  if (lookupError) return json({ error: "Could not verify existing subscription" }, 500);
-  if (existingSubscription && existingSubscription.user_id !== user.id) {
-    if (isUnsubscribe) return json({ ok: true, localOnly: true });
-    return json({ error: "Subscription belongs to another account" }, 409);
-  }
   if (isUnsubscribe) {
     const { error } = await admin.from("push_subscriptions").delete().eq("user_id", user.id).eq("endpoint", body.endpoint);
     if (error) return json({ error: "Could not remove subscription" }, 500);
@@ -35,7 +29,7 @@ Deno.serve(async (req) => {
     user_id: user.id, endpoint: body.endpoint, p256dh: body.keys.p256dh, auth: body.keys.auth,
     user_agent: typeof body.userAgent === "string" ? body.userAgent.slice(0, 500) : "",
     is_active: true, updated_at: new Date().toISOString(),
-  }, { onConflict: "endpoint" });
+  }, { onConflict: "user_id,endpoint" });
   if (error) return json({ error: "Could not save subscription" }, 500);
   const { error: prefError } = await admin.from("notification_preferences").upsert({ user_id: user.id, enabled: true, push_enabled: true, updated_at: new Date().toISOString() });
   if (prefError) return json({ error: "Subscription saved but preferences failed" }, 500);

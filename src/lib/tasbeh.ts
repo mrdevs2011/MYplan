@@ -5,10 +5,9 @@ export interface TasbehState {
   rounds: number; // completed rounds
   target: number;
   total: number; // all taps counted since the last reset
-  updatedAt: number; // epoch ms of the last change; decides which copy wins when syncing
 }
 
-export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 33, total: 0, updatedAt: 0 };
+export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 33, total: 0 };
 
 const whole = (value: unknown) => Math.max(0, Math.floor(Number(value)) || 0);
 
@@ -19,7 +18,7 @@ export function normalizeTasbeh(raw: unknown): TasbehState {
   const count = whole(r.count);
   const rounds = whole(r.rounds);
   const total = r.total === undefined ? rounds * target + count : whole(r.total);
-  return { count, rounds, target, total, updatedAt: whole(r.updatedAt) };
+  return { count, rounds, target, total };
 }
 
 /** One tap. Reaching the target starts a new round. */

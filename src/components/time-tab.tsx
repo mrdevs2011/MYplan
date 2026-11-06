@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock, IconBell } from "@/components/icons";
 import { playMelody, type MelodyHandle } from "@/lib/timer-melody";
+import { useSyncedState } from "@/lib/use-synced-state";
 import type { Language, translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
@@ -11,8 +12,8 @@ type SubTab = "timer" | "stopwatch" | "clock";
 interface TimeTabProps {
   t: T;
   language: Language;
-  /** Per-account storage scope so running timers don't leak between accounts. */
-  scope: string;
+  /** Signed-in account: timer, stopwatch and melody choice follow it across devices. */
+  userId: string | null;
   soundEnabled: boolean;
 }
 
@@ -27,25 +28,6 @@ function formatDate(d: Date, language: Language) {
   const text = d.toLocaleDateString(LOCALES[language] || "en-US", { weekday: "long", day: "numeric", month: "long" });
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
-const storageKey = (scope: string, name: string) => `myplan_account_${scope}_time_${name}`;
-
-function load<V>(scope: string, name: string, fallback: V): V {
-  try {
-    const raw = localStorage.getItem(storageKey(scope, name));
-    return raw ? ({ ...fallback, ...JSON.parse(raw) } as V) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function save(scope: string, name: string, value: unknown) {
-  try {
-    localStorage.setItem(storageKey(scope, name), JSON.stringify(value));
-  } catch {
-    // Storage unavailable: the tool still works, it just won't survive a tab switch.
-  }
-}
-
 const pad = (n: number) => String(n).padStart(2, "0");
 
 function formatClock(ms: number) {
@@ -138,19 +120,25 @@ interface TimerState {
   done: boolean;
 }
 
-function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope" | "soundEnabled">) {
-  // This panel only mounts client-side (after login), so reading storage here is safe.
-  const [state, setState] = useState<TimerState>(() => {
-    const stored = load<TimerState>(scope, "timer", {
-      duration: 5 * 60000,
-      endAt: null,
-      remaining: 5 * 60000,
-      done: false,
-    });
-    // Finished while the tab was closed: show it as finished, without beeping.
-    return stored.endAt && stored.endAt <= Date.now()
-      ? { ...stored, endAt: null, remaining: 0, done: true }
-      : stored;
+const DEFAULT_TIMER: TimerState = { duration: 5 * 60000, endAt: null, remaining: 5 * 60000, done: false };
+
+function normalizeTimer(raw: unknown): TimerState {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<TimerState>;
+  const duration =
+    typeof r.duration === "number" && Number.isFinite(r.duration)
+      ? Math.min(99 * 60000, Math.max(60000, r.duration))
+      : DEFAULT_TIMER.duration;
+  const endAt = typeof r.endAt === "number" && Number.isFinite(r.endAt) ? r.endAt : null;
+  const remaining = typeof r.remaining === "number" && r.remaining >= 0 ? Math.min(r.remaining, duration) : duration;
+  // Finished while nobody was looking: show it as finished, without beeping.
+  if (endAt !== null && endAt <= Date.now()) return { duration, endAt: null, remaining: 0, done: true };
+  return { duration, endAt, remaining, done: Boolean(r.done) };
+}
+
+function TimerPanel({ t, userId, soundEnabled }: Pick<TimeTabProps, "t" | "userId" | "soundEnabled">) {
+  // This panel only mounts client-side (after login), so the device copy can be read right away.
+  const { value: state, set: setState } = useSyncedState<TimerState>(userId, "timer", DEFAULT_TIMER, normalizeTimer, {
+    lazyLocal: true,
   });
   const soundRef = useRef(soundEnabled);
   useEffect(() => {
@@ -158,8 +146,18 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
   }, [soundEnabled]);
 
   // The melody can be switched off for good; the choice is remembered per account.
-  const [musicOn, setMusicOn] = useState(() => load<{ on: boolean }>(scope, "music", { on: true }).on);
+  const { value: music, set: setMusic } = useSyncedState<{ on: boolean }>(
+    userId,
+    "timer_music",
+    { on: true },
+    (raw) => ({ on: !(raw && typeof raw === "object" && (raw as { on?: unknown }).on === false) }),
+    { lazyLocal: true },
+  );
+  const musicOn = music.on;
   const musicRef = useRef(musicOn);
+  useEffect(() => {
+    musicRef.current = musicOn;
+  }, [musicOn]);
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
   const melodyRef = useRef<MelodyHandle | null>(null);
@@ -189,16 +187,11 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
   const toggleMusic = () => {
     const next = !musicOn;
     musicRef.current = next;
-    setMusicOn(next);
-    save(scope, "music", { on: next });
+    setMusic({ on: next });
     if (!next) stopMelody();
   };
 
   useEffect(() => () => melodyRef.current?.stop(), []);
-
-  useEffect(() => {
-    save(scope, "timer", state);
-  }, [scope, state]);
 
   const running = state.endAt !== null;
   const now = useNow(running, 100);
@@ -206,7 +199,6 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
 
   useEffect(() => {
     if (running && remaining <= 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState((s) => ({ ...s, endAt: null, remaining: 0, done: true }));
       if (soundRef.current && musicRef.current) {
         const ctx = audioRef.current;
@@ -227,7 +219,7 @@ function TimerPanel({ t, scope, soundEnabled }: Pick<TimeTabProps, "t" | "scope"
         // Not supported.
       }
     }
-  }, [running, remaining]);
+  }, [running, remaining, setState]);
 
   const setDuration = (ms: number) => {
     const duration = Math.min(99 * 60000, Math.max(60000, ms));
@@ -322,14 +314,25 @@ interface StopwatchState {
   laps: number[]; // cumulative ms at each lap
 }
 
-function StopwatchPanel({ t, scope }: Pick<TimeTabProps, "t" | "scope">) {
-  const [state, setState] = useState<StopwatchState>(() =>
-    load<StopwatchState>(scope, "stopwatch", { startedAt: null, base: 0, laps: [] }),
-  );
+const DEFAULT_STOPWATCH: StopwatchState = { startedAt: null, base: 0, laps: [] };
 
-  useEffect(() => {
-    save(scope, "stopwatch", state);
-  }, [scope, state]);
+function normalizeStopwatch(raw: unknown): StopwatchState {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<StopwatchState>;
+  return {
+    startedAt: typeof r.startedAt === "number" && Number.isFinite(r.startedAt) ? r.startedAt : null,
+    base: typeof r.base === "number" && r.base >= 0 ? r.base : 0,
+    laps: Array.isArray(r.laps) ? r.laps.filter((lap): lap is number => typeof lap === "number" && lap >= 0) : [],
+  };
+}
+
+function StopwatchPanel({ t, userId }: Pick<TimeTabProps, "t" | "userId">) {
+  const { value: state, set: setState } = useSyncedState<StopwatchState>(
+    userId,
+    "stopwatch",
+    DEFAULT_STOPWATCH,
+    normalizeStopwatch,
+    { lazyLocal: true },
+  );
 
   const running = state.startedAt !== null;
   const now = useNow(running, 40);
@@ -455,7 +458,7 @@ function ClockPanel({ language }: Pick<TimeTabProps, "language">) {
 
 /* ------------------------------------------------------------------ Tab */
 
-export default function TimeTab({ t, language, scope, soundEnabled }: TimeTabProps) {
+export default function TimeTab({ t, language, userId, soundEnabled }: TimeTabProps) {
   const [sub, setSub] = useState<SubTab>("timer");
   const tabs: Array<{ id: SubTab; label: string }> = [
     { id: "timer", label: t.clk_timer },
@@ -485,11 +488,11 @@ export default function TimeTab({ t, language, scope, soundEnabled }: TimeTabPro
       <div className="time-grid">
         <section className="time-card" data-active={sub === "timer"}>
           <h2 className="time-card-title">{t.clk_timer}</h2>
-          <TimerPanel t={t} scope={scope} soundEnabled={soundEnabled} />
+          <TimerPanel t={t} userId={userId} soundEnabled={soundEnabled} />
         </section>
         <section className="time-card" data-active={sub === "stopwatch"}>
           <h2 className="time-card-title">{t.clk_stopwatch}</h2>
-          <StopwatchPanel t={t} scope={scope} />
+          <StopwatchPanel t={t} userId={userId} />
         </section>
         <section className="time-card" data-active={sub === "clock"}>
           <h2 className="time-card-title">{t.clk_clock}</h2>

@@ -19,6 +19,7 @@ The SQL files in this directory are the canonical schema scripts. Matching Supab
 11. `011_custom_time_of_day.sql` — custom time-of-day values.
 12. `012_activity_reminder_time.sql` — optional per-task reminder time (`activities.reminder_time`).
 13. `013_tasbeh_counters.sql` — tasbeh (counter) state per user, with owner-only RLS.
+14. `014_multi_account_push_and_user_state.sql` — one push row per (account, browser) and the realtime `user_state` table.
 
 The scripts use `IF NOT EXISTS`/replace patterns where practical, but they are not a substitute for reviewing the target schema and backing up production data. Do not blindly replay modified scripts against a live database.
 

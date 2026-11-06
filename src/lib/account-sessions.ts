@@ -112,3 +112,8 @@ export async function revokeSessionToken(accessToken: string): Promise<void> {
     // Best effort; the local copy is removed regardless.
   }
 }
+
+/** Every saved account's token pair (the active one included). */
+export function listAccountSessions(): Record<string, { access_token: string; refresh_token: string }> {
+  return typeof window === "undefined" ? {} : readAll();
+}

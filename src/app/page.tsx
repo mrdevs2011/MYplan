@@ -7,6 +7,8 @@ import TimeTab from "@/components/time-tab";
 import StatsTab from "@/components/stats-tab";
 import TasbehTab, { TasbehFloat } from "@/components/tasbeh-tab";
 import { useTasbeh } from "@/lib/use-tasbeh";
+import { useSyncedState } from "@/lib/use-synced-state";
+import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -107,6 +109,7 @@ import {
   pruneAccountSessions,
   restoreAccountSession,
   revokeSessionToken,
+  listAccountSessions,
 } from "@/lib/account-sessions";
 import {
   getOrCreateSessionToken,
@@ -161,6 +164,13 @@ interface CustomTimeSlot {
   id: string;
   label: string;
 }
+
+const NO_CUSTOM_SLOTS: CustomTimeSlot[] = [];
+const normalizeCustomSlots = (raw: unknown): CustomTimeSlot[] =>
+  Array.isArray(raw)
+    ? raw.filter((slot): slot is CustomTimeSlot => Boolean(slot && typeof slot.id === "string" && typeof slot.label === "string"))
+    : NO_CUSTOM_SLOTS;
+const normalizeTheme = (raw: unknown): "dark" | "light" | "system" => (raw === "dark" || raw === "light" ? raw : "system");
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
 
@@ -551,8 +561,6 @@ export default function Home() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushChecked, setPushChecked] = useState(false);
-  // True only when permission is granted but the silent re-subscription failed: then (and only then) the prompt returns.
-  const [pushSyncFailed, setPushSyncFailed] = useState(false);
   const [nagSnoozedUntil, setNagSnoozedUntil] = useState(0);
   const [nagNow, setNagNow] = useState(0);
   const [nagArmedAt, setNagArmedAt] = useState(0);
@@ -586,7 +594,11 @@ export default function Home() {
   const [debouncedDurationError, setDebouncedDurationError] = useState("");
 
   // Custom Time Slots
-  const [customTimeSlots, setCustomTimeSlots] = useState<CustomTimeSlot[]>([]);
+  // Custom time-of-day slots follow the account to every device (and update live).
+  const slotsSync = useSyncedState<CustomTimeSlot[]>(userId, "custom_time_slots", NO_CUSTOM_SLOTS, normalizeCustomSlots);
+  const customTimeSlots = slotsSync.value;
+  const setCustomTimeSlots = slotsSync.set;
+  const themeSync = useSyncedState<"dark" | "light" | "system">(userId, "theme", "system", normalizeTheme);
   const [showCustomTimeModal, setShowCustomTimeModal] = useState<boolean>(false);
   const [customTimeInput, setCustomTimeInput] = useState<string>("");
   const [customTimeError, setCustomTimeError] = useState<string>("");
@@ -1167,43 +1179,6 @@ export default function Home() {
       if (!isCurrentLoad()) return;
       const acts = (activityRows || []) as Activity[];
       setActivities(acts);
-      const savedSlots = localStorage.getItem(accountStorageKey(id, "custom_time_slots"));
-      let accountSlots: CustomTimeSlot[] = [];
-      if (savedSlots) {
-        try {
-          const parsedSlots: unknown = JSON.parse(savedSlots);
-          if (Array.isArray(parsedSlots)) {
-            accountSlots = parsedSlots.filter((slot): slot is CustomTimeSlot =>
-              Boolean(slot && typeof slot.id === "string" && typeof slot.label === "string")
-            );
-          }
-        } catch {
-          localStorage.removeItem(accountStorageKey(id, "custom_time_slots"));
-        }
-      }
-      setCustomTimeSlots(accountSlots);
-
-      if (acts && acts.length > 0) {
-        setCustomTimeSlots((prev) => {
-          const map = new Map<string, string>(prev.map((s) => [s.id, s.label]));
-          let changed = false;
-          acts.forEach((a) => {
-            if (a.time_of_day && !["morning", "afternoon", "evening", "anytime"].includes(a.time_of_day)) {
-              if (!map.has(a.time_of_day)) {
-                map.set(a.time_of_day, a.time_of_day.replace(/^custom_/, ""));
-                changed = true;
-              }
-            }
-          });
-          if (!changed) return prev;
-          const updated = Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-          if (typeof window !== "undefined") {
-            localStorage.setItem(accountStorageKey(id, "custom_time_slots"), JSON.stringify(updated));
-          }
-          return updated;
-        });
-      }
-
       if (profile) {
         setAccountName(profile.full_name || profile.username || "");
         setAccountUsername(profile.username || "");
@@ -2084,31 +2059,19 @@ export default function Home() {
     }
     const id = `custom_${Date.now()}`;
     const newSlot: CustomTimeSlot = { id, label: trimmed };
-    setCustomTimeSlots((prev) => {
-      const updated = [...prev, newSlot];
-      if (typeof window !== "undefined") {
-        if (userId) localStorage.setItem(accountStorageKey(userId, "custom_time_slots"), JSON.stringify(updated));
-      }
-      return updated;
-    });
+    setCustomTimeSlots((prev) => [...prev, newSlot]);
     setNewTimeOfDay(id);
     setCustomTimeInput("");
     setCustomTimeError("");
     setShowCustomTimeModal(false);
     triggerHaptic("medium");
-  }, [customTimeInput, t.field_required, userId]);
+  }, [customTimeInput, t.field_required, setCustomTimeSlots]);
 
   const handleDeleteCustomTimeSlot = useCallback((id: string) => {
-    setCustomTimeSlots((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      if (typeof window !== "undefined") {
-        if (userId) localStorage.setItem(accountStorageKey(userId, "custom_time_slots"), JSON.stringify(updated));
-      }
-      return updated;
-    });
+    setCustomTimeSlots((prev) => prev.filter((s) => s.id !== id));
     setNewTimeOfDay((prev) => (prev === id ? "anytime" : prev));
     setActiveTimeFilter((prev) => (prev === id ? "all" : prev));
-  }, [userId]);
+  }, [setCustomTimeSlots]);
 
   const applyPlanForm = useCallback((draft: Partial<PlanDraft>) => {
     setCreateTaskKind(draft.kind ?? "check");
@@ -2315,7 +2278,8 @@ export default function Home() {
   const pushNagMode: "ask" | "denied" | "ios-install" | "unsupported" | null = (() => {
     if (typeof window === "undefined" || anyOverlayOpen || !pushChecked || !userId || loadingData || nagNow === 0 || nagArmedAt === 0 || nagNow < nagArmedAt) return null;
     if (process.env.NODE_ENV !== "production") return null;
-    if (pushPermission === "granted" && (pushSubscribed || !pushSyncFailed)) return null;
+    // Permission is a browser-level choice: once granted, never ask again, whichever account is open.
+    if (pushPermission === "granted") return null;
     if (nagNow < nagSnoozedUntil) return null;
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
@@ -2710,7 +2674,9 @@ export default function Home() {
           const supabase = createClient();
           const { error } = await supabase.functions.invoke("notification-subscribe", { body: { action: "unsubscribe", endpoint: existing.endpoint } });
           if (error) throw new Error("notification-subscribe: obunani serverdan bekor qilib bo‘lmadi.");
-          if (!(await existing.unsubscribe())) throw new Error("Brauzer obunasini bekor qilib bo‘lmadi.");
+          // The browser subscription is shared by every account saved here: drop it only when no other account needs it.
+          const otherAccounts = Object.keys(listAccountSessions()).filter((id) => id !== userId).length;
+          if (otherAccounts === 0 && !(await existing.unsubscribe())) throw new Error("Brauzer obunasini bekor qilib bo‘lmadi.");
         }
         setPushSubscribed(false);
         return;
@@ -2754,18 +2720,13 @@ export default function Home() {
         "push-service-timeout",
       );
     };
-    let subscription = (await registration.pushManager.getSubscription()) ?? (await subscribeFresh());
-    let { error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } });
-    if (error && (error as { context?: Response }).context?.status === 409) {
-      await subscription.unsubscribe().catch(() => false);
-      subscription = await subscribeFresh();
-      ({ error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } }));
-    }
-    if (error) {
-      await subscription.unsubscribe().catch(() => false);
-      throw error;
-    }
+    const subscription = (await registration.pushManager.getSubscription()) ?? (await subscribeFresh());
+    // One browser subscription serves every account saved in this browser (the server keeps a row per account).
+    const { error } = await supabase.functions.invoke("notification-subscribe", { body: { ...subscription.toJSON(), userAgent: navigator.userAgent } });
+    if (error) throw error;
     setPushSubscribed(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user.id) void registerPushForSavedAccounts(sessionData.session.user.id, subscription.toJSON(), navigator.userAgent);
     if (!silent) {
       // Prove the whole chain works on this device: show a real OS notification right away.
       void registration.showNotification("MYplan", {
@@ -2810,10 +2771,7 @@ export default function Home() {
     if (pushPermission !== "granted") return;
     if (pushSyncedUserRef.current === userId) return;
     pushSyncedUserRef.current = userId;
-    void enablePushForThisDevice(true).catch((error) => {
-      console.warn("Push re-sync failed:", error);
-      setPushSyncFailed(true);
-    });
+    void enablePushForThisDevice(true).catch((error) => console.warn("Push re-sync failed:", error));
   }, [userId, pushChecked, pushPermission, enablePushForThisDevice]);
 
   const snoozeNag = () => {
@@ -3152,16 +3110,77 @@ export default function Home() {
   }
 
   // Theme change
-  const handleThemeChange = (newTheme: "dark" | "light" | "system") => {
+  const applyTheme = useCallback((newTheme: "dark" | "light" | "system") => {
     setTheme(newTheme);
-    localStorage.setItem("myplan_theme", newTheme);
+    try {
+      localStorage.setItem("myplan_theme", newTheme);
+    } catch {
+      // Storage unavailable: the theme still applies for this session.
+    }
     if (newTheme === "system") {
       const isLight = window.matchMedia("(prefers-color-scheme: light)").matches;
       document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
     } else {
       document.documentElement.setAttribute("data-theme", newTheme);
     }
+  }, []);
+  const handleThemeChange = (newTheme: "dark" | "light" | "system") => {
+    applyTheme(newTheme);
+    themeSync.set(newTheme);
   };
+
+  // The saved theme (and the custom slots) follow the account. Wait for the saved copy to be read first.
+  const { ready: themeReady, at: themeAt, value: themeValue, set: setThemeValue } = themeSync;
+  useEffect(() => {
+    if (!themeReady) return;
+    const timer = setTimeout(() => {
+      if (themeAt > 0) applyTheme(themeValue);
+      else {
+        // First time on this account: the theme this device already uses becomes the account's.
+        let legacy: string | null = null;
+        try {
+          legacy = localStorage.getItem("myplan_theme");
+        } catch {
+          legacy = null;
+        }
+        setThemeValue(normalizeTheme(legacy));
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [themeReady, themeAt, themeValue, applyTheme, setThemeValue]);
+
+  const slotsReady = slotsSync.ready;
+  const slotsAt = slotsSync.at;
+  useEffect(() => {
+    if (!slotsReady) return;
+    const timer = setTimeout(() => {
+      // Accounts that had slots only on this device before syncing existed: bring them along once.
+      if (slotsAt === 0 && userId) {
+        try {
+          const legacy = normalizeCustomSlots(JSON.parse(localStorage.getItem(accountStorageKey(userId, "custom_time_slots")) || "null"));
+          if (legacy.length > 0) setCustomTimeSlots(legacy);
+        } catch {
+          // Nothing usable saved on this device.
+        }
+      }
+      // Slots used by a plan but missing from the list (created on another device) are restored.
+      if (activities.length > 0) {
+        setCustomTimeSlots((prev) => {
+          const known = new Map<string, string>(prev.map((slot) => [slot.id, slot.label]));
+          let changed = false;
+          for (const activity of activities) {
+            const id = activity.time_of_day;
+            if (id && !["morning", "afternoon", "evening", "anytime"].includes(id) && !known.has(id)) {
+              known.set(id, id.replace(/^custom_/, ""));
+              changed = true;
+            }
+          }
+          return changed ? Array.from(known.entries()).map(([id, label]) => ({ id, label })) : prev;
+        });
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [slotsReady, slotsAt, activities, userId, setCustomTimeSlots]);
 
   // Language change
   const handleLanguageChange = (newLang: Language) => {
@@ -5501,7 +5520,7 @@ export default function Home() {
           {/* TAB 4: PROFIL (READ-ONLY) */}
           {activeTab === "time" && (
             <div key="tab-time" className="tab-pane-container time-pane">
-              <TimeTab t={t} language={language} scope={userId || "guest"} soundEnabled={soundEnabled} />
+              <TimeTab t={t} language={language} userId={userId} soundEnabled={soundEnabled} />
             </div>
           )}
 
