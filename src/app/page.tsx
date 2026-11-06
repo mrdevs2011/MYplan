@@ -2082,16 +2082,34 @@ export default function Home() {
       playCompletionSound();
     }
 
+    // Ticking a counter task fills it to the target; un-ticking resets it. The change must also reach the cloud
+    // as a progress event, otherwise a reload or another device shows the old number next to the new status.
+    let countCorrection: { id: string; user_id: string; occurrence_id: string; amount: number; note: string } | null = null;
     if (activity.measurement_type === "count" && activity.target) {
+      const before = Math.min(taskCountsRef.current[occ.id] || 0, activity.target);
       const newCount = nextStatus === "completed" ? activity.target : 0;
       updateTaskCounts((prev) => ({ ...prev, [occ.id]: newCount }));
+      setTaskHistory((prev) => ({ ...prev, [occ.id]: [] }));
       localStorage.setItem(`myplan_count_${occ.id}`, String(newCount));
+      if (newCount !== before) {
+        countCorrection = {
+          id: crypto.randomUUID(),
+          user_id: userId,
+          occurrence_id: occ.id,
+          amount: newCount - before,
+          note: nextStatus === "completed" ? "Belgilandi (to‘ldirildi)" : "Belgi olib tashlandi",
+        };
+      }
     }
 
     try {
       const supabase = createClient();
       const { error } = await supabase.from("occurrences").update({ status: nextStatus }).eq("id", occ.id).eq("user_id", userId);
       if (error) throw error;
+      if (countCorrection) {
+        const { error: progressError } = await supabase.from("progress_events").insert(countCorrection);
+        if (progressError) enqueueOfflineMutation({ type: "progress_event", payload: countCorrection });
+      }
       if (nextStatus === "completed") {
         void supabase.functions.invoke("notification-compose", { body: {
           category: "productivity",
@@ -2106,6 +2124,7 @@ export default function Home() {
         type: "occurrence_status",
         payload: { id: occ.id, user_id: userId, status: nextStatus },
       });
+      if (countCorrection) enqueueOfflineMutation({ type: "progress_event", payload: countCorrection });
     }
   }
 

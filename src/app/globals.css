@@ -8912,3 +8912,11 @@ textarea,
 @media (max-width: 768px) {
   .push-nag-card { left: 12px; right: 12px; width: auto; bottom: calc(var(--bottombar-h-mobile, 68px) + 12px); }
 }
+
+/* Counter form: the unit picker is ONE pill the same height as the amount field.
+   .count-unit-select also lands on the LifeSelect wrapper, which used to become a second box around the trigger. */
+.count-input-row { align-items: start !important; }
+.life-select.count-unit-select { min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.count-unit-select .life-select-trigger { min-height: 54px; padding: 6px 16px; border-radius: 9999px; }
+.count-unit-select .life-select-current-meta { display: none; }
+.count-unit-select .life-select-current-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
