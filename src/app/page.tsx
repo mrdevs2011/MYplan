@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent, type
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import TimeTab from "@/components/time-tab";
-import StatsTab from "@/components/stats-tab";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -5454,14 +5453,54 @@ export default function Home() {
           {/* TAB 3: STATISTIKA */}
           {activeTab === "analytics" && (
             <div key="tab-analytics" className="tab-pane-container">
-              <StatsTab
-                userId={userId}
-                language={language}
-                activities={activities}
-                liveToday={occurrences.map((o) => ({ activity_id: o.activity_id, status: o.status }))}
-                todayKey={today()}
-                refreshKey={completedCount}
-              />
+              <section className="analytics-view">
+                <div className="stats-grid">
+                  <article className="stat-card progress-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">{t.analytics_tag_today}</span>
+                      <IconTarget className="stat-icon" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">{percent}</span>
+                      <span className="stat-unit">%</span>
+                    </div>
+                    <div className="progress-bar-track">
+                      <div className="progress-bar-fill" style={{ width: `${percent}%` }} />
+                    </div>
+                    <p className="stat-footer">{completedCount} {t.analytics_completed_footer}</p>
+                  </article>
+
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">{t.analytics_tag_total}</span>
+                      <IconList className="stat-icon" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value">{activities.length.toString().padStart(2, "0")}</span>
+                    </div>
+                    <p className="stat-footer">{t.analytics_total_footer}</p>
+                  </article>
+
+                  <article className="stat-card">
+                    <div className="stat-header">
+                      <span className="stat-tag">{t.analytics_tag_active}</span>
+                      <IconTrendUp className="stat-icon text-lime" />
+                    </div>
+                    <div className="stat-value-row">
+                      <span className="stat-value text-lime">{activeActivities.length.toString().padStart(2, "0")}</span>
+                    </div>
+                    <p className="stat-footer">{t.analytics_active_footer}</p>
+                  </article>
+                </div>
+
+                <div className="analytics-insight-card">
+                  <div className="insight-badge">
+                    <IconSparkles className="icon-xs" /> {t.insight_kicker}
+                  </div>
+                  <h3>{t.insight_title}</h3>
+                  <p>{t.insight_desc}</p>
+                </div>
+              </section>
             </div>
           )}
 
