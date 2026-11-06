@@ -1,109 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { IconRepeat } from "@/components/icons";
+import { useEffect, useState } from "react";
+import { IconBeads, IconRepeat, IconClose } from "@/components/icons";
+import { TASBEH_TARGETS } from "@/lib/tasbeh";
+import type { Tasbeh } from "@/lib/use-tasbeh";
 import type { translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
 
-interface TasbehTabProps {
+interface TasbehProps {
   t: T;
-  /** Per-account storage scope so counts don't leak between accounts. */
-  scope: string;
+  tasbeh: Tasbeh;
 }
 
-interface TasbehState {
-  count: number; // taps in the current round
-  rounds: number; // completed rounds
-  target: number; // 0 = endless
-}
-
-const TARGETS = [33, 99, 100, 0];
-const DEFAULT_STATE: TasbehState = { count: 0, rounds: 0, target: 33 };
 const RING_R = 46;
 const RING_C = 2 * Math.PI * RING_R;
 
-const storageKey = (scope: string) => `myplan_account_${scope}_tasbeh`;
-
-function load(scope: string): TasbehState {
-  try {
-    const raw = localStorage.getItem(storageKey(scope));
-    if (!raw) return DEFAULT_STATE;
-    const parsed = JSON.parse(raw) as Partial<TasbehState>;
-    const target = TARGETS.includes(Number(parsed.target)) ? Number(parsed.target) : DEFAULT_STATE.target;
-    return {
-      count: Math.max(0, Math.floor(Number(parsed.count)) || 0),
-      rounds: Math.max(0, Math.floor(Number(parsed.rounds)) || 0),
-      target,
-    };
-  } catch {
-    return DEFAULT_STATE;
-  }
-}
-
-function vibrate(pattern: number | number[]) {
-  try {
-    navigator.vibrate?.(pattern);
-  } catch {
-    // Haptics are optional.
-  }
-}
-
-export default function TasbehTab({ t, scope }: TasbehTabProps) {
-  const [state, setState] = useState<TasbehState>(DEFAULT_STATE);
-  const loaded = useRef(false);
-
-  // Read the saved count after mount (localStorage is not available during SSR).
-  useEffect(() => {
-    const id = window.setTimeout(() => {
-      setState(load(scope));
-      loaded.current = true;
-    }, 0);
-    return () => {
-      window.clearTimeout(id);
-      loaded.current = false;
-    };
-  }, [scope]);
-
-  useEffect(() => {
-    if (!loaded.current) return;
-    try {
-      localStorage.setItem(storageKey(scope), JSON.stringify(state));
-    } catch {
-      // Storage unavailable: counting still works for this session.
-    }
-  }, [state, scope]);
-
-  const tap = useCallback(() => {
-    setState((s) => {
-      const count = s.count + 1;
-      if (s.target > 0 && count >= s.target) {
-        vibrate([40, 60, 40]);
-        return { ...s, count: 0, rounds: s.rounds + 1 };
-      }
-      vibrate(12);
-      return { ...s, count };
-    });
-  }, []);
-
-  const undo = useCallback(() => {
-    setState((s) => {
-      if (s.count > 0) return { ...s, count: s.count - 1 };
-      if (s.rounds > 0 && s.target > 0) return { ...s, count: s.target - 1, rounds: s.rounds - 1 };
-      return s;
-    });
-  }, []);
-
-  const reset = useCallback(() => setState((s) => ({ ...s, count: 0, rounds: 0 })), []);
-  const setTarget = useCallback((target: number) => setState((s) => ({ ...s, target, count: 0 })), []);
-
-  const total = state.rounds * Math.max(state.target, 0) + state.count;
+/** The counter itself: used as the Sanash tab on mobile and inside the floating panel on desktop. */
+export default function TasbehTab({ t, tasbeh }: TasbehProps) {
+  const { state, tap, undo, reset, setTarget } = tasbeh;
   const progress = state.target > 0 ? state.count / state.target : 0;
 
   return (
     <div className="tasbeh-view">
       <div className="tasbeh-targets" role="group" aria-label={t.cnt_target}>
-        {TARGETS.map((target) => (
+        {TASBEH_TARGETS.map((target) => (
           <button
             key={target}
             type="button"
@@ -140,20 +61,61 @@ export default function TasbehTab({ t, scope }: TasbehTabProps) {
           <span className="tasbeh-stat-label">{t.cnt_rounds}</span>
         </div>
         <div className="tasbeh-stat">
-          <span className="tasbeh-stat-value">{total}</span>
+          <span className="tasbeh-stat-value">{state.total}</span>
           <span className="tasbeh-stat-label">{t.cnt_total}</span>
         </div>
       </div>
 
       <div className="time-controls tasbeh-controls">
-        <button type="button" className="time-btn" onClick={undo} disabled={total === 0}>
+        <button type="button" className="time-btn" onClick={undo} disabled={state.total === 0}>
           <span>{t.cnt_undo}</span>
         </button>
-        <button type="button" className="time-btn" onClick={reset} disabled={total === 0}>
+        <button type="button" className="time-btn" onClick={reset} disabled={state.total === 0}>
           <IconRepeat className="icon-xs" />
           <span>{t.cnt_reset}</span>
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Desktop only (hidden by CSS on phones): a round button that opens the counter over any page. */
+export function TasbehFloat({ t, tasbeh }: TasbehProps) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div className="tasbeh-float">
+      {open && (
+        <section className="tasbeh-float-panel" role="dialog" aria-label={t.cnt_title}>
+          <header className="tasbeh-float-head">
+            <span className="tasbeh-float-title">{t.cnt_title}</span>
+            <button type="button" className="tasbeh-float-close" onClick={() => setOpen(false)} aria-label="×">
+              <IconClose className="icon-sm" />
+            </button>
+          </header>
+          <TasbehTab t={t} tasbeh={tasbeh} />
+        </section>
+      )}
+      <button
+        type="button"
+        className={`tasbeh-fab ${open ? "is-open" : ""}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={t.cnt_title}
+        title={t.cnt_title}
+      >
+        <IconBeads className="icon-md" />
+        {!open && tasbeh.state.count > 0 && <span className="tasbeh-fab-badge">{tasbeh.state.count}</span>}
+      </button>
     </div>
   );
 }

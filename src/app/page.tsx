@@ -5,7 +5,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import TimeTab from "@/components/time-tab";
 import StatsTab from "@/components/stats-tab";
-import TasbehTab from "@/components/tasbeh-tab";
+import TasbehTab, { TasbehFloat } from "@/components/tasbeh-tab";
+import { useTasbeh } from "@/lib/use-tasbeh";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -422,6 +423,7 @@ export default function Home() {
   // Authentication & User State
   const [userId, setUserId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const tasbeh = useTasbeh(userId);
   const [accountName, setAccountName] = useState("");
   const [accountUsername, setAccountUsername] = useState("");
   const [userAge, setUserAge] = useState<string | number>("");
@@ -4599,20 +4601,6 @@ export default function Home() {
 
             <button
               type="button"
-              className={`nav-item ${activeTab === "counter" ? "active" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveTab("counter");
-                setMobileMenuOpen(false);
-              }}
-            >
-              <IconBeads className="nav-icon" />
-              <span className="nav-label">{t.tab_counter}</span>
-              {activeTab === "counter" && <span className="active-indicator" />}
-            </button>
-
-            <button
-              type="button"
               className={`nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -4676,6 +4664,8 @@ export default function Home() {
 
         </div>
       </aside>
+
+      {userId && <TasbehFloat t={t} tasbeh={tasbeh} />}
 
       {/* Main Workspace Wrapper */}
       <div className="main-wrapper">
@@ -5472,7 +5462,7 @@ export default function Home() {
 
           {activeTab === "counter" && (
             <div key="tab-counter" className="tab-pane-container time-pane">
-              <TasbehTab t={t} scope={userId || "guest"} />
+              <TasbehTab t={t} tasbeh={tasbeh} />
             </div>
           )}
 
