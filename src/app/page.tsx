@@ -4717,6 +4717,24 @@ export default function Home() {
                 <span>{t.offline_pill}</span>
               </span>
             )}
+            <button
+              type="button"
+              className={`mobile-icon-btn ${activeTab === "time" ? "active" : ""}`}
+              onClick={() => setActiveTab("time")}
+              aria-label={t.tab_time}
+              title={t.tab_time}
+            >
+              <IconClock className="icon-sm" />
+            </button>
+            <button
+              type="button"
+              className={`mobile-icon-btn ${activeTab === "counter" ? "active" : ""}`}
+              onClick={() => setActiveTab("counter")}
+              aria-label={t.tab_counter}
+              title={t.tab_counter}
+            >
+              <IconBeads className="icon-sm" />
+            </button>
             {!isAppInstalled && (
               <button
                 type="button"
@@ -6161,15 +6179,6 @@ export default function Home() {
           </button>
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "analytics" ? "active" : ""}`}
-            onClick={() => setActiveTab("analytics")}
-          >
-            <IconBarChart className="bottom-nav-icon" />
-            <span>{t.tab_analytics}</span>
-          </button>
-
-          <button
-            type="button"
             className="bottom-nav-create"
             onClick={openCreateModal}
             aria-label="Vazifa qo‘shish"
@@ -6180,20 +6189,13 @@ export default function Home() {
 
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "time" ? "active" : ""}`}
-            onClick={() => setActiveTab("time")}
+            className={`bottom-nav-item ${activeTab === "analytics" ? "active" : ""}`}
+            onClick={() => setActiveTab("analytics")}
           >
-            <IconClock className="bottom-nav-icon" />
-            <span>{t.tab_time}</span>
+            <IconBarChart className="bottom-nav-icon" />
+            <span>{t.tab_analytics}</span>
           </button>
-          <button
-            type="button"
-            className={`bottom-nav-item ${activeTab === "counter" ? "active" : ""}`}
-            onClick={() => setActiveTab("counter")}
-          >
-            <IconBeads className="bottom-nav-icon" />
-            <span>{t.tab_counter}</span>
-          </button>
+
           <button
             type="button"
             className={`bottom-nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}

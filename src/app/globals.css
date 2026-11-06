@@ -9462,3 +9462,30 @@ html, body { overscroll-behavior-y: none; }
     border-radius: 50% !important;
   }
 }
+
+/* Mobile: five bottom slots (Bugun, Katalog, +, Statistika, Profil); Vaqt and Sanash live in the header. */
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .mobile-topbar-actions {
+    gap: 8px;
+  }
+  .bottom-nav-item span {
+    font-size: 11px;
+  }
+}
+@media (max-width: 380px) {
+  .mobile-icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .mobile-topbar-actions {
+    gap: 6px;
+  }
+}
+@media (max-width: 340px) {
+  .mobile-brand-btn .brand-title {
+    display: none;
+  }
+}
