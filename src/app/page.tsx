@@ -2251,6 +2251,21 @@ export default function Home() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [showCustomTimeModal, showPresetModal, showInstallGuideModal, showEveningReview, focusModalOpen, closeCreateModal]);
 
+  // The Sanash tab exists only in the phone/tablet layout. On a wide window the counter is the floating button,
+  // so widening the window while the tab is open (or restoring it from a saved session) goes back to Today.
+  useEffect(() => {
+    const wide = window.matchMedia("(min-width: 769px)");
+    const leaveCounterTab = () => {
+      if (wide.matches) setActiveTab((tab) => (tab === "counter" ? "today" : tab));
+    };
+    const timer = setTimeout(leaveCounterTab, 0);
+    wide.addEventListener("change", leaveCounterTab);
+    return () => {
+      clearTimeout(timer);
+      wide.removeEventListener("change", leaveCounterTab);
+    };
+  }, [activeTab]);
+
   // The "turn notifications on" prompt wakes exactly when it may (re)appear. No interval: a timer that
   // set state every few seconds re-rendered this whole page for nothing.
   useEffect(() => {
@@ -6220,7 +6235,14 @@ export default function Home() {
             className={`bottom-nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
             onClick={() => setActiveTab("profile")}
           >
-            <IconUser className="bottom-nav-icon" />
+            <span className="bottom-nav-avatar">
+              {avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={avatarUrl} alt="" className="avatar-img" />
+              ) : (
+                (accountName || "M").slice(0, 1).toUpperCase()
+              )}
+            </span>
             <span>{t.tab_profile}</span>
           </button>
         </nav>
