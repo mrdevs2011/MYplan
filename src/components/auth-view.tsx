@@ -2,7 +2,7 @@
 
 import { saveAccountSession } from "@/lib/account-sessions";
 import { markCleanSlateEpoch } from "@/lib/epoch";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -48,8 +48,18 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
   const [debouncedAgeError, setDebouncedAgeError] = useState("");
   const [debouncedPasswordError, setDebouncedPasswordError] = useState("");
   const [isAddingAccount, setIsAddingAccount] = useState(false);
+  // True only when this page was opened by tapping "add account" inside the app. Read once: a page refresh loses it.
+  const freshAddRef = useRef<boolean | null>(null);
 
   useEffect(() => {
+    if (freshAddRef.current === null && typeof window !== "undefined") {
+      try {
+        freshAddRef.current = sessionStorage.getItem("myplan_add_account_fresh") === "1";
+        sessionStorage.removeItem("myplan_add_account_fresh");
+      } catch {
+        freshAddRef.current = true;
+      }
+    }
     const addingIntent = typeof window !== "undefined" && localStorage.getItem("myplan_add_account_intent") === "true";
     setTimeout(() => setIsAddingAccount(addingIntent), 0);
     if (addingIntent && typeof window !== "undefined") {
@@ -71,6 +81,12 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
     const supabase = createClient();
     void supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !addingIntent) {
+        router.replace("/");
+      } else if (session?.user && addingIntent && freshAddRef.current === false) {
+        // Refreshing (or re-opening) the add-account page while still signed in: go back to the app instead of
+        // leaving the user on a login form for an account they did not ask to switch.
+        localStorage.removeItem("myplan_add_account_intent");
+        localStorage.removeItem("myplan_switch_account_id");
         router.replace("/");
       }
     });

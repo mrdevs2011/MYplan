@@ -2350,6 +2350,7 @@ export default function Home() {
     }
     if (typeof window !== "undefined") {
       localStorage.setItem("myplan_add_account_intent", "true");
+      try { sessionStorage.setItem("myplan_add_account_fresh", "1"); } catch { /* the form simply behaves as freshly opened */ }
     }
     // Immediate feedback: the login route can take a moment to arrive, so never leave the page looking frozen.
     setOverlayText(t.please_wait);
@@ -2510,14 +2511,35 @@ export default function Home() {
     if (userId) router.prefetch("/login");
   }, [userId, router]);
 
-  // Keep this device registered for the signed-in account: runs silently once per account per page load.
+  // Web standard: follow the browser's own notification permission (Permissions API). A grant made once, in the
+  // browser or its site settings, is picked up live and remembered by the browser: the page never needs to ask again.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions?.query) return;
+    let status: PermissionStatus | null = null;
+    let disposed = false;
+    const apply = () => {
+      if (status) setPushPermission(status.state === "prompt" ? "default" : (status.state as NotificationPermission));
+    };
+    navigator.permissions.query({ name: "notifications" as PermissionName }).then((result) => {
+      if (disposed) return;
+      status = result;
+      apply();
+      result.addEventListener("change", apply);
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      status?.removeEventListener("change", apply);
+    };
+  }, []);
+
+  // Keep this device registered for the signed-in account: runs silently once per account while permission is granted.
   useEffect(() => {
     if (!userId || !pushChecked || process.env.NODE_ENV !== "production") return;
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (pushPermission !== "granted") return;
     if (pushSyncedUserRef.current === userId) return;
     pushSyncedUserRef.current = userId;
     void enablePushForThisDevice(true).catch((error) => console.warn("Push re-sync failed:", error));
-  }, [userId, pushChecked, enablePushForThisDevice]);
+  }, [userId, pushChecked, pushPermission, enablePushForThisDevice]);
 
   const snoozeNag = () => {
     const until = Date.now() + 60_000;
