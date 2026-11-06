@@ -9,6 +9,7 @@ import TasbehTab, { TasbehFloat } from "@/components/tasbeh-tab";
 import { useTasbeh } from "@/lib/use-tasbeh";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { registerPushForSavedAccounts } from "@/lib/push-accounts";
+import { changedFields } from "@/lib/patch";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -173,6 +174,10 @@ const normalizeCustomSlots = (raw: unknown): CustomTimeSlot[] =>
   Array.isArray(raw)
     ? raw.filter((slot): slot is CustomTimeSlot => Boolean(slot && typeof slot.id === "string" && typeof slot.label === "string"))
     : NO_CUSTOM_SLOTS;
+const mergeCustomSlots = (local: CustomTimeSlot[], remote: CustomTimeSlot[]): CustomTimeSlot[] => [
+  ...local,
+  ...remote.filter((slot) => !local.some((mine) => mine.id === slot.id)),
+];
 const normalizeTheme = (raw: unknown): "dark" | "light" | "system" => (raw === "dark" || raw === "light" ? raw : "system");
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
@@ -626,7 +631,7 @@ export default function Home() {
 
   // Custom Time Slots
   // Custom time-of-day slots follow the account to every device (and update live).
-  const slotsSync = useSyncedState<CustomTimeSlot[]>(userId, "custom_time_slots", NO_CUSTOM_SLOTS, normalizeCustomSlots);
+  const slotsSync = useSyncedState<CustomTimeSlot[]>(userId, "custom_time_slots", NO_CUSTOM_SLOTS, normalizeCustomSlots, { merge: mergeCustomSlots });
   const customTimeSlots = slotsSync.value;
   const setCustomTimeSlots = slotsSync.set;
   const themeSync = useSyncedState<"dark" | "light" | "system">(userId, "theme", "system", normalizeTheme);
@@ -885,11 +890,24 @@ export default function Home() {
           }));
           ({ error } = await supabase.from("progress_events").upsert(rows, { onConflict: "id", ignoreDuplicates: true }));
         } else if (head.type === "occurrence_status") {
-          ({ error } = await supabase
+          // A change that waited in the queue (offline) must not overwrite a newer change made on another device.
+          const stale = Date.now() - head.createdAt > 30_000;
+          const madeAt = new Date(head.createdAt).toISOString();
+          let statusWrite = supabase
             .from("occurrences")
-            .update({ status: head.payload.status })
+            .update(stale ? { status: head.payload.status, status_changed_at: madeAt } : { status: head.payload.status })
             .eq("id", head.payload.id)
-            .eq("user_id", head.payload.user_id));
+            .eq("user_id", head.payload.user_id);
+          if (stale) statusWrite = statusWrite.lte("status_changed_at", madeAt);
+          ({ error } = await statusWrite);
+          if (stale && (error?.code === "42703" || error?.code === "PGRST204")) {
+            // The status-time column (migration 015) is not on this database yet: plain write, never lose the tick.
+            ({ error } = await supabase
+              .from("occurrences")
+              .update({ status: head.payload.status })
+              .eq("id", head.payload.id)
+              .eq("user_id", head.payload.user_id));
+          }
         } else if (head.type === "activity_write") {
           ({ error } = await supabase
             .from("activities")
@@ -936,7 +954,9 @@ export default function Home() {
               best_streak: head.payload.best_streak,
               last_active_date: head.payload.last_active_date,
             })
-            .eq("id", head.payload.user_id));
+            .eq("id", head.payload.user_id)
+            // Another device may already have recorded this (or a later) day.
+            .or(`last_active_date.is.null,last_active_date.lt.${head.payload.last_active_date}`));
         }
 
         if (error && !isPermanentWriteError(error.code)) {
@@ -3241,14 +3261,17 @@ export default function Home() {
           unit: unitValue,
           ends_on: endsOnStr,
         };
+        const changes = changedFields(editingActivity as unknown as Record<string, unknown>, patch);
         const keepEditOffline = () => {
-          setActivities((curr) => curr.map((a) => (a.id === editingActivity.id ? ({ ...a, ...patch } as Activity) : a)));
-          enqueueOfflineMutation({ type: "activity_update", payload: { id: editingActivity.id, user_id: userId, patch } });
+          setActivities((curr) => curr.map((a) => (a.id === editingActivity.id ? ({ ...a, ...changes } as Activity) : a)));
+          enqueueOfflineMutation({ type: "activity_update", payload: { id: editingActivity.id, user_id: userId, patch: changes } });
         };
-        if (!navigator.onLine) {
+        if (Object.keys(changes).length === 0) {
+          // Nothing was changed: nothing to send.
+        } else if (!navigator.onLine) {
           keepEditOffline();
         } else {
-          const { error } = await supabase.from("activities").update(patch).eq("id", editingActivity.id).eq("user_id", userId);
+          const { error } = await supabase.from("activities").update(changes).eq("id", editingActivity.id).eq("user_id", userId);
           if (error) {
             if (notReachable(error)) keepEditOffline();
             else throw error;

@@ -30,22 +30,22 @@ export function useSyncedState<T>(
   key: string,
   fallback: T,
   normalize: (raw: unknown) => T,
-  options: { lazyLocal?: boolean } = {},
+  options: { lazyLocal?: boolean; merge?: (local: T, remote: T) => T } = {},
 ): SyncedState<T> {
   const scope = userId || "guest";
   const localKey = `myplan_account_${scope}_state_${key}`;
 
-  const readLocal = useCallback((): Box<T> => {
+  const readLocal = useCallback((): Box<T> & { synced: number } => {
     try {
       const raw = localStorage.getItem(localKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as { value?: unknown; at?: unknown };
-        return { value: normalize(parsed.value), at: Number(parsed.at) || 0 };
+        const parsed = JSON.parse(raw) as { value?: unknown; at?: unknown; synced?: unknown };
+        return { value: normalize(parsed.value), at: Number(parsed.at) || 0, synced: Number(parsed.synced) || 0 };
       }
     } catch {
       // Unreadable copy: start from the default.
     }
-    return { value: fallback, at: 0 };
+    return { value: fallback, at: 0, synced: 0 };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localKey]);
 
@@ -55,7 +55,12 @@ export function useSyncedState<T>(
   const [ready, setReady] = useState(false);
   const boxRef = useRef(box);
   const readyRef = useRef(false);
+  // Time of the newest copy known to be on the server. A device copy newer than this has NOT been uploaded yet.
   const lastSynced = useRef(0);
+  const mergeRef = useRef(options.merge);
+  useEffect(() => {
+    mergeRef.current = options.merge;
+  }, [options.merge]);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -75,15 +80,30 @@ export function useSyncedState<T>(
       });
       if (error) throw error;
       lastSynced.current = Math.max(lastSynced.current, b.at);
+      try {
+        localStorage.setItem(localKey, JSON.stringify({ ...b, synced: lastSynced.current }));
+      } catch {
+        // Storage unavailable: the next load simply treats the copy as not uploaded yet.
+      }
     } catch (error) {
       // Offline: the device copy stays and the next change or reconnect pushes it.
       console.warn(`State "${key}" could not sync:`, error);
     }
-  }, [userId, key]);
+  }, [userId, key, localKey]);
 
   const adopt = useCallback(
     (raw: unknown, at: number) => {
-      if (at <= boxRef.current.at) return;
+      const local = boxRef.current;
+      // Both sides changed since they last agreed (this device offline, another one online): combine them
+      // when the data allows it, instead of letting the newer clock erase the other side's work.
+      if (mergeRef.current && local.at > lastSynced.current && at > lastSynced.current) {
+        const merged: Box<T> = { value: mergeRef.current(local.value, normalize(raw)), at: Math.max(local.at, at) + 1 };
+        lastSynced.current = Math.max(lastSynced.current, at);
+        boxRef.current = merged;
+        setBox(merged);
+        return;
+      }
+      if (at <= local.at) return;
       lastSynced.current = Math.max(lastSynced.current, at);
       const next = { value: normalize(raw), at };
       boxRef.current = next;
@@ -116,8 +136,9 @@ export function useSyncedState<T>(
     lastSynced.current = 0;
     const id = window.setTimeout(async () => {
       const local = readLocal();
-      boxRef.current = local;
-      setBox(local);
+      lastSynced.current = local.synced;
+      boxRef.current = { value: local.value, at: local.at };
+      setBox({ value: local.value, at: local.at });
       await pull();
       if (cancelled) return;
       readyRef.current = true;
@@ -159,7 +180,7 @@ export function useSyncedState<T>(
   useEffect(() => {
     if (!readyRef.current || box.at === 0) return;
     try {
-      localStorage.setItem(localKey, JSON.stringify(box));
+      localStorage.setItem(localKey, JSON.stringify({ ...box, synced: lastSynced.current }));
     } catch {
       // Storage unavailable: the state still works for this session.
     }
