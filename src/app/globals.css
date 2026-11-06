@@ -9448,3 +9448,17 @@ html, body { overscroll-behavior-y: none; }
     bottom: 96px;
   }
 }
+
+/* Collapsed sidebar: every button is a true 44x44 circle (the global 48px min-height made the active item oval). */
+@media (min-width: 769px) {
+  .app-layout.sidebar-collapsed .nav-item,
+  .app-layout.sidebar-collapsed .sidebar-pwa-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    max-width: 44px !important;
+    max-height: 44px !important;
+    border-radius: 50% !important;
+  }
+}
