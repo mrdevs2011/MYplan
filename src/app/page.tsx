@@ -2323,6 +2323,33 @@ export default function Home() {
     return pushPermission === "denied" ? "denied" : "ask";
   })();
 
+  // A counter that has reached its target is done, however it got there: editing the target down to the
+  // current amount used to leave it "pending" at 6/6. Settle it here, once per occurrence.
+  const settledCountersRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!userId) return;
+    const reached: string[] = [];
+    for (const occ of occurrences) {
+      if (occ.status === "completed") continue;
+      const activity = activities.find((item) => item.id === occ.activity_id);
+      if (!activity || activity.measurement_type !== "count") continue;
+      const target = activity.target || 0;
+      const count = taskCounts[occ.id];
+      if (target > 0 && typeof count === "number" && count >= target) reached.push(occ.id);
+    }
+    if (reached.length === 0) return;
+    const timer = setTimeout(() => {
+      setOccurrences((curr) => curr.map((item) => (reached.includes(item.id) ? { ...item, status: "completed" } : item)));
+      for (const id of reached) {
+        if (settledCountersRef.current.has(id)) continue;
+        settledCountersRef.current.add(id);
+        enqueueOfflineMutation({ type: "occurrence_status", payload: { id, user_id: userId, status: "completed" } });
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the queue writer is re-created every render; only data changes matter here
+  }, [occurrences, activities, taskCounts, userId]);
+
   // Scroll lock background when any modal is open so modal scrolls freely
   useEffect(() => {
     const isModalActive =
