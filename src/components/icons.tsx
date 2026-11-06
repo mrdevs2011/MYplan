@@ -522,3 +522,7 @@ export function IconPin(props: IconProps) {
 export function IconCircleDot(props: IconProps) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>;
 }
+
+export function IconBeads(props: IconProps) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="5" r="2" /><circle cx="18" cy="9" r="2" /><circle cx="18" cy="16" r="2" /><circle cx="12" cy="20" r="2" /><circle cx="6" cy="16" r="2" /><circle cx="6" cy="9" r="2" /></svg>;
+}

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import TimeTab from "@/components/time-tab";
 import StatsTab from "@/components/stats-tab";
+import TasbehTab from "@/components/tasbeh-tab";
 import { formatLongDate } from "@/lib/date-format";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
@@ -45,7 +46,6 @@ import {
   IconList,
   IconArchive,
   IconLogOut,
-  IconMenu,
   IconClose,
   IconChevronLeft,
   IconChevronRight,
@@ -72,6 +72,7 @@ import {
   IconWifiOff,
   IconSmartphone,
   IconTablet,
+  IconBeads,
   IconLaptop,
   IconLock,
   IconKey,
@@ -119,7 +120,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-type TabType = "today" | "activities" | "notifications" | "analytics" | "time" | "profile" | "settings";
+type TabType = "today" | "activities" | "notifications" | "analytics" | "time" | "counter" | "profile" | "settings";
 
 interface UserAccount {
   id: string;
@@ -4593,7 +4594,21 @@ export default function Home() {
 
             <button
               type="button"
-              className={`nav-item ${activeTab === "profile" ? "active" : ""}`}
+              className={`nav-item ${activeTab === "counter" ? "active" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab("counter");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <IconBeads className="nav-icon" />
+              <span className="nav-label">{t.tab_counter}</span>
+              {activeTab === "counter" && <span className="active-indicator" />}
+            </button>
+
+            <button
+              type="button"
+              className={`nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setActiveTab("profile");
@@ -4602,22 +4617,9 @@ export default function Home() {
             >
               <IconUser className="nav-icon" />
               <span className="nav-label">{t.tab_profile}</span>
-              {activeTab === "profile" && <span className="active-indicator" />}
+              {(activeTab === "profile" || activeTab === "settings") && <span className="active-indicator" />}
             </button>
 
-            <button
-              type="button"
-              className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveTab("settings");
-                setMobileMenuOpen(false);
-              }}
-            >
-              <IconSettings className="nav-icon" />
-              <span className="nav-label">{t.tab_settings}</span>
-              {activeTab === "settings" && <span className="active-indicator" />}
-            </button>
           </nav>
         </div>
 
@@ -4667,18 +4669,6 @@ export default function Home() {
             </div>
           </button>
 
-          <button
-            type="button"
-            className="logout-action-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              void handleSignOut();
-            }}
-            title={t.logout}
-          >
-            <IconLogOut className="icon-sm" />
-            <span className="logout-text">{t.logout}</span>
-          </button>
         </div>
       </aside>
 
@@ -4686,18 +4676,6 @@ export default function Home() {
       <div className="main-wrapper">
         {/* Top Navbar on Mobile & Tablet */}
         <header className="mobile-topbar">
-          <button
-            type="button"
-            className="mobile-menu-trigger"
-            onClick={() => {
-              setMobileMenuOpen(true);
-              setSidebarOpen(true);
-            }}
-            aria-label="Menyuni ochish"
-          >
-            <IconMenu className="icon-md" />
-          </button>
-
           <button
             type="button"
             className="mobile-brand-btn"
@@ -4717,25 +4695,31 @@ export default function Home() {
                 <span>{t.offline_pill}</span>
               </span>
             )}
+            {!isAppInstalled && (
+              <button
+                type="button"
+                className="mobile-icon-btn"
+                onClick={() => void handleInstallApp()}
+                aria-label={t.btn_install_app}
+                title={t.btn_install_app}
+              >
+                <IconDownload className="icon-sm" />
+              </button>
+            )}
             <button
               type="button"
-              className="mobile-avatar-btn"
-              onClick={() => setActiveTab("profile")}
-              title={t.tab_profile}
+              className={`mobile-icon-btn ${activeTab === "notifications" ? "active" : ""}`}
+              onClick={() => setActiveTab("notifications")}
+              aria-label={t.tab_notifications}
+              title={t.tab_notifications}
             >
-              <div className="mobile-user-avatar">
-                {avatarUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img src={avatarUrl} alt="Avatar" className="avatar-img" />
-                ) : (
-                  (accountName || "M").slice(0, 1).toUpperCase()
-                )}
-              </div>
+              <IconBell className="icon-sm" />
+              {unreadNotifsCount > 0 && <span className="mobile-icon-badge">{unreadNotifsCount > 9 ? "9+" : unreadNotifsCount}</span>}
             </button>
           </div>
         </header>
 
-        <main className={`content-container ${activeTab === "time" ? "is-time" : ""}`}>
+        <main className={`content-container ${activeTab === "time" || activeTab === "counter" ? "is-time" : ""}`}>
           {/* Header Bar Distinct for Each Tab */}
           <header className="page-header">
             <div className="header-text">
@@ -4782,6 +4766,15 @@ export default function Home() {
                   </span>
                   <h1 className="page-title">{t.clk_title}</h1>
                   <p className="page-subtitle">{t.clk_sub}</p>
+                </>
+              )}
+              {activeTab === "counter" && (
+                <>
+                  <span className="page-kicker">
+                    <IconBeads className="icon-xs" /> {t.cnt_kicker}
+                  </span>
+                  <h1 className="page-title">{t.cnt_title}</h1>
+                  <p className="page-subtitle">{t.cnt_sub}</p>
                 </>
               )}
               {activeTab === "profile" && (
@@ -5472,6 +5465,12 @@ export default function Home() {
             </div>
           )}
 
+          {activeTab === "counter" && (
+            <div key="tab-counter" className="tab-pane-container time-pane">
+              <TasbehTab t={t} scope={userId || "guest"} />
+            </div>
+          )}
+
           {activeTab === "profile" && (
             <div key="tab-profile" className="tab-pane-container">
               <section className="profile-view">
@@ -5742,6 +5741,16 @@ export default function Home() {
                       )}
                     </div>
                   </div>
+                </div>
+                <div className="profile-actions">
+                  <button type="button" className="profile-action-btn" onClick={() => setActiveTab("settings")}>
+                    <IconSettings className="icon-sm" />
+                    <span>{t.tab_settings}</span>
+                  </button>
+                  <button type="button" className="profile-action-btn danger" onClick={() => void handleSignOut()}>
+                    <IconLogOut className="icon-sm" />
+                    <span>{t.logout}</span>
+                  </button>
                 </div>
               </section>
             </div>
@@ -6098,7 +6107,7 @@ export default function Home() {
           )}
 
           {/* Workspace Footer */}
-          <footer className={`app-footer ${activeTab === "time" ? "is-hidden-time" : ""}`}>
+          <footer className={`app-footer ${activeTab === "time" || activeTab === "counter" ? "is-hidden-time" : ""}`}>
             <div className="footer-left">
               <span className="footer-brand">MyPlan</span>
               <span className="footer-separator">•</span>
@@ -6120,18 +6129,23 @@ export default function Home() {
             <IconCalendar className="bottom-nav-icon" />
             <span>{t.tab_today}</span>
           </button>
-
-          {/* The catalog is not in the bottom bar: it lives in the side menu (burger). */}
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "time" ? "active" : ""}`}
-            onClick={() => setActiveTab("time")}
+            className={`bottom-nav-item ${activeTab === "activities" ? "active" : ""}`}
+            onClick={() => setActiveTab("activities")}
           >
-            <IconClock className="bottom-nav-icon" />
-            <span>{t.tab_time}</span>
+            <IconList className="bottom-nav-icon" />
+            <span>{t.tab_activities}</span>
+          </button>
+          <button
+            type="button"
+            className={`bottom-nav-item ${activeTab === "analytics" ? "active" : ""}`}
+            onClick={() => setActiveTab("analytics")}
+          >
+            <IconBarChart className="bottom-nav-icon" />
+            <span>{t.tab_analytics}</span>
           </button>
 
-          {/* Center Floating Plus Button */}
           <button
             type="button"
             className="bottom-nav-create"
@@ -6144,17 +6158,23 @@ export default function Home() {
 
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "notifications" ? "active" : ""}`}
-            onClick={() => setActiveTab("notifications")}
+            className={`bottom-nav-item ${activeTab === "time" ? "active" : ""}`}
+            onClick={() => setActiveTab("time")}
           >
-            <IconBell className="bottom-nav-icon" />
-            <span>{t.tab_notifications}</span>
-            {unreadNotifsCount > 0 && <span className="mobile-unread-dot" />}
+            <IconClock className="bottom-nav-icon" />
+            <span>{t.tab_time}</span>
           </button>
-
           <button
             type="button"
-            className={`bottom-nav-item ${activeTab === "profile" ? "active" : ""}`}
+            className={`bottom-nav-item ${activeTab === "counter" ? "active" : ""}`}
+            onClick={() => setActiveTab("counter")}
+          >
+            <IconBeads className="bottom-nav-icon" />
+            <span>{t.tab_counter}</span>
+          </button>
+          <button
+            type="button"
+            className={`bottom-nav-item ${activeTab === "profile" || activeTab === "settings" ? "active" : ""}`}
             onClick={() => setActiveTab("profile")}
           >
             <IconUser className="bottom-nav-icon" />

@@ -9084,3 +9084,253 @@ html, body { overscroll-behavior-y: none; }
 .music-stop-btn { align-self: center; margin-top: 12px; animation: toastSlideIn 0.3s ease-out; }
 .music-toggle { align-self: center; margin-top: 14px; gap: 8px; display: inline-flex; align-items: center; }
 .music-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ==========================================================================
+   SANASH TAB (Tasbeh) — fits the viewport like the Vaqt tab.
+   ========================================================================== */
+.tasbeh-view {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tasbeh-targets {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tasbeh-targets .time-chip {
+  min-width: 52px;
+  height: 40px;
+}
+
+.tasbeh-tap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: min(100%, 360px);
+  max-height: 360px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  transition: transform 0.08s ease;
+}
+
+.tasbeh-tap:active {
+  transform: scale(0.97);
+}
+
+.tasbeh-tap svg {
+  position: absolute;
+  inset: 8px;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  transform: rotate(-90deg);
+}
+
+.tasbeh-tap-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.tasbeh-count {
+  font-size: clamp(56px, 16dvh, 120px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.tasbeh-hint {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tasbeh-stats {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.tasbeh-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+}
+
+.tasbeh-stat-value {
+  font-size: 22px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.tasbeh-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.tasbeh-controls {
+  flex-shrink: 0;
+}
+
+.tasbeh-controls .time-btn span {
+  display: inline;
+}
+
+/* ==========================================================================
+   NAVIGATION LAYOUT — centred collapsed sidebar, tidy 7-slot bottom bar, topbar actions
+   ========================================================================== */
+
+/* Collapsed desktop sidebar: the hidden labels must not leave a gap that pushes icons off-centre. */
+.app-layout.sidebar-collapsed .nav-item,
+.app-layout.sidebar-collapsed .user-profile-card-btn,
+.app-layout.sidebar-collapsed .user-profile-card,
+.app-layout.sidebar-collapsed .sidebar-pwa-btn,
+.app-layout.sidebar-collapsed .sidebar-add-task-btn {
+  gap: 0 !important;
+  padding: 0 !important;
+  justify-content: center !important;
+}
+.app-layout.sidebar-collapsed .user-avatar,
+.app-layout.sidebar-collapsed .nav-item .nav-icon,
+.app-layout.sidebar-collapsed .sidebar-pwa-btn svg {
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+.app-layout.sidebar-collapsed .user-info {
+  display: none !important;
+}
+.app-layout.sidebar-collapsed .sidebar-pwa-wrap,
+.app-layout.sidebar-collapsed .sidebar-footer,
+.app-layout.sidebar-collapsed .sidebar-nav-group,
+.app-layout.sidebar-collapsed .nav-links,
+.app-layout.sidebar-collapsed .sidebar-action-wrap {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  align-items: center !important;
+}
+
+/* Top bar actions (install, notifications) */
+.mobile-icon-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50% !important;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.mobile-icon-btn.active {
+  color: var(--accent-lime);
+  border-color: var(--border-active);
+}
+.mobile-icon-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-lime);
+  color: var(--text-inverse);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Profile tab: settings + logout */
+.profile-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.profile-action-btn {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 18px;
+  border-radius: 9999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+.profile-action-btn.danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* Bottom bar: seven equal slots (3 tabs | + | 3 tabs), everything centred */
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    align-items: center;
+    justify-items: center;
+    padding: 0 4px;
+  }
+  .bottom-nav-item {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 0;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .bottom-nav-item span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+  }
+  .mobile-topbar-actions {
+    margin-left: auto;
+  }
+  .profile-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 380px) {
+  .bottom-nav-item span {
+    font-size: 9px;
+  }
+}
