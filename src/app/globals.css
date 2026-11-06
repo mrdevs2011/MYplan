@@ -9591,3 +9591,31 @@ html, body { overscroll-behavior-y: none; }
 .time-card {
   --ring: clamp(110px, 30dvh, 250px);
 }
+
+/* A finished plan leaves quietly: it fades while its row closes up, so nothing jumps. */
+.task-card-swipe-wrap.is-fading-out {
+  pointer-events: none;
+  animation: task-leave 0.9s ease forwards;
+}
+@keyframes task-leave {
+  from {
+    opacity: 1;
+    max-height: var(--card-h, 240px);
+    margin-bottom: 0;
+  }
+  35% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: -10px;
+    border-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-card-swipe-wrap.is-fading-out {
+    animation-duration: 0.01s;
+  }
+}

@@ -180,7 +180,6 @@ const mergeCustomSlots = (local: CustomTimeSlot[], remote: CustomTimeSlot[]): Cu
   ...local,
   ...remote.filter((slot) => !local.some((mine) => mine.id === slot.id)),
 ];
-const normalizeTheme = (raw: unknown): "dark" | "light" | "system" => (raw === "dark" || raw === "light" ? raw : "system");
 
 type CustomDurationUnit = "kun" | "hafta" | "oy" | "yil";
 
@@ -554,6 +553,14 @@ export default function Home() {
   const [language, setLanguage] = useState<Language>("uz");
   const [theme, setTheme] = useState<"dark" | "light" | "system">("system");
   const [soundEnabled, setSoundEnabled] = useState(true);
+  // Device preferences (language, theme, sound, hide-done): one person uses one device, so they stay on it.
+  const [hideDone, setHideDone] = useState(true);
+  // Plans whose finished row is hidden, and the ones currently fading away (activity id -> their height).
+  const [hiddenDoneIds, setHiddenDoneIds] = useState<Set<string>>(new Set());
+  const [fadingDone, setFadingDone] = useState<Map<string, number>>(new Map());
+  const doneTimersRef = useRef<Map<string, number>>(new Map());
+  const userDoneRef = useRef<Set<string>>(new Set());
+  const hideBaselineRef = useRef<{ uid: string; at: number } | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoArchiveDelay, setAutoArchiveDelay] = useState(7);
 
@@ -649,7 +656,6 @@ export default function Home() {
   const slotsSync = useSyncedState<CustomTimeSlot[]>(userId, "custom_time_slots", NO_CUSTOM_SLOTS, normalizeCustomSlots, { merge: mergeCustomSlots });
   const customTimeSlots = slotsSync.value;
   const setCustomTimeSlots = slotsSync.set;
-  const themeSync = useSyncedState<"dark" | "light" | "system">(userId, "theme", "system", normalizeTheme);
   const [showCustomTimeModal, setShowCustomTimeModal] = useState<boolean>(false);
   const [customTimeInput, setCustomTimeInput] = useState<string>("");
   const [customTimeError, setCustomTimeError] = useState<string>("");
@@ -1351,11 +1357,6 @@ export default function Home() {
         setStreakCount(typeof profile.streak_count === "number" ? profile.streak_count : 0);
         setBestStreak(typeof profile.best_streak === "number" ? profile.best_streak : 0);
 
-        const profileLanguage = profile.language === "en" || profile.language === "ru" ? profile.language : "uz";
-        setLanguage(profileLanguage);
-        localStorage.setItem("myplan_lang", profileLanguage);
-        setFormattedToday(formatLongDate(profileLanguage));
-
         const validSteps = Array.isArray(profile.counter_steps)
           ? (profile.counter_steps as number[])
               .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
@@ -1365,11 +1366,8 @@ export default function Home() {
         setCounterSteps(resolvedSteps);
         localStorage.setItem("myplan_counter_steps", JSON.stringify(resolvedSteps));
 
-        const soundEnabledForAccount = typeof profile.sound_enabled === "boolean" ? profile.sound_enabled : true;
         const notificationsEnabledForAccount = typeof profile.notifications_enabled === "boolean" ? profile.notifications_enabled : true;
-        setSoundEnabled(soundEnabledForAccount);
         setNotificationsEnabled(notificationsEnabledForAccount);
-        localStorage.setItem("myplan_sound_enabled", String(soundEnabledForAccount));
         localStorage.setItem("myplan_notifications_enabled", String(notificationsEnabledForAccount));
         setAutoArchiveDelay(typeof profile.auto_archive_delay === "number" ? profile.auto_archive_delay : 7);
       }
@@ -1718,12 +1716,6 @@ export default function Home() {
           (payload) => {
             if (activeRealtimeUid !== uid) return;
             const p = payload.new as Record<string, unknown>;
-            if (p.language && typeof p.language === "string") {
-              const l = p.language as Language;
-              setLanguage(l);
-              localStorage.setItem("myplan_lang", l);
-              setFormattedToday(formatLongDate(l));
-            }
             if (Array.isArray(p.counter_steps)) {
               const steps = (p.counter_steps as number[])
                 .filter((n): n is number => typeof n === "number" && n >= 1 && n <= 99)
@@ -1735,10 +1727,6 @@ export default function Home() {
             }
             if (typeof p.streak_count === "number") setStreakCount(p.streak_count);
             if (typeof p.best_streak === "number") setBestStreak(p.best_streak);
-            if (typeof p.sound_enabled === "boolean") {
-              setSoundEnabled(p.sound_enabled);
-              localStorage.setItem("myplan_sound_enabled", String(p.sound_enabled));
-            }
             if (typeof p.notifications_enabled === "boolean") {
               setNotificationsEnabled(p.notifications_enabled);
               localStorage.setItem("myplan_notifications_enabled", String(p.notifications_enabled));
@@ -2146,6 +2134,26 @@ export default function Home() {
         }
       };
       colorSchemeMedia.addEventListener("change", handleSystemThemeChange);
+
+      // Device preferences are read from this device only.
+      setTimeout(() => {
+        try {
+          const savedLang = localStorage.getItem("myplan_lang");
+          const browserLang = (navigator.language || "uz").slice(0, 2).toLowerCase();
+          const chosen: Language =
+            savedLang === "en" || savedLang === "ru" || savedLang === "uz"
+              ? savedLang
+              : browserLang === "ru" ? "ru" : browserLang === "en" ? "en" : "uz";
+          setLanguage(chosen);
+          setFormattedToday(formatLongDate(chosen));
+          const savedSound = localStorage.getItem("myplan_sound_enabled");
+          if (savedSound !== null) setSoundEnabled(savedSound !== "false");
+          const savedHideDone = localStorage.getItem("myplan_hide_done");
+          if (savedHideDone !== null) setHideDone(savedHideDone !== "false");
+        } catch {
+          // Storage unavailable: defaults apply.
+        }
+      }, 0);
 
       const currentD = new Date().getDay();
       setTimeout(() => {
@@ -2636,6 +2644,7 @@ export default function Home() {
     if (!occ) return;
 
     const nextStatus = occ.status === "completed" ? "pending" : "completed";
+    if (nextStatus === "completed") userDoneRef.current.add(occ.id);
     triggerHaptic(nextStatus === "completed" ? "success" : "medium");
 
     setOccurrences((curr) =>
@@ -2716,6 +2725,7 @@ export default function Home() {
 
     // Auto complete when target is reached
     const reachedTarget = next >= target && occurrence.status !== "completed";
+    if (reachedTarget) userDoneRef.current.add(occurrence.id);
     if (!options.silent) triggerHaptic(reachedTarget ? "success" : "light");
 
     if (reachedTarget) {
@@ -3436,30 +3446,7 @@ export default function Home() {
       document.documentElement.setAttribute("data-theme", newTheme);
     }
   }, []);
-  const handleThemeChange = (newTheme: "dark" | "light" | "system") => {
-    applyTheme(newTheme);
-    themeSync.set(newTheme);
-  };
-
-  // The saved theme (and the custom slots) follow the account. Wait for the saved copy to be read first.
-  const { ready: themeReady, at: themeAt, value: themeValue, set: setThemeValue } = themeSync;
-  useEffect(() => {
-    if (!themeReady) return;
-    const timer = setTimeout(() => {
-      if (themeAt > 0) applyTheme(themeValue);
-      else {
-        // First time on this account: the theme this device already uses becomes the account's.
-        let legacy: string | null = null;
-        try {
-          legacy = localStorage.getItem("myplan_theme");
-        } catch {
-          legacy = null;
-        }
-        setThemeValue(normalizeTheme(legacy));
-      }
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [themeReady, themeAt, themeValue, applyTheme, setThemeValue]);
+  const handleThemeChange = (newTheme: "dark" | "light" | "system") => applyTheme(newTheme);
 
   const slotsReady = slotsSync.ready;
   const slotsAt = slotsSync.at;
@@ -3499,15 +3486,22 @@ export default function Home() {
     setLanguage(newLang);
     localStorage.setItem("myplan_lang", newLang);
     setFormattedToday(formatLongDate(newLang));
-
-    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { language: newLang } } });
   };
 
   // Sound toggle
   const handleSoundToggle = (enabled: boolean) => {
     setSoundEnabled(enabled);
     localStorage.setItem("myplan_sound_enabled", String(enabled));
-    if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { sound_enabled: enabled } } });
+  };
+
+  // Hide finished plans (device setting)
+  const handleHideDoneToggle = (enabled: boolean) => {
+    setHideDone(enabled);
+    try {
+      localStorage.setItem("myplan_hide_done", String(enabled));
+    } catch {
+      // Storage unavailable: the choice lasts until the page closes.
+    }
   };
 
   // Notifications toggle
@@ -3539,20 +3533,102 @@ export default function Home() {
   );
   const percent = activeActivities.length ? Math.round((completedCount / activeActivities.length) * 100) : 0;
 
+  // Finished plans can be tucked away (device setting). They stay in every count and statistic.
+  const visibleActivities = useMemo(
+    () => (hideDone ? activeActivities.filter((a) => !hiddenDoneIds.has(a.id)) : activeActivities),
+    [activeActivities, hideDone, hiddenDoneIds]
+  );
+
   const timeCounts = useMemo(() => {
     return {
-      all: activeActivities.length,
-      morning: activeActivities.filter((a) => a.time_of_day === "morning").length,
-      afternoon: activeActivities.filter((a) => a.time_of_day === "afternoon").length,
-      evening: activeActivities.filter((a) => a.time_of_day === "evening").length,
+      all: visibleActivities.length,
+      morning: visibleActivities.filter((a) => a.time_of_day === "morning").length,
+      afternoon: visibleActivities.filter((a) => a.time_of_day === "afternoon").length,
+      evening: visibleActivities.filter((a) => a.time_of_day === "evening").length,
     };
-  }, [activeActivities]);
+  }, [visibleActivities]);
 
   const displayedActivities = useMemo(() => {
-    const ordered = orderByHabit(activeActivities, habits.usualMinute);
+    const ordered = orderByHabit(visibleActivities, habits.usualMinute);
     if (activeTimeFilter === "all") return ordered;
     return ordered.filter((a) => a.time_of_day === activeTimeFilter);
-  }, [activeActivities, activeTimeFilter, habits]);
+  }, [visibleActivities, activeTimeFilter, habits]);
+
+  // ---- Finished plans leave the list quietly ----
+  // A plan that is done stays for 10 seconds (so it can still be undone), then fades away. Plans that were already
+  // done when the page opened are not shown at all. Undoing brings a plan straight back.
+  useEffect(() => {
+    if (!userId || loadingData || workspaceHydratedRef.current !== userId) return;
+    const timers = doneTimersRef.current;
+    const cancel = (key: string) => {
+      const id = timers.get(key);
+      if (id !== undefined) window.clearTimeout(id);
+      timers.delete(key);
+    };
+    const reset = window.setTimeout(() => {
+      if (!hideDone) {
+        for (const key of Array.from(timers.keys())) cancel(key);
+        setHiddenDoneIds((prev) => (prev.size ? new Set() : prev));
+        setFadingDone((prev) => (prev.size ? new Map() : prev));
+        return;
+      }
+      if (hideBaselineRef.current?.uid !== userId) hideBaselineRef.current = { uid: userId, at: Date.now() };
+      const justOpened = Date.now() - hideBaselineRef.current.at < 3000;
+      const instantly: string[] = [];
+      const reopened: string[] = [];
+      for (const occ of occurrences) {
+        if (occ.status !== "completed") {
+          cancel(occ.id);
+          cancel(`${occ.id}:hide`);
+          reopened.push(occ.activity_id);
+          continue;
+        }
+        if (timers.has(occ.id) || timers.has(`${occ.id}:hide`)) continue;
+        if (!userDoneRef.current.has(occ.id) && justOpened) {
+          instantly.push(occ.activity_id);
+          continue;
+        }
+        if (hiddenDoneIds.has(occ.activity_id)) continue;
+        timers.set(
+          occ.id,
+          window.setTimeout(() => {
+            timers.delete(occ.id);
+            const card = document.querySelector<HTMLElement>(`[data-activity-id="${occ.activity_id}"]`);
+            setFadingDone((prev) => new Map(prev).set(occ.activity_id, card?.offsetHeight ?? 0));
+            timers.set(
+              `${occ.id}:hide`,
+              window.setTimeout(() => {
+                timers.delete(`${occ.id}:hide`);
+                setHiddenDoneIds((prev) => new Set(prev).add(occ.activity_id));
+                setFadingDone((prev) => {
+                  const next = new Map(prev);
+                  next.delete(occ.activity_id);
+                  return next;
+                });
+              }, 900)
+            );
+          }, 10_000)
+        );
+      }
+      if (instantly.length > 0 || reopened.length > 0) {
+        setHiddenDoneIds((prev) => {
+          const next = new Set(prev);
+          instantly.forEach((id) => next.add(id));
+          reopened.forEach((id) => next.delete(id));
+          return next.size === prev.size && [...next].every((id) => prev.has(id)) ? prev : next;
+        });
+      }
+      if (reopened.length > 0) {
+        setFadingDone((prev) => {
+          if (!reopened.some((id) => prev.has(id))) return prev;
+          const next = new Map(prev);
+          reopened.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    }, 0);
+    return () => window.clearTimeout(reset);
+  }, [occurrences, hideDone, loadingData, userId, hiddenDoneIds]);
 
   // Streak Verification: When all today's plans are completed, strengthen the chain!
   useEffect(() => {
@@ -5457,13 +5533,23 @@ export default function Home() {
                     <p>{t.no_tasks_sub}</p>
                   </div>
                 ) : displayedActivities.length === 0 ? (
-                  <div className="empty-state-box">
-                    <div className="empty-icon-wrap">
-                      <IconCalendar className="icon-lg" />
+                  hideDone && hiddenDoneIds.size > 0 && activeTimeFilter === "all" ? (
+                    <div className="empty-state-box">
+                      <div className="empty-icon-wrap">
+                        <IconCheck className="icon-lg" />
+                      </div>
+                      <h3>{t.all_done_title}</h3>
+                      <p>{t.all_done_sub}</p>
                     </div>
-                    <h3>{t.no_tasks_filter}</h3>
-                    <p>{t.no_tasks_filter_sub}</p>
-                  </div>
+                  ) : (
+                    <div className="empty-state-box">
+                      <div className="empty-icon-wrap">
+                        <IconCalendar className="icon-lg" />
+                      </div>
+                      <h3>{t.no_tasks_filter}</h3>
+                      <p>{t.no_tasks_filter_sub}</p>
+                    </div>
+                  )
                 ) : (
                   <div className="task-items-list">
                     {displayedActivities.map((activity) => {
@@ -5483,7 +5569,9 @@ export default function Home() {
                       return (
                         <div
                           key={activity.id}
-                          className="task-card-swipe-wrap"
+                          data-activity-id={activity.id}
+                          className={`task-card-swipe-wrap ${fadingDone.has(activity.id) ? "is-fading-out" : ""}`}
+                          style={fadingDone.has(activity.id) ? ({ "--card-h": `${fadingDone.get(activity.id)}px` } as React.CSSProperties) : undefined}
                           onTouchStart={(e) => handleTouchStart(activity.id, e)}
                           onTouchMove={(e) => handleTouchMove(activity.id, e)}
                           onTouchEnd={() => handleTouchEnd(activity, occ)}
@@ -6300,6 +6388,29 @@ export default function Home() {
                         className={`toggle-switch-btn ${soundEnabled ? "on" : "off"}`}
                         onClick={() => handleSoundToggle(!soundEnabled)}
                         aria-label="Tovushni yoqish yoki o‘chirish"
+                      >
+                        <span className="toggle-slider" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Finished plans (device setting) */}
+                  <div className="settings-card">
+                    <div className="settings-card-header">
+                      <IconCheck className="icon-sm text-lime" />
+                      <div>
+                        <h3>{t.setting_hide_done}</h3>
+                        <p>{t.setting_hide_done_sub}</p>
+                      </div>
+                    </div>
+                    <div className="settings-toggle-row">
+                      <span>{t.setting_hide_done}</span>
+                      <button
+                        type="button"
+                        className={`toggle-switch-btn ${hideDone ? "on" : "off"}`}
+                        onClick={() => handleHideDoneToggle(!hideDone)}
+                        aria-label={t.setting_hide_done}
+                        aria-pressed={hideDone}
                       >
                         <span className="toggle-slider" />
                       </button>
