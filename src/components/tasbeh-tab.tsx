@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { IconBeads, IconRepeat, IconClose } from "@/components/icons";
+import { IconBeads, IconRepeat, IconClose, IconUndo } from "@/components/icons";
 import { TASBEH_TARGETS } from "@/lib/tasbeh";
 import type { Tasbeh } from "@/lib/use-tasbeh";
 import type { translations } from "@/lib/translations";
@@ -55,24 +55,16 @@ export default function TasbehTab({ t, tasbeh }: TasbehProps) {
         </span>
       </button>
 
-      <div className="tasbeh-stats">
-        <div className="tasbeh-stat">
-          <span className="tasbeh-stat-value">{state.rounds}</span>
-          <span className="tasbeh-stat-label">{t.cnt_rounds}</span>
-        </div>
-        <div className="tasbeh-stat">
-          <span className="tasbeh-stat-value">{state.total}</span>
-          <span className="tasbeh-stat-label">{t.cnt_total}</span>
-        </div>
-      </div>
+      <p className="tasbeh-summary">
+        {t.cnt_rounds} {state.rounds} · {t.cnt_total} {state.total}
+      </p>
 
-      <div className="time-controls tasbeh-controls">
-        <button type="button" className="time-btn" onClick={undo} disabled={state.total === 0}>
-          <span>{t.cnt_undo}</span>
+      <div className="tasbeh-actions">
+        <button type="button" className="tasbeh-ghost" onClick={undo} disabled={state.total === 0} aria-label={t.cnt_undo} title={t.cnt_undo}>
+          <IconUndo className="icon-sm" />
         </button>
-        <button type="button" className="time-btn" onClick={reset} disabled={state.total === 0}>
-          <IconRepeat className="icon-xs" />
-          <span>{t.cnt_reset}</span>
+        <button type="button" className="tasbeh-ghost" onClick={reset} disabled={state.total === 0} aria-label={t.cnt_reset} title={t.cnt_reset}>
+          <IconRepeat className="icon-sm" />
         </button>
       </div>
     </div>

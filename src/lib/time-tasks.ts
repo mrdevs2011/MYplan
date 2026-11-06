@@ -68,3 +68,69 @@ export function orderTasksForTimer(tasks: TimeTask[], suggestedId: string | null
     .sort((a, b) => rank(a.task) - rank(b.task) || a.index - b.index)
     .map(({ task }) => task);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Which plan is this session for? Scored from what the person already does: when they usually do it, what they
+// used the timer for lately, how much is still missing. Nothing to set up; it just gets better with use.
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface RankSignals {
+  /** Minutes after local midnight. */
+  nowMinute: number;
+  /** When each plan is usually started (learned), minutes after midnight. */
+  usualMinute: Record<string, number>;
+  /** Plans the timer or stopwatch was used for most recently, newest first. */
+  recentIds: string[];
+  /** The plan the app itself would put in front right now (time-of-day window). */
+  suggestedId: string | null;
+}
+
+const circularGap = (a: number, b: number) => {
+  const diff = Math.abs(a - b) % 1440;
+  return Math.min(diff, 1440 - diff);
+};
+
+export function scoreTask(task: TimeTask, signals: RankSignals): number {
+  if (task.done) return -100;
+  let score = 0;
+  if (task.minuteBased) score += 40; // time is exactly what these plans are measured in
+  if (task.id === signals.suggestedId) score += 12;
+  const usual = signals.usualMinute[task.id];
+  if (usual !== undefined) {
+    const gap = circularGap(usual, signals.nowMinute);
+    if (gap <= 90) score += 36 - gap / 3; // right now is when they usually do it: up to +36
+  }
+  const recent = signals.recentIds.indexOf(task.id);
+  if (recent >= 0) score += Math.max(0, 12 - recent * 3);
+  if (task.minuteBased && task.remainingMin) score += Math.min(task.remainingMin, 30) / 3; // more left, more pressing
+  return score;
+}
+
+/** Best first. Equal scores keep the order they came in. */
+export function rankTasksForTimer(tasks: TimeTask[], signals: RankSignals): TimeTask[] {
+  return tasks
+    .map((task, index) => ({ task, index, score: scoreTask(task, signals) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ task }) => task);
+}
+
+/** A plan worth choosing without asking: clearly ahead of the rest and a minute plan that is still open. */
+export function confidentPick(tasks: TimeTask[], signals: RankSignals): TimeTask | null {
+  const scored = tasks
+    .map((task) => ({ task, score: scoreTask(task, signals) }))
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || !best.task.minuteBased || best.task.done || (best.task.remainingMin ?? 0) <= 0) return null;
+  if (best.score < 66) return null; // roughly: a minute plan they usually start within half an hour of now
+  const second = scored[1];
+  return !second || best.score - second.score >= 12 ? best.task : null;
+}
+
+/** Keeps a list in the order it was first seen, so a picker never reshuffles under a finger. New items go last. */
+export function freezeOrder<T extends { id: string }>(items: T[], seenOrder: string[]): { items: T[]; order: string[] } {
+  const known = new Set(items.map((item) => item.id));
+  const order = seenOrder.filter((id) => known.has(id));
+  for (const item of items) if (!order.includes(item.id)) order.push(item.id);
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return { items: order.map((id) => byId.get(id)!).filter(Boolean), order };
+}

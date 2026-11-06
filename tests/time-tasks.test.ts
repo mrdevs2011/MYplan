@@ -37,3 +37,42 @@ test("picker order: suggested minute plan, other minute plans, other open plans,
   ];
   assert.deepEqual(orderTasksForTimer(list, "pick").map((x) => x.id), ["pick", "min", "check", "done"]);
 });
+
+import { confidentPick, freezeOrder, rankTasksForTimer, type RankSignals } from "../src/lib/time-tasks.ts";
+
+const signals = (over: Partial<RankSignals> = {}): RankSignals => ({
+  nowMinute: 8 * 60, usualMinute: {}, recentIds: [], suggestedId: null, ...over,
+});
+
+test("the plan usually done around now comes first", () => {
+  const list = [task({ id: "evening" }), task({ id: "morning" })];
+  const ranked = rankTasksForTimer(list, signals({ usualMinute: { morning: 8 * 60 + 10, evening: 20 * 60 } }));
+  assert.equal(ranked[0].id, "morning");
+});
+
+test("recently used plans are bumped, finished ones sink", () => {
+  const list = [task({ id: "a", done: true }), task({ id: "b" }), task({ id: "c" })];
+  const ranked = rankTasksForTimer(list, signals({ recentIds: ["c"] }));
+  assert.deepEqual(ranked.map((x) => x.id), ["c", "b", "a"]);
+});
+
+test("a plan is only chosen on its own when it is clearly the one", () => {
+  const habitual = task({ id: "plank", remainingMin: 5 });
+  const other = task({ id: "run", remainingMin: 5 });
+  const s = signals({ usualMinute: { plank: 8 * 60 } });
+  assert.equal(confidentPick([habitual, other], s)?.id, "plank");
+  // two equally likely plans: do not guess
+  assert.equal(confidentPick([habitual, other], signals({ usualMinute: { plank: 8 * 60, run: 8 * 60 } })), null);
+  // nothing learned yet: do not guess
+  assert.equal(confidentPick([habitual, other], signals()), null);
+  // a plan that is already finished is never chosen
+  assert.equal(confidentPick([task({ id: "x", done: true, remainingMin: 0 })], s), null);
+});
+
+test("the picker keeps its order once seen, new plans go last", () => {
+  const first = freezeOrder([{ id: "a" }, { id: "b" }], []);
+  assert.deepEqual(first.items.map((x) => x.id), ["a", "b"]);
+  const later = freezeOrder([{ id: "c" }, { id: "b" }, { id: "a" }], first.order);
+  assert.deepEqual(later.items.map((x) => x.id), ["a", "b", "c"]);
+  assert.deepEqual(freezeOrder([{ id: "b" }], later.order).items.map((x) => x.id), ["b"]);
+});

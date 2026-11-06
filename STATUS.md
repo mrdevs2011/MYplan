@@ -7,6 +7,11 @@
 - Hozirgi muammo/blocker: `sql/015_occurrence_status_time.sql` bazaga qo'llanishi kerak (kod usiz ham ishlaydi, himoya bor).
 - Keyingi qadam: 015 ni qo'llash; haqiqiy qurilmalarda offline/realtime sinovi.
 
+## Domenlar (Vercel loyiha nomi: myplan)
+- Asosiy: https://mylife-org.vercel.app  (mylife va mylife-mr band edi)
+- Eski https://myplan-mr.vercel.app  ->  308 redirect asosiyga (yo'l va so'rov saqlanadi)
+- Qurilma sozlamalari (til, mavzu, tovush, bajarilganlarni yashirish) faqat localStorage da; server: rejalar, progress, streak, qadamlar, zonalar, taymer/sekundomer/tasbeh.
+
 ## Muhim fayllar
 - `src/app/page.tsx` — asosiy ilova, navbat (outbox) protsessori, snapshot
 - `src/lib/progress-sync.ts` — outbox, overlay, remap; `src/lib/patch.ts` — faqat o'zgargan maydonlar

@@ -12,7 +12,7 @@ import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { changedFields } from "@/lib/patch";
 import { addDays, average, buildDays, buildStatusMap, type StatActivity, type StatOccurrence } from "@/lib/stats";
 import { formatLongDate } from "@/lib/date-format";
-import { orderTasksForTimer, type TimeTask } from "@/lib/time-tasks";
+import { confidentPick, rankTasksForTimer, type RankSignals, type TimeTask } from "@/lib/time-tasks";
 import { EPOCH_STORAGE_KEY, PROD_CLEAN_SLATE_EPOCH, markCleanSlateEpoch } from "@/lib/epoch";
 import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
@@ -943,6 +943,14 @@ export default function Home() {
             .update(head.payload.patch as Record<string, unknown>)
             .eq("id", head.payload.id as string)
             .eq("user_id", head.payload.user_id as string));
+        } else if (head.type === "notifications_read") {
+          // Only still-unread rows: the earliest "read" time wins, and a repeat is harmless.
+          ({ error } = await supabase
+            .from("notifications")
+            .update({ read_at: head.payload.at as string })
+            .in("id", head.payload.ids as string[])
+            .eq("user_id", head.payload.user_id as string)
+            .is("read_at", null));
         } else if (head.type === "profile_patch") {
           ({ error } = await supabase
             .from("profiles")
@@ -2066,8 +2074,33 @@ export default function Home() {
       setDeferredPrompt(null);
     };
 
+    // The saved history. Read state is sticky: read on this device or on any other device means read.
+    const loadNotificationHistory = () =>
+      createClient().functions.invoke("notifications", { body: { action: "list" } })
+        .then(({ data, error }) => {
+          if (error || !data) return;
+          const payload = data as { notifications?: Array<{ id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null }> };
+          const rows = (payload.notifications || [])
+            .filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now())
+            .flatMap((row) => toNotification(row) ?? []);
+          setNotifications((prev) => {
+            const byId = new Map(prev.map((item) => [item.id, item]));
+            const serverIds = new Set(rows.map((item) => item.id));
+            const merged = rows.map((item) => {
+              const mine = byId.get(item.id);
+              return mine ? { ...mine, isRead: mine.isRead || item.isRead } : item;
+            });
+            for (const item of prev) {
+              if (!serverIds.has(item.id) && Date.now() - item.createdAt < 3 * 86400000) merged.push(item);
+            }
+            return merged.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
+          });
+        })
+        .catch((error) => console.warn("Notification history could not load:", error));
+
     const handleOnline = () => {
       setIsOnline(true);
+      void loadNotificationHistory();
       const uid = activeRealtimeUid;
       void processOfflineQueue().finally(() => {
         if (uid) void loadWorkspace(uid);
@@ -2078,6 +2111,7 @@ export default function Home() {
       if (document.visibilityState === "visible") setTodayKey(today());
       if (document.visibilityState !== "visible" || !activeRealtimeUid) return;
       void processOfflineQueue();
+      void loadNotificationHistory();
       // Hopping to another app and back is not a reason to reload; realtime already kept this screen current.
       if (Date.now() - lastWorkspaceLoadRef.current < WORKSPACE_REFRESH_MIN_GAP_MS) return;
       void loadWorkspace(activeRealtimeUid);
@@ -2171,24 +2205,7 @@ export default function Home() {
         cleanUrl.searchParams.delete("notification_read");
         window.history.replaceState({}, "", cleanUrl.toString());
       }
-      void notificationClient.functions.invoke("notifications", { body: { action: "list" } })
-        .then(({ data, error }) => {
-          if (error || !data) return;
-          const payload = data as { notifications?: Array<{ id: string; category: string; title: string; message: string; created_at: string; scheduled_at?: string; read_at: string | null }> };
-          const rows = (payload.notifications || [])
-            .filter((row) => !row.scheduled_at || new Date(row.scheduled_at).getTime() <= Date.now())
-            .flatMap((row) => toNotification(row) ?? []);
-          setNotifications((prev) => {
-            const byId = new Map(prev.map((item) => [item.id, item]));
-            const serverIds = new Set(rows.map((item) => item.id));
-            const merged = rows.map((item) => byId.get(item.id) ?? item);
-            for (const item of prev) {
-              if (!serverIds.has(item.id) && Date.now() - item.createdAt < 3 * 86400000) merged.push(item);
-            }
-            return merged.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
-          });
-        })
-        .catch((error) => console.warn("Notification history could not load:", error));
+      void loadNotificationHistory();
 
       if ("Notification" in window) {
         setTimeout(() => setPushPermission(Notification.permission), 0);
@@ -2917,20 +2934,27 @@ export default function Home() {
   }
 
   // Notification helpers
-  const markNotificationAsRead = (id: string) => {
-    setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: true } : item));
-    void createClient().functions.invoke("notifications", { body: { action: "mark-read", id, read: true } })
-      .then(({ error }) => {
-        if (!error) return;
-        console.warn("Could not sync notification read state:", error);
-        setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: false } : item));
-      })
-      .catch((error) => {
-        console.warn("Could not sync notification read state:", error);
-        setNotifications((current) => current.map((item) => item.id === id ? { ...item, isRead: false } : item));
-      });
-    if (activeToast?.id === id) setActiveToast(null);
+  const markNotificationsAsRead = (ids: string[]) => {
+    if (!userId || ids.length === 0) return;
+    const wanted = new Set(ids);
+    setNotifications((current) => current.map((item) => (wanted.has(item.id) ? { ...item, isRead: true } : item)));
+    // Durable first: saved on the account (and shown live on every other device) as soon as there is a connection.
+    enqueueOfflineMutation({ type: "notifications_read", payload: { user_id: userId, ids, at: new Date().toISOString() } });
+    if (activeToast && wanted.has(activeToast.id)) setActiveToast(null);
   };
+  const markNotificationAsRead = (id: string) => markNotificationsAsRead([id]);
+
+  // Looking at the list is reading it: after a moment on the Notifications page, what is shown counts as read.
+  const unreadIds = notifications.filter((item) => !item.isRead).map((item) => item.id);
+  const unreadKey = unreadIds.join(",");
+  useEffect(() => {
+    if (activeTab !== "notifications" || !userId || !unreadKey) return;
+    const timer = setTimeout(() => {
+      if (document.visibilityState === "visible") markNotificationsAsRead(unreadKey.split(","));
+    }, 1800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, userId, unreadKey]);
 
   const pushErrorText = (error: { kind: PushErrorKind; detail: string }) =>
     error.kind === "dismissed" ? t.nag_err_dismissed
@@ -3692,7 +3716,23 @@ export default function Home() {
 
   // ---- Timer and stopwatch know about today's plans ----
   // Minute plans get the time spent logged on them by the timer itself; every open plan can be linked.
-  const timeTasks = useMemo<TimeTask[]>(() => {
+  // Plans the timer or stopwatch was used for recently (this device), newest first: they rank higher next time.
+  const [timeRecents, setTimeRecents] = useState<string[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    const timer = setTimeout(() => setTimeRecents(readJson<string[]>(accountStorageKey(userId, "time_recent")) ?? []), 0);
+    return () => clearTimeout(timer);
+  }, [userId]);
+  const rememberTimeTask = (activityId: string) => {
+    if (!userId) return;
+    setTimeRecents((prev) => {
+      const next = [activityId, ...prev.filter((id) => id !== activityId)].slice(0, 5);
+      writeJson(accountStorageKey(userId, "time_recent"), next);
+      return next;
+    });
+  };
+
+  const { timeTasks, timeSuggestedId, timeAutoId } = useMemo(() => {
     const list: TimeTask[] = [];
     for (const activity of activeActivities) {
       const occ = occurrences.find((item) => item.activity_id === activity.id);
@@ -3710,8 +3750,20 @@ export default function Home() {
         done,
       });
     }
-    return orderTasksForTimer(list, recommendedFocusActivity?.id ?? null);
-  }, [activeActivities, occurrences, taskCounts, habits, recommendedFocusActivity]);
+    const signals: RankSignals = {
+      nowMinute: focusClockMinute ?? 0,
+      // Until the clock has been read there is no "right now" to compare habits with.
+      usualMinute: focusClockMinute === null ? {} : habits.usualMinute,
+      recentIds: timeRecents,
+      suggestedId: recommendedFocusActivity?.id ?? null,
+    };
+    const ranked = rankTasksForTimer(list, signals);
+    return {
+      timeTasks: ranked,
+      timeSuggestedId: ranked[0] && !ranked[0].done ? ranked[0].id : null,
+      timeAutoId: confidentPick(ranked, signals)?.id ?? null,
+    };
+  }, [activeActivities, occurrences, taskCounts, habits, recommendedFocusActivity, focusClockMinute, timeRecents]);
 
   const [timeLaunch, setTimeLaunch] = useState<{ activityId: string; nonce: number } | null>(null);
   // The request is used once: leaving the tab forgets it, so coming back never resets a running timer.
@@ -5997,7 +6049,9 @@ export default function Home() {
                 userId={userId}
                 soundEnabled={soundEnabled}
                 tasks={timeTasks}
-                suggestedTaskId={recommendedFocusActivity?.id ?? null}
+                suggestedTaskId={timeSuggestedId}
+                autoTaskId={timeAutoId}
+                onUseTask={rememberTimeTask}
                 deviceId={getOrCreateSessionToken()}
                 launch={timeLaunch}
                 onLogMinutes={logTaskMinutes}

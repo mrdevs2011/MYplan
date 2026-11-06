@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock, IconBell } from "@/components/icons";
 import { playMelody, type MelodyHandle } from "@/lib/timer-melody";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { formatTimeLeft } from "@/lib/counter-steps";
-import { defaultMinutesFor, minutesToLog, smartPresets, type TimeTask } from "@/lib/time-tasks";
+import { defaultMinutesFor, freezeOrder, minutesToLog, smartPresets, type TimeTask } from "@/lib/time-tasks";
 import type { Language, translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
@@ -21,6 +21,10 @@ interface TimeTabProps {
   tasks: TimeTask[];
   /** The plan the app would pick right now; offered as one tap, never forced. */
   suggestedTaskId: string | null;
+  /** A plan so clearly the right one that an idle timer or stopwatch is simply set to it (and can be changed). */
+  autoTaskId: string | null;
+  /** A session was started for this plan (feeds what the app offers next time). */
+  onUseTask: (activityId: string) => void;
   /** This browser. The device that started a session is the one that books its time. */
   deviceId: string;
   /** "Start a timer for this plan" from a task card. */
@@ -35,11 +39,13 @@ interface TaskLinkProps {
   suggestedTaskId: string | null;
   value: string | null;
   disabled: boolean;
+  /** The plan was chosen by the app, not by the person: say so, quietly. */
+  autoChosen: boolean;
   onChange: (activityId: string | null) => void;
 }
 
 /** Which plan this session is for. Quiet by default: the suggestion is one chip, nothing is chosen for the person. */
-function TaskLink({ t, tasks, suggestedTaskId, value, disabled, onChange }: TaskLinkProps) {
+function TaskLink({ t, tasks, suggestedTaskId, value, disabled, autoChosen, onChange }: TaskLinkProps) {
   const labels = { sec: t.step_sec, min: t.step_min };
   const current = tasks.find((task) => task.id === value) ?? null;
   const suggested = !value ? tasks.find((task) => task.id === suggestedTaskId && !task.done) ?? null : null;
@@ -69,6 +75,7 @@ function TaskLink({ t, tasks, suggestedTaskId, value, disabled, onChange }: Task
           {t.clk_task_suggest}: {suggested.title}
         </button>
       ) : null}
+      {autoChosen && value ? <span className="time-task-auto">{t.clk_task_auto}</span> : null}
     </div>
   );
 }
@@ -208,10 +215,10 @@ function normalizeTimer(raw: unknown): TimerState {
 }
 
 function TimerPanel({
-  t, userId, soundEnabled, tasks, suggestedTaskId, deviceId, launch, onLogMinutes, onCompleteTask,
-}: Pick<TimeTabProps, "t" | "userId" | "soundEnabled" | "tasks" | "suggestedTaskId" | "deviceId" | "launch" | "onLogMinutes" | "onCompleteTask">) {
+  t, userId, soundEnabled, tasks, suggestedTaskId, autoTaskId, deviceId, launch, onLogMinutes, onCompleteTask, onUseTask,
+}: Pick<TimeTabProps, "t" | "userId" | "soundEnabled" | "tasks" | "suggestedTaskId" | "autoTaskId" | "deviceId" | "launch" | "onLogMinutes" | "onCompleteTask" | "onUseTask">) {
   // This panel only mounts client-side (after login), so the device copy can be read right away.
-  const { value: state, set: setState } = useSyncedState<TimerState>(userId, "timer", DEFAULT_TIMER, normalizeTimer, {
+  const { value: state, set: setState, ready } = useSyncedState<TimerState>(userId, "timer", DEFAULT_TIMER, normalizeTimer, {
     lazyLocal: true,
   });
   const soundRef = useRef(soundEnabled);
@@ -219,19 +226,6 @@ function TimerPanel({
     soundRef.current = soundEnabled;
   }, [soundEnabled]);
 
-  // The melody can be switched off for good; the choice is remembered per account.
-  const { value: music, set: setMusic } = useSyncedState<{ on: boolean }>(
-    userId,
-    "timer_music",
-    { on: true },
-    (raw) => ({ on: !(raw && typeof raw === "object" && (raw as { on?: unknown }).on === false) }),
-    { lazyLocal: true },
-  );
-  const musicOn = music.on;
-  const musicRef = useRef(musicOn);
-  useEffect(() => {
-    musicRef.current = musicOn;
-  }, [musicOn]);
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
   const melodyRef = useRef<MelodyHandle | null>(null);
@@ -257,13 +251,6 @@ function TimerPanel({
     melodyRef.current = null;
     setPlaying(false);
   }, []);
-
-  const toggleMusic = () => {
-    const next = !musicOn;
-    musicRef.current = next;
-    setMusic({ on: next });
-    if (!next) stopMelody();
-  };
 
   useEffect(() => () => melodyRef.current?.stop(), []);
 
@@ -314,6 +301,7 @@ function TimerPanel({
   }, [state.done, state.logged, state.activityId, state.owner, state.duration, deviceId, tasks, onLogMinutes, setState, t.step_sec, t.step_min]);
 
   const pickTask = (activityId: string | null) => {
+    setAutoChosen(false);
     const task = tasks.find((item) => item.id === activityId) ?? null;
     const minutes = defaultMinutesFor(task);
     setState((s) => {
@@ -322,6 +310,32 @@ function TimerPanel({
       return { ...s, activityId, owner: null, logged: false, duration, remaining: fresh ? duration : s.remaining };
     });
   };
+
+  // An idle timer with no plan, and one plan clearly the right one right now: it is simply set to it. Once per visit,
+  // only after the saved state was read (so a plan chosen on another device is never overwritten), and always
+  // changeable. Nothing starts and nothing is logged without the person pressing Start.
+  const [autoChosen, setAutoChosen] = useState(false);
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (autoTried.current || !ready || !autoTaskId || state.activityId) return;
+    if (state.endAt !== null || state.done || state.remaining !== state.duration) return;
+    const task = tasks.find((item) => item.id === autoTaskId);
+    if (!task) return;
+    autoTried.current = true;
+    const minutes = defaultMinutesFor(task);
+    const timer = window.setTimeout(() => {
+      setState((s) => ({
+        ...s,
+        activityId: task.id,
+        owner: null,
+        logged: false,
+        duration: minutes ? minutes * 60000 : s.duration,
+        remaining: minutes ? minutes * 60000 : s.remaining,
+      }));
+      setAutoChosen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [ready, autoTaskId, tasks, state.activityId, state.endAt, state.done, state.remaining, state.duration, setState]);
 
   // "Start a timer for this plan" from a task card: the plan is chosen and the length is what is left (or what
   // this person usually does). Starting stays one tap away, because browsers only allow sound after a tap.
@@ -342,7 +356,7 @@ function TimerPanel({
   useEffect(() => {
     if (running && remaining <= 0) {
       setState((s) => ({ ...s, endAt: null, remaining: 0, done: true }));
-      if (soundRef.current && musicRef.current) {
+      if (soundRef.current) {
         const ctx = audioRef.current;
         void ctx?.resume();
         const handle = ctx ? playMelody(ctx, () => { melodyRef.current = null; setPlaying(false); }) : null;
@@ -376,7 +390,19 @@ function TimerPanel({
     } else {
       const left = state.done || state.remaining <= 0 ? state.duration : state.remaining;
       setState((s) => ({ ...s, done: false, logged: false, owner: deviceId, remaining: left, endAt: Date.now() + left }));
+      if (state.activityId) onUseTask(state.activityId);
     }
+  };
+
+  // The plan still has time missing after a session: one tap runs a timer for exactly that.
+  const missingMs = linked?.minuteBased && !linked.done && linked.remainingMin ? Math.round(linked.remainingMin * 60000) : 0;
+  const again = () => {
+    if (!state.activityId || missingMs < 10_000) return;
+    stopMelody();
+    unlockAudio();
+    const duration = Math.min(99 * 60000, Math.max(60000, missingMs));
+    setState((s) => ({ ...s, duration, remaining: duration, endAt: Date.now() + duration, done: false, owner: deviceId, logged: false }));
+    onUseTask(state.activityId);
   };
 
   const reset = () => {
@@ -390,10 +416,10 @@ function TimerPanel({
 
   return (
     <>
-      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} onChange={pickTask} />
+      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} autoChosen={autoChosen} onChange={pickTask} />
       <Ring progress={state.duration ? remaining / state.duration : 0} done={state.done}>
         <span className="time-digits">{state.done ? "00:00" : formatClock(remaining)}</span>
-        <span className="time-note">{state.done ? t.clk_up : `${Math.round(state.duration / 60000)} ${t.clk_min}`}</span>
+        {state.done ? <span className="time-note">{t.clk_up}</span> : null}
       </Ring>
 
       <div className="time-extra">
@@ -420,6 +446,12 @@ function TimerPanel({
       </div>
 
       {logNote ? <span className="time-note time-task-note">{logNote}</span> : null}
+      {state.done && state.logged && missingMs >= 10_000 ? (
+        <button type="button" className="time-btn time-task-mark" onClick={again}>
+          <IconRepeat className="icon-xs" />
+          <span>{t.clk_task_again} {formatTimeLeft(linked!.remainingMin!, labels)}</span>
+        </button>
+      ) : null}
       {state.done && linked && !linked.minuteBased && !linked.done ? (
         <button type="button" className="time-btn time-task-mark" onClick={() => onCompleteTask(linked.id)}>
           <span>{t.clk_task_mark}</span>
@@ -443,17 +475,6 @@ function TimerPanel({
           <span>{t.clk_reset}</span>
         </button>
       </div>
-
-      <button
-        type="button"
-        className={`time-chip music-toggle ${musicOn ? "active" : ""}`}
-        onClick={toggleMusic}
-        aria-pressed={musicOn}
-        disabled={!soundEnabled}
-      >
-        <IconBell className="icon-xs" />
-        <span>{musicOn ? t.clk_music_on : t.clk_music_off}</span>
-      </button>
     </>
   );
 }
@@ -482,9 +503,9 @@ function normalizeStopwatch(raw: unknown): StopwatchState {
 }
 
 function StopwatchPanel({
-  t, userId, tasks, suggestedTaskId, onLogMinutes,
-}: Pick<TimeTabProps, "t" | "userId" | "tasks" | "suggestedTaskId" | "onLogMinutes">) {
-  const { value: state, set: setState } = useSyncedState<StopwatchState>(
+  t, userId, tasks, suggestedTaskId, autoTaskId, onLogMinutes, onUseTask,
+}: Pick<TimeTabProps, "t" | "userId" | "tasks" | "suggestedTaskId" | "autoTaskId" | "onLogMinutes" | "onUseTask">) {
+  const { value: state, set: setState, ready } = useSyncedState<StopwatchState>(
     userId,
     "stopwatch",
     DEFAULT_STOPWATCH,
@@ -514,6 +535,38 @@ function StopwatchPanel({
     return totalMs;
   };
 
+  // The same quiet pre-selection as the timer: only when idle, only once, only after the saved state was read.
+  const [autoChosen, setAutoChosen] = useState(false);
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (autoTried.current || !ready || !autoTaskId || state.activityId) return;
+    if (state.startedAt !== null || state.base > 0) return;
+    if (!tasks.some((item) => item.id === autoTaskId)) return;
+    autoTried.current = true;
+    const timer = window.setTimeout(() => {
+      setState((s) => ({ ...s, activityId: autoTaskId, loggedMs: s.base }));
+      setAutoChosen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [ready, autoTaskId, tasks, state.activityId, state.startedAt, state.base, setState]);
+
+  // Reaching what the plan still needs books it by itself, without stopping the clock; one soft buzz says so.
+  const needMs = linked?.minuteBased && !linked.done && linked.remainingMin ? Math.round(linked.remainingMin * 60000) : 0;
+  const goalBooked = useRef<number | null>(null);
+  const reached = running && needMs > 0 && elapsed - state.loggedMs >= needMs;
+  useEffect(() => {
+    if (!reached || goalBooked.current === state.loggedMs) return;
+    goalBooked.current = state.loggedMs;
+    const loggedMs = bookTime(elapsed);
+    setState((s) => ({ ...s, loggedMs }));
+    try {
+      navigator.vibrate?.(120);
+    } catch {
+      // Not supported.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reached]);
+
   const toggle = () => {
     if (state.startedAt !== null) {
       const total = state.base + (Date.now() - state.startedAt);
@@ -521,11 +574,14 @@ function StopwatchPanel({
       setState((s) => ({ ...s, startedAt: null, base: total, loggedMs }));
     } else {
       setState((s) => ({ ...s, startedAt: Date.now() }));
+      if (state.activityId) onUseTask(state.activityId);
     }
   };
-  const pickTask = (activityId: string | null) =>
+  const pickTask = (activityId: string | null) => {
+    setAutoChosen(false);
     // What was already measured belongs to the previous plan.
     setState((s) => ({ ...s, activityId, loggedMs: s.base }));
+  };
   const lap = () =>
     setState((s) => {
       const total = s.base + (s.startedAt ? Date.now() - s.startedAt : 0);
@@ -546,27 +602,36 @@ function StopwatchPanel({
 
   return (
     <>
-      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} onChange={pickTask} />
-      <Ring progress={(elapsed % 60000) / 60000}>
-        <span className="time-digits">{main}</span>
-        <span className="time-note time-cs">.{cs}</span>
-      </Ring>
+      <TaskLink t={t} tasks={tasks} suggestedTaskId={suggestedTaskId} value={state.activityId} disabled={running} autoChosen={autoChosen} onChange={pickTask} />
+      <div className="stopwatch-face">
+        <span className="stopwatch-digits">
+          {main}
+          <span className="stopwatch-cs">.{cs}</span>
+        </span>
+        {linked?.minuteBased ? (
+          <span className="stopwatch-goal">
+            {linked.done || (needMs === 0 && !running)
+              ? `✓ ${t.done}`
+              : `${formatTimeLeft(Math.max(0, needMs - Math.max(0, elapsed - state.loggedMs)) / 60000, { sec: t.step_sec, min: t.step_min })} ${t.step_left}`}
+          </span>
+        ) : null}
+      </div>
 
-      <div className="time-extra time-extra-laps">
-        <ul className="time-laps">
-          {lastLaps.length === 0 ? (
-            <li className="time-lap-empty">{t.clk_no_laps}</li>
-          ) : (
-            lastLaps.map((l) => (
+      {lastLaps.length > 0 ? (
+        <div className="time-extra time-extra-laps">
+          <ul className="time-laps">
+            {lastLaps.map((l) => (
               <li key={l.n}>
                 <span>#{l.n}</span>
                 <span>{formatStopwatch(l.split).main}.{formatStopwatch(l.split).cs}</span>
                 <span className="time-lap-total">{formatStopwatch(l.total).main}.{formatStopwatch(l.total).cs}</span>
               </li>
-            ))
-          )}
-        </ul>
-      </div>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="time-extra" />
+      )}
 
       {logNote ? <span className="time-note time-task-note">{logNote}</span> : null}
 
@@ -645,8 +710,17 @@ function ClockPanel({ language }: Pick<TimeTabProps, "language">) {
 
 /* ------------------------------------------------------------------ Tab */
 
-export default function TimeTab({ t, language, userId, soundEnabled, tasks, suggestedTaskId, deviceId, launch, onLogMinutes, onCompleteTask }: TimeTabProps) {
+export default function TimeTab({ t, language, userId, soundEnabled, tasks: rankedTasks, suggestedTaskId, autoTaskId, deviceId, launch, onLogMinutes, onCompleteTask, onUseTask }: TimeTabProps) {
   const [sub, setSub] = useState<SubTab>("timer");
+  // The picker keeps the order it first showed: ranks change as time is logged, and nothing may move under a finger.
+  const [seenOrder, setSeenOrder] = useState<string[]>([]);
+  const tasks = useMemo(() => freezeOrder(rankedTasks, seenOrder).items, [rankedTasks, seenOrder]);
+  useEffect(() => {
+    const { order } = freezeOrder(rankedTasks, seenOrder);
+    if (order.join("|") === seenOrder.join("|")) return;
+    const timer = window.setTimeout(() => setSeenOrder(order), 0);
+    return () => window.clearTimeout(timer);
+  }, [rankedTasks, seenOrder]);
   const tabs: Array<{ id: SubTab; label: string }> = [
     { id: "timer", label: t.clk_timer },
     { id: "stopwatch", label: t.clk_stopwatch },
@@ -688,15 +762,17 @@ export default function TimeTab({ t, language, userId, soundEnabled, tasks, sugg
             soundEnabled={soundEnabled}
             tasks={tasks}
             suggestedTaskId={suggestedTaskId}
+            autoTaskId={autoTaskId}
             deviceId={deviceId}
             launch={launch}
             onLogMinutes={onLogMinutes}
             onCompleteTask={onCompleteTask}
+            onUseTask={onUseTask}
           />
         </section>
         <section className="time-card" data-active={sub === "stopwatch"}>
           <h2 className="time-card-title">{t.clk_stopwatch}</h2>
-          <StopwatchPanel t={t} userId={userId} tasks={tasks} suggestedTaskId={suggestedTaskId} onLogMinutes={onLogMinutes} />
+          <StopwatchPanel t={t} userId={userId} tasks={tasks} suggestedTaskId={suggestedTaskId} autoTaskId={autoTaskId} onLogMinutes={onLogMinutes} onUseTask={onUseTask} />
         </section>
         <section className="time-card" data-active={sub === "clock"}>
           <h2 className="time-card-title">{t.clk_clock}</h2>

@@ -9619,3 +9619,70 @@ html, body { overscroll-behavior-y: none; }
     animation-duration: 0.01s;
   }
 }
+
+/* Simpler timer, stopwatch and tasbeh */
+.stopwatch-face {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stopwatch-digits {
+  font-size: clamp(40px, calc(var(--ring) * 0.34), 84px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.stopwatch-cs {
+  font-size: 0.45em;
+  letter-spacing: 0;
+  color: var(--accent-lime);
+}
+.tasbeh-summary {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.tasbeh-actions {
+  display: flex;
+  gap: 14px;
+  flex-shrink: 0;
+}
+.tasbeh-ghost {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.tasbeh-ghost:disabled {
+  opacity: 0.35;
+}
+
+.time-task-auto {
+  align-self: center;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+.stopwatch-face {
+  flex-direction: column;
+  gap: 8px;
+}
+.stopwatch-goal {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-lime);
+  font-variant-numeric: tabular-nums;
+}
