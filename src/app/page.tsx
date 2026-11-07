@@ -3242,8 +3242,10 @@ export default function Home() {
       if (swipeState.action === "complete") {
         // Swiping right only completes; un-completing needs the checkbox or a left swipe.
         if (occ.status !== "completed") void toggleComplete(activity);
-      } else if (swipeState.action === "undo" && activity.measurement_type === "count") {
-        void undoTaskCount(activity, occ);
+      } else if (swipeState.action === "undo") {
+        // Left swipe takes back the last step of a counter; with no step to take back, a finished plan is reopened.
+        if (activity.measurement_type === "count" && (taskHistory[occ.id]?.length || 0) > 0) void undoTaskCount(activity, occ);
+        else if (occ.status === "completed") void toggleComplete(activity);
       }
     }
     setSwipeState({ id: null, offset: 0, action: null });
@@ -3739,6 +3741,7 @@ export default function Home() {
       if (!occ) continue;
       const target = activity.target || 0;
       const minuteBased = activity.measurement_type === "count" && isMinuteUnit(activity.unit) && target > 0;
+      if (!minuteBased) continue; // the timer only offers plans measured in time
       const done = occ.status === "completed";
       const count = taskCounts[occ.id] ?? (done ? target : 0);
       list.push({
