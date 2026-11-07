@@ -2522,6 +2522,20 @@ export default function Home() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [showCustomTimeModal, showPresetModal, showInstallGuideModal, showEveningReview, focusModalOpen, closeCreateModal]);
 
+  // Notifications always open at the top (newest first), whatever was scrolled before, on any layout.
+  useEffect(() => {
+    if (activeTab !== "notifications") return;
+    const toTop = () => {
+      window.scrollTo(0, 0);
+      for (let el = document.querySelector<HTMLElement>(".notifications-view")?.parentElement ?? null; el; el = el.parentElement) {
+        if (el.scrollTop > 0) el.scrollTop = 0;
+      }
+    };
+    toTop();
+    const frame = requestAnimationFrame(toTop);
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab]);
+
   // The Sanash tab exists only in the phone/tablet layout. On a wide window the counter is the floating button,
   // so widening the window while the tab is open (or restoring it from a saved session) goes back to Today
   // and the counter carries on as the open floating panel.
