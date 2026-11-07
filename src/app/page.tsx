@@ -7,6 +7,8 @@ import TimeTab from "@/components/time-tab";
 import StatsTab from "@/components/stats-tab";
 import TasbehTab, { TasbehFloat } from "@/components/tasbeh-tab";
 import { useTasbeh } from "@/lib/use-tasbeh";
+import { useTasbehPlans } from "@/lib/use-tasbeh-plans";
+import { isTasbehUnit, rankTasbehPlans, type TasbehPlan } from "@/lib/tasbeh-plans";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { changedFields } from "@/lib/patch";
@@ -482,7 +484,7 @@ export default function Home() {
   // Authentication & User State
   const [userId, setUserId] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const tasbeh = useTasbeh(userId);
+  const tasbehBase = useTasbeh(userId);
   const [tasbehFloatOpen, setTasbehFloatOpen] = useState(false);
   const [accountName, setAccountName] = useState("");
   const [accountUsername, setAccountUsername] = useState("");
@@ -2772,14 +2774,16 @@ export default function Home() {
   }
 
   // Counter Undo: restores previous step, clears 10-second timer and restores button positions immediately
-  async function undoTaskCount(activity: Activity, occurrence: Occurrence) {
+  async function undoTaskCount(activity: Activity, occurrence: Occurrence, amount?: number) {
     if (!userId) return;
     const history = taskHistory[occurrence.id] || [];
-    if (history.length === 0) return;
+    if (history.length === 0 && amount === undefined) return;
 
-    triggerHaptic("warning");
-    const lastAdd = history[history.length - 1];
-    const newHistory = history.slice(0, -1);
+    if (amount === undefined) triggerHaptic("warning");
+    // A given amount takes back just that much (the counter's single taps); otherwise the whole last step.
+    const last = history.length ? history[history.length - 1] : 0;
+    const lastAdd = amount === undefined ? last : amount;
+    const newHistory = amount !== undefined && last > amount ? [...history.slice(0, -1), roundAmount(last - amount)] : history.slice(0, -1);
     const target = activity.target || 0;
     const current = Math.min(taskCountsRef.current[occurrence.id] || 0, target > 0 ? target : Infinity);
     const next = roundAmount(Math.max(0, current - lastAdd));
@@ -3778,6 +3782,43 @@ export default function Home() {
   const launchTimerFor = (activityId: string) => {
     setTimeLaunch({ activityId, nonce: Date.now() });
     setActiveTab("time");
+  };
+
+  // Tasbeh plans: counting plans in zikr units, ranked like the timer's plans.
+  const { tasbehPlans, tasbehAutoId } = useMemo(() => {
+    const list: TasbehPlan[] = [];
+    for (const activity of activeActivities) {
+      if (activity.measurement_type !== "count" || !isTasbehUnit(activity.unit)) continue;
+      const occ = occurrences.find((item) => item.activity_id === activity.id);
+      const target = activity.target || 0;
+      if (!occ || target <= 0) continue;
+      const done = occ.status === "completed";
+      const count = taskCounts[occ.id] ?? (done ? target : 0);
+      list.push({ id: activity.id, title: activity.title, remaining: roundAmount(Math.max(target - count, 0)), done });
+    }
+    const ranked = rankTasbehPlans(list, {
+      nowMinute: focusClockMinute ?? 0,
+      usualMinute: focusClockMinute === null ? {} : habits.usualMinute,
+      recentIds: [],
+      suggestedId: recommendedFocusActivity?.id ?? null,
+    });
+    return { tasbehPlans: ranked.plans, tasbehAutoId: ranked.autoId };
+  }, [activeActivities, occurrences, taskCounts, habits, recommendedFocusActivity, focusClockMinute]);
+
+  /** Counter taps land on the plan silently, like a +N tap; a negative amount takes taps back. */
+  const logTaskCount = (activityId: string, amount: number) => {
+    const activity = activitiesRef.current.find((item) => item.id === activityId);
+    const occ = occurrences.find((item) => item.activity_id === activityId);
+    if (!activity || !occ || amount === 0) return;
+    if (!(activity.measurement_type === "count" && isTasbehUnit(activity.unit))) return;
+    if (amount > 0) void incrementTaskCount(activity, occ, amount, { silent: true });
+    else void undoTaskCount(activity, occ, -amount);
+  };
+  const tasbeh = useTasbehPlans(tasbehBase, tasbehPlans, tasbehAutoId, logTaskCount);
+  const launchTasbehFor = (activityId: string) => {
+    tasbeh.setPlan(activityId);
+    if (window.matchMedia("(min-width: 769px)").matches) setTasbehFloatOpen(true);
+    else setActiveTab("counter");
   };
 
   /** Time spent by the timer or stopwatch lands on the plan like a +N tap, silently. */
@@ -5753,6 +5794,18 @@ export default function Home() {
                                             aria-label={t.clk_task_timer}
                                           >
                                             <IconTimer className="icon-sm" />
+                                          </button>
+                                        )}
+                                        {/* Zikr plans: count them on the counter */}
+                                        {!isDone && isTasbehUnit(activity.unit) && (
+                                          <button
+                                            type="button"
+                                            className="btn-counter-inc btn-visible btn-counter-timer"
+                                            onClick={() => launchTasbehFor(activity.id)}
+                                            title={t.cnt_plan_open}
+                                            aria-label={t.cnt_plan_open}
+                                          >
+                                            <IconBeads className="icon-sm" />
                                           </button>
                                         )}
                                       </div>

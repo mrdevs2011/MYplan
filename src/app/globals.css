@@ -9106,6 +9106,7 @@ html, body { overscroll-behavior-y: none; }
   gap: 14px;
 }
 
+.tasbeh-plan { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
 .tasbeh-targets {
   display: flex;
   gap: 8px;

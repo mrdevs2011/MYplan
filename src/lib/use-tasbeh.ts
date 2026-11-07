@@ -6,6 +6,7 @@ import {
   EMPTY_TASBEH,
   normalizeTasbeh,
   resetTasbeh,
+  setTasbehActivity,
   setTasbehTarget,
   tapTasbeh,
   undoTasbeh,
@@ -26,11 +27,14 @@ export interface Tasbeh {
   undo: () => void;
   reset: () => void;
   setTarget: (target: number) => void;
+  setActivity: (activityId: string | null) => void;
+  /** The saved copy has been read: only then is it safe to decide anything from `state`. */
+  ready: boolean;
 }
 
 /** Tasbeh counter: instant locally, saved on the server and mirrored live to the account's other devices. */
 export function useTasbeh(userId: string | null): Tasbeh {
-  const { value: state, set } = useSyncedState<TasbehState>(userId, "tasbeh", EMPTY_TASBEH, normalizeTasbeh);
+  const { value: state, set, ready } = useSyncedState<TasbehState>(userId, "tasbeh", EMPTY_TASBEH, normalizeTasbeh);
 
   const tap = useCallback(() => {
     set((s) => {
@@ -43,5 +47,7 @@ export function useTasbeh(userId: string | null): Tasbeh {
   const reset = useCallback(() => set(resetTasbeh), [set]);
   const setTarget = useCallback((target: number) => set((s) => setTasbehTarget(s, target)), [set]);
 
-  return { state, tap, undo, reset, setTarget };
+  const setActivity = useCallback((activityId: string | null) => set((s) => setTasbehActivity(s, activityId)), [set]);
+
+  return { state, tap, undo, reset, setTarget, setActivity, ready };
 }

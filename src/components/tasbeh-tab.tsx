@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { IconBeads, IconRepeat, IconClose, IconUndo } from "@/components/icons";
 import { TASBEH_TARGETS } from "@/lib/tasbeh";
-import type { Tasbeh } from "@/lib/use-tasbeh";
+import { LifeSelect } from "@/components/life-select";
+import type { TasbehLinked } from "@/lib/use-tasbeh-plans";
 import type { translations } from "@/lib/translations";
 
 type T = Record<keyof (typeof translations)["uz"], string>;
 
 interface TasbehProps {
   t: T;
-  tasbeh: Tasbeh;
+  tasbeh: TasbehLinked;
 }
 
 const RING_R = 46;
@@ -18,11 +19,27 @@ const RING_C = 2 * Math.PI * RING_R;
 
 /** The counter itself: used as the Sanash tab on mobile and inside the floating panel on desktop. */
 export default function TasbehTab({ t, tasbeh }: TasbehProps) {
-  const { state, tap, undo, reset, setTarget } = tasbeh;
+  const { state, tap, undo, reset, setTarget, plans, linked, remaining, autoChosen, setPlan } = tasbeh;
   const progress = state.target > 0 ? state.count / state.target : 0;
 
   return (
     <div className="tasbeh-view">
+      {plans.length > 0 || linked ? (
+        <div className="tasbeh-plan">
+          <LifeSelect
+            className="life-select-compact"
+            value={linked?.id ?? ""}
+            ariaLabel={t.cnt_plan_label}
+            onChange={(next) => setPlan(next || null)}
+            options={[
+              { value: "", label: t.cnt_plan_none },
+              ...plans.map((plan) => ({ value: plan.id, label: `${plan.title} · ${plan.remaining} ${t.step_left}` })),
+            ]}
+          />
+          {autoChosen && linked ? <span className="time-task-auto">{t.clk_task_auto}</span> : null}
+        </div>
+      ) : null}
+
       <div className="tasbeh-targets" role="group" aria-label={t.cnt_target}>
         {TASBEH_TARGETS.map((target) => (
           <button
@@ -57,6 +74,7 @@ export default function TasbehTab({ t, tasbeh }: TasbehProps) {
 
       <p className="tasbeh-summary">
         {t.cnt_rounds} {state.rounds} · {t.cnt_total} {state.total}
+        {linked && remaining !== null ? ` · ${linked.title}: ${remaining} ${t.step_left}` : ""}
       </p>
 
       <div className="tasbeh-actions">

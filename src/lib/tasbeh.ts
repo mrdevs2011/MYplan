@@ -5,9 +5,10 @@ export interface TasbehState {
   rounds: number; // completed rounds
   target: number;
   total: number; // all taps counted since the last reset
+  activityId: string | null; // today's plan the taps are booked on
 }
 
-export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 33, total: 0 };
+export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 33, total: 0, activityId: null };
 
 const whole = (value: unknown) => Math.max(0, Math.floor(Number(value)) || 0);
 
@@ -18,7 +19,8 @@ export function normalizeTasbeh(raw: unknown): TasbehState {
   const count = whole(r.count);
   const rounds = whole(r.rounds);
   const total = r.total === undefined ? rounds * target + count : whole(r.total);
-  return { count, rounds, target, total };
+  const activityId = typeof r.activityId === "string" && r.activityId ? r.activityId : null;
+  return { count, rounds, target, total, activityId };
 }
 
 /** One tap. Reaching the target starts a new round. */
@@ -42,4 +44,8 @@ export function resetTasbeh(s: TasbehState): TasbehState {
 export function setTasbehTarget(s: TasbehState, target: number): TasbehState {
   if (target === s.target || !(TASBEH_TARGETS as readonly number[]).includes(target)) return s;
   return { ...s, target, count: 0 };
+}
+
+export function setTasbehActivity(s: TasbehState, activityId: string | null): TasbehState {
+  return s.activityId === activityId ? s : { ...s, activityId };
 }
