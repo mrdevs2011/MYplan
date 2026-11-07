@@ -503,8 +503,8 @@ function normalizeStopwatch(raw: unknown): StopwatchState {
 }
 
 function StopwatchPanel({
-  t, userId, tasks, suggestedTaskId, autoTaskId, onLogMinutes, onUseTask,
-}: Pick<TimeTabProps, "t" | "userId" | "tasks" | "suggestedTaskId" | "autoTaskId" | "onLogMinutes" | "onUseTask">) {
+  t, userId, tasks, suggestedTaskId, autoTaskId, launch, onLogMinutes, onUseTask,
+}: Pick<TimeTabProps, "t" | "userId" | "tasks" | "suggestedTaskId" | "autoTaskId" | "launch" | "onLogMinutes" | "onUseTask">) {
   const { value: state, set: setState, ready } = useSyncedState<StopwatchState>(
     userId,
     "stopwatch",
@@ -549,6 +549,19 @@ function StopwatchPanel({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [ready, autoTaskId, tasks, state.activityId, state.startedAt, state.base, setState]);
+
+  // The clock icon on a plan card picks that plan here too (only while the stopwatch is idle, never mid-session).
+  const handledLaunch = useRef(0);
+  useEffect(() => {
+    if (!launch || !ready || launch.nonce === handledLaunch.current) return;
+    if (state.startedAt !== null || state.base > 0) return;
+    if (!tasks.some((item) => item.id === launch.activityId)) return;
+    handledLaunch.current = launch.nonce;
+    const timer = window.setTimeout(() => {
+      setState((s) => ({ ...s, activityId: launch.activityId, loggedMs: s.base }));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [launch, ready, tasks, state.startedAt, state.base, setState]);
 
   // Reaching what the plan still needs books it by itself, without stopping the clock; one soft buzz says so.
   const needMs = linked?.minuteBased && !linked.done && linked.remainingMin ? Math.round(linked.remainingMin * 60000) : 0;
@@ -772,7 +785,7 @@ export default function TimeTab({ t, language, userId, soundEnabled, tasks: rank
         </section>
         <section className="time-card" data-active={sub === "stopwatch"}>
           <h2 className="time-card-title">{t.clk_stopwatch}</h2>
-          <StopwatchPanel t={t} userId={userId} tasks={tasks} suggestedTaskId={suggestedTaskId} autoTaskId={autoTaskId} onLogMinutes={onLogMinutes} onUseTask={onUseTask} />
+          <StopwatchPanel t={t} userId={userId} tasks={tasks} suggestedTaskId={suggestedTaskId} autoTaskId={autoTaskId} launch={launch} onLogMinutes={onLogMinutes} onUseTask={onUseTask} />
         </section>
         <section className="time-card" data-active={sub === "clock"}>
           <h2 className="time-card-title">{t.clk_clock}</h2>
