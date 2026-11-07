@@ -4,6 +4,7 @@
  */
 import { confidentPick, rankTasksForTimer, type RankSignals, type TimeTask } from "./time-tasks.ts";
 import { TASBEH_TARGETS } from "./tasbeh.ts";
+import { isMinuteUnit } from "./counter-steps.ts";
 
 export interface TasbehPlan {
   id: string;
@@ -11,6 +12,16 @@ export interface TasbehPlan {
   /** Taps still missing today. */
   remaining: number;
   done: boolean;
+  /** A zikr plan: the counter's own kind of plan, offered before the other counting plans. */
+  zikr: boolean;
+}
+
+/** Hours belong to the timer, like minutes. */
+const TIME_UNITS = new Set(["soat", "hour", "hours", "час", "часа", "часов"]);
+
+/** Any plan that counts things (ta, dona, bet, rakat, zikr, ...): time plans belong to the timer and stopwatch. */
+export function isCountingUnit(unit: string | null | undefined): boolean {
+  return !isMinuteUnit(unit) && !TIME_UNITS.has((unit ?? "").trim().toLowerCase());
 }
 
 const TASBEH_UNITS = new Set(["tasbeh", "tasbih", "tasbeeh", "zikr", "dhikr", "тасбих", "зикр"]);
@@ -39,6 +50,10 @@ const asTimeTask = (plan: TasbehPlan): TimeTask => ({
 export function rankTasbehPlans(plans: TasbehPlan[], signals: RankSignals): { plans: TasbehPlan[]; autoId: string | null } {
   const byId = new Map(plans.map((plan) => [plan.id, plan]));
   const tasks = plans.map(asTimeTask);
-  const ranked = rankTasksForTimer(tasks, signals).map((task) => byId.get(task.id)!);
-  return { plans: ranked, autoId: confidentPick(tasks, signals)?.id ?? null };
+  const scored = rankTasksForTimer(tasks, signals).map((task) => byId.get(task.id)!);
+  // Zikr plans first among the open ones (a stable split keeps the scoring order inside each group).
+  const open = scored.filter((plan) => !plan.done);
+  const ranked = [...open.filter((plan) => plan.zikr), ...open.filter((plan) => !plan.zikr), ...scored.filter((plan) => plan.done)];
+  const pickable = open.some((plan) => plan.zikr) ? tasks.filter((task) => byId.get(task.id)!.zikr) : tasks;
+  return { plans: ranked, autoId: confidentPick(pickable, signals)?.id ?? null };
 }

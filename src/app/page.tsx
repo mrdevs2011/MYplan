@@ -8,7 +8,7 @@ import StatsTab from "@/components/stats-tab";
 import TasbehTab, { TasbehFloat } from "@/components/tasbeh-tab";
 import { useTasbeh } from "@/lib/use-tasbeh";
 import { useTasbehPlans } from "@/lib/use-tasbeh-plans";
-import { isTasbehUnit, rankTasbehPlans, type TasbehPlan } from "@/lib/tasbeh-plans";
+import { isCountingUnit, isTasbehUnit, rankTasbehPlans, type TasbehPlan } from "@/lib/tasbeh-plans";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { registerPushForSavedAccounts } from "@/lib/push-accounts";
 import { changedFields } from "@/lib/patch";
@@ -3784,17 +3784,17 @@ export default function Home() {
     setActiveTab("time");
   };
 
-  // Tasbeh plans: counting plans in zikr units, ranked like the timer's plans.
+  // Counter plans: every plan that counts things (not time), zikr first, ranked like the timer's plans.
   const { tasbehPlans, tasbehAutoId } = useMemo(() => {
     const list: TasbehPlan[] = [];
     for (const activity of activeActivities) {
-      if (activity.measurement_type !== "count" || !isTasbehUnit(activity.unit)) continue;
+      if (activity.measurement_type !== "count" || !isCountingUnit(activity.unit)) continue;
       const occ = occurrences.find((item) => item.activity_id === activity.id);
       const target = activity.target || 0;
       if (!occ || target <= 0) continue;
       const done = occ.status === "completed";
       const count = taskCounts[occ.id] ?? (done ? target : 0);
-      list.push({ id: activity.id, title: activity.title, remaining: roundAmount(Math.max(target - count, 0)), done });
+      list.push({ id: activity.id, title: activity.title, remaining: roundAmount(Math.max(target - count, 0)), done, zikr: isTasbehUnit(activity.unit) });
     }
     const ranked = rankTasbehPlans(list, {
       nowMinute: focusClockMinute ?? 0,
@@ -3810,7 +3810,7 @@ export default function Home() {
     const activity = activitiesRef.current.find((item) => item.id === activityId);
     const occ = occurrences.find((item) => item.activity_id === activityId);
     if (!activity || !occ || amount === 0) return;
-    if (!(activity.measurement_type === "count" && isTasbehUnit(activity.unit))) return;
+    if (!(activity.measurement_type === "count" && isCountingUnit(activity.unit))) return;
     if (amount > 0) void incrementTaskCount(activity, occ, amount, { silent: true });
     else void undoTaskCount(activity, occ, -amount);
   };
@@ -5796,8 +5796,8 @@ export default function Home() {
                                             <IconTimer className="icon-sm" />
                                           </button>
                                         )}
-                                        {/* Zikr plans: count them on the counter */}
-                                        {!isDone && isTasbehUnit(activity.unit) && (
+                                        {/* Counting plans: count them on the counter */}
+                                        {!isDone && isCountingUnit(activity.unit) && (
                                           <button
                                             type="button"
                                             className="btn-counter-inc btn-visible btn-counter-timer"
