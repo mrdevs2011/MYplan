@@ -16,8 +16,28 @@ export function isMinuteUnit(unit: string | null | undefined): boolean {
   return MINUTE_UNITS.has((unit ?? "").trim().toLowerCase());
 }
 
-export function stepsFor(unit: string | null | undefined, userSteps: number[]): number[] {
-  return isMinuteUnit(unit) ? MINUTE_STEPS : userSteps;
+export function stepsFor(unit: string | null | undefined, userSteps: number[], minuteSteps: number[] = MINUTE_STEPS): number[] {
+  return isMinuteUnit(unit) ? minuteSteps : userSteps;
+}
+
+export const MAX_MINUTE_STEPS = 10;
+
+/** The saved minute steps (in minutes, so 0.5 is 30 seconds): valid, unique, largest first; the defaults if nothing is left. */
+export function normalizeMinuteSteps(raw: unknown): number[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const valid = list
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .map(roundAmount)
+    .filter((value) => value > 0 && value <= 99);
+  const steps = [...new Set(valid)].sort((a, b) => b - a).slice(0, MAX_MINUTE_STEPS);
+  return steps.length > 0 ? steps : [...MINUTE_STEPS];
+}
+
+/** A step typed as whole minutes (1-99) or whole seconds (1-59), as minutes; null when out of range. */
+export function minuteStepFrom(value: number, unit: "min" | "sec"): number | null {
+  if (!Number.isInteger(value) || value < 1) return null;
+  if (unit === "min") return value <= 99 ? value : null;
+  return value <= 59 ? roundAmount(value / 60) : null;
 }
 
 /** Progress is stored with two decimals. Rounding here keeps 0.1 + 0.2 from missing a target by a hair. */

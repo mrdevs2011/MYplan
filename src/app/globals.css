@@ -9714,3 +9714,6 @@ html, body { overscroll-behavior-y: none; }
   color: var(--accent-lime);
   font-variant-numeric: tabular-nums;
 }
+
+.step-unit-toggle { display: inline-flex; gap: 6px; }
+.step-unit-toggle .setting-choice-btn { width: auto; min-width: 42px; padding: 8px 12px; justify-content: center; }

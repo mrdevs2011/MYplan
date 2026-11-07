@@ -20,7 +20,7 @@ import { LifeSelect, type LifeSelectOption } from "@/components/life-select";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { getRecommendedFocusActivity } from "@/lib/focus-recommendation";
-import { formatCount, formatStep, formatTimeLeft, isMinuteUnit, roundAmount, stepsFor } from "@/lib/counter-steps";
+import { MAX_MINUTE_STEPS, MINUTE_STEPS, formatCount, formatStep, formatTimeLeft, isMinuteUnit, minuteStepFrom, normalizeMinuteSteps, roundAmount, stepsFor } from "@/lib/counter-steps";
 import {
   EMPTY_PROFILE,
   buildHabitProfile,
@@ -669,6 +669,11 @@ export default function Home() {
 
   // Sanoqli hisoblagich bosqichlari (+10, +5, +1 va sozlamalardagi custom bosqichlar)
   const [counterSteps, setCounterSteps] = useState<number[]>([10, 5, 1]);
+  // Steps of the plans measured in time (in minutes: 0.5 is 30 s). Saved on the account, so every device agrees.
+  const { value: minuteSteps, set: setMinuteSteps } = useSyncedState<number[]>(userId, "minute_steps", MINUTE_STEPS, normalizeMinuteSteps);
+  const [newMinStepInput, setNewMinStepInput] = useState("");
+  const [newMinStepUnit, setNewMinStepUnit] = useState<"min" | "sec">("min");
+  const [newMinStepError, setNewMinStepError] = useState("");
   const [newStepInput, setNewStepInput] = useState("");
   const [newStepError, setNewStepError] = useState("");
 
@@ -3216,7 +3221,7 @@ export default function Home() {
 
   const handleRemoveCounterStep = (stepToRemove: number) => {
     if (counterSteps.length <= 1) {
-      setNewStepError("Kamida bitta hisoblash qadami qolishi shart.");
+      setNewStepError(t.err_step_last);
       return;
     }
     const updated = counterSteps.filter((s) => s !== stepToRemove);
@@ -3224,6 +3229,44 @@ export default function Home() {
     localStorage.setItem("myplan_counter_steps", JSON.stringify(updated));
     setNewStepError("");
     if (userId) enqueueOfflineMutation({ type: "profile_patch", payload: { user_id: userId, patch: { counter_steps: updated } } });
+  };
+
+  const handleAddMinuteStep = () => {
+    setNewMinStepError("");
+    if (minuteSteps.length >= MAX_MINUTE_STEPS) {
+      setNewMinStepError(t.err_step_max);
+      return;
+    }
+    const raw = newMinStepInput.trim();
+    if (!raw) {
+      setNewMinStepError(t.err_step_empty);
+      return;
+    }
+    const step = minuteStepFrom(parseInt(raw, 10), newMinStepUnit);
+    if (step === null) {
+      setNewMinStepError(t.err_minstep_range);
+      return;
+    }
+    if (minuteSteps.includes(step)) {
+      setNewMinStepError(t.err_step_exists.replace("{n}", formatStep(step, "daqiqa", timeLabels).replace("+", "")));
+      return;
+    }
+    setMinuteSteps(normalizeMinuteSteps([...minuteSteps, step]));
+    setNewMinStepInput("");
+  };
+
+  const handleRemoveMinuteStep = (step: number) => {
+    if (minuteSteps.length <= 1) {
+      setNewMinStepError(t.err_step_last);
+      return;
+    }
+    setMinuteSteps(minuteSteps.filter((item) => item !== step));
+    setNewMinStepError("");
+  };
+
+  const handleResetMinuteSteps = () => {
+    setMinuteSteps([...MINUTE_STEPS]);
+    setNewMinStepError("");
   };
 
   const handleResetCounterSteps = () => {
@@ -3281,7 +3324,7 @@ export default function Home() {
   // Double-tapping a counter card adds the step this person actually uses most.
   const handleCardDoubleTap = (activity: Activity, occ: Occurrence | undefined) => {
     if (activity.measurement_type !== "count" || !occ || occ.status === "completed") return;
-    const fallback = isMinuteUnit(activity.unit) ? 1 : counterSteps.length > 0 ? Math.min(...counterSteps) : 1;
+    const fallback = isMinuteUnit(activity.unit) ? Math.min(...minuteSteps) : counterSteps.length > 0 ? Math.min(...counterSteps) : 1;
     const step = habits.favoriteStep[activity.id] ?? fallback;
     void incrementTaskCount(activity, occ, step);
   };
@@ -5673,7 +5716,10 @@ export default function Home() {
                       const rawCount = taskCounts[occ?.id || ""] ?? (isDone ? target : 0);
                       const current = target > 0 ? Math.min(Math.max(0, rawCount), target) : Math.max(0, rawCount);
                       const remaining = roundAmount(Math.max(target - current, 0));
-                      const steps = stepsFor(activity.unit, counterSteps);
+                      const baseSteps = stepsFor(activity.unit, counterSteps, minuteSteps);
+                      // A time plan with less left than its smallest step offers exactly what is left, never a longer step.
+                      const steps =
+                        isMinuteUnit(activity.unit) && remaining > 0 && !baseSteps.some((st) => st <= remaining) ? [remaining] : baseSteps;
 
                       // 10s inactivity collapse state
                       // Space is held only right after a tap, so buttons never shift under a finger; otherwise it is released.
@@ -6708,7 +6754,7 @@ export default function Home() {
                               setNewStepInput(val);
                               setNewStepError("");
                             }}
-                            placeholder={counterSteps.length >= 10 ? "Limitga yetildi" : "Masalan: 15"}
+                            placeholder={counterSteps.length >= 10 ? t.ph_step_limit : t.ph_step_example}
                             maxLength={2}
                             disabled={counterSteps.length >= 10}
                             onKeyDown={(e) => {
@@ -6749,9 +6795,104 @@ export default function Home() {
                         </p>
                       ) : (
                         <p className="step-hint">
-                          {t.step_hint} (Maksimal 10 ta qadam).
+                          {t.step_hint} {t.step_max_count_hint}
                         </p>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Steps of plans measured in time (minutes and seconds) */}
+                  <div className="settings-card counter-steps-manage-card">
+                    <div className="settings-card-header">
+                      <IconTimer className="icon-sm text-lime" />
+                      <div className="step-header-text">
+                        <div className="step-title-row">
+                          <h3>{t.setting_minutes}</h3>
+                          <span className="step-count-badge">{minuteSteps.length} / {MAX_MINUTE_STEPS}</span>
+                        </div>
+                        <p>{t.setting_minutes_sub}</p>
+                      </div>
+                    </div>
+
+                    <div className="step-pills-row">
+                      {minuteSteps.map((step) => (
+                        <div key={step} className="step-pill">
+                          <span className="step-pill-val">{formatStep(step, "daqiqa", timeLabels)}</span>
+                          <button
+                            type="button"
+                            className="btn-delete-step"
+                            onClick={() => handleRemoveMinuteStep(step)}
+                            title={t.step_remove.replace("{n}", formatStep(step, "daqiqa", timeLabels).replace("+", ""))}
+                            aria-label={t.step_remove.replace("{n}", formatStep(step, "daqiqa", timeLabels).replace("+", ""))}
+                          >
+                            <IconClose className="icon-xs" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="step-add-container">
+                      <div className="step-add-row">
+                        <div className="step-input-wrap">
+                          <span className="step-input-prefix">+</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="step-number-input"
+                            value={newMinStepInput}
+                            onChange={(e) => {
+                              setNewMinStepInput(e.target.value.replace(/\D/g, "").slice(0, 2));
+                              setNewMinStepError("");
+                            }}
+                            placeholder={minuteSteps.length >= MAX_MINUTE_STEPS ? t.ph_step_limit : t.ph_step_example}
+                            maxLength={2}
+                            disabled={minuteSteps.length >= MAX_MINUTE_STEPS}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddMinuteStep();
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="step-unit-toggle" role="group" aria-label={t.setting_minutes}>
+                          <button
+                            type="button"
+                            className={`setting-choice-btn ${newMinStepUnit === "min" ? "active" : ""}`}
+                            aria-pressed={newMinStepUnit === "min"}
+                            onClick={() => setNewMinStepUnit("min")}
+                          >
+                            {t.step_min}
+                          </button>
+                          <button
+                            type="button"
+                            className={`setting-choice-btn ${newMinStepUnit === "sec" ? "active" : ""}`}
+                            aria-pressed={newMinStepUnit === "sec"}
+                            onClick={() => setNewMinStepUnit("sec")}
+                          >
+                            {t.step_sec}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-add-step"
+                          onClick={handleAddMinuteStep}
+                          disabled={minuteSteps.length >= MAX_MINUTE_STEPS}
+                        >
+                          <IconPlus className="icon-xs" />
+                          <span>{t.btn_add}</span>
+                        </button>
+                        <button type="button" className="btn-reset-steps" onClick={handleResetMinuteSteps} title={t.minstep_reset_title}>
+                          {t.btn_reset}
+                        </button>
+                      </div>
+
+                      {newMinStepError && (
+                        <p className="step-validation-error" role="alert">
+                          <IconAlertTriangle className="icon-xs inline-icon" /> {newMinStepError}
+                        </p>
+                      )}
+                      <p className="step-hint">{t.minstep_hint}</p>
                     </div>
                   </div>
 
