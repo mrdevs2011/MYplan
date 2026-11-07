@@ -4970,7 +4970,8 @@ export default function Home() {
                 </div>
                 <div className="evening-stat-item flame">
                   <span className="stat-sub">{t.streak_label}</span>
-                  <span className="stat-num">{streakCount} {t.streak_days}</span>
+                  <span className="stat-num">{streakCount}</span>
+                  <span className="stat-unit">{t.streak_days}</span>
                 </div>
               </div>
 

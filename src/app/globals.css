@@ -5878,15 +5878,18 @@ select:focus-visible {
    POCKET EXPERIENCE: EVENING REVIEW MODAL
    ========================================================================== */
 .evening-review-modal-box {
-  max-width: 480px;
+  max-width: 500px;
   width: 92%;
+  max-height: 92dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .evening-review-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px 0;
+  gap: 14px;
+  padding: 14px 0 6px;
 }
 
 .evening-banner-visual {
@@ -5915,8 +5918,12 @@ select:focus-visible {
 
 .evening-stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+@media (max-width: 440px) {
+  .evening-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .evening-stat-item {
@@ -5925,14 +5932,18 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 12px 6px;
-  border-radius: 12px;
+  padding: 14px 6px;
+  min-width: 0;
+  border-radius: 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   text-align: center;
 }
 
 .evening-stat-item .stat-sub {
+  max-width: 100%;
+  line-height: 1.25;
+  text-wrap: balance;
   font-size: 10px;
   font-weight: 750;
   text-transform: uppercase;
@@ -5941,9 +5952,20 @@ select:focus-visible {
 }
 
 .evening-stat-item .stat-num {
-  font-size: 18px;
+  font-size: 24px;
+  line-height: 1.1;
   font-weight: 850;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.evening-stat-item .stat-unit {
+  max-width: 100%;
+  font-size: 10.5px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-wrap: balance;
 }
 
 .evening-stat-item.highlight {
@@ -5966,12 +5988,13 @@ select:focus-visible {
 
 .evening-quote-card {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 14px 16px;
   border-radius: 14px;
   background: var(--bg-surface);
-  border-left: 3px solid var(--accent-lime);
+  border: 1px solid var(--border-subtle);
+  box-shadow: inset 3px 0 0 var(--accent-lime);
   font-size: 12.5px;
   font-style: italic;
   color: var(--text-secondary);
@@ -5981,7 +6004,6 @@ select:focus-visible {
 .evening-quote-card svg {
   color: var(--accent-lime);
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 
