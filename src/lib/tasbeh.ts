@@ -1,4 +1,4 @@
-export const TASBEH_TARGETS = [33, 99, 100, 0] as const; // 0 = endless
+export const TASBEH_TARGETS = [33, 66, 99, 0] as const; // 0 = endless
 
 export interface TasbehState {
   count: number; // taps in the current round
@@ -8,7 +8,7 @@ export interface TasbehState {
   activityId: string | null; // today's plan the taps are booked on
 }
 
-export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 33, total: 0, activityId: null };
+export const EMPTY_TASBEH: TasbehState = { count: 0, rounds: 0, target: 0, total: 0, activityId: null };
 
 const whole = (value: unknown) => Math.max(0, Math.floor(Number(value)) || 0);
 

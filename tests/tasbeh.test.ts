@@ -34,5 +34,5 @@ test("reset and target change", () => {
 test("old saved state without a total is upgraded; junk is ignored", () => {
   assert.equal(normalizeTasbeh({ count: 5, rounds: 2, target: 33 }).total, 71);
   assert.deepEqual(normalizeTasbeh("x"), EMPTY_TASBEH);
-  assert.equal(normalizeTasbeh({ count: -4, target: 12 }).target, 33);
+  assert.equal(normalizeTasbeh({ count: -4, target: 12 }).target, 0);
 });

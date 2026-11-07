@@ -123,6 +123,7 @@ import {
   getOrCreateSessionToken,
   syncCurrentDeviceSession,
   checkDeviceSessionActive,
+  localizeDeviceLabel,
   revokeDeviceSession,
   type UserDevice,
 } from "@/lib/device-session";
@@ -793,15 +794,15 @@ export default function Home() {
       }
       const val = parseInt(countTarget, 10);
       if (val === 0 || val === 1) {
-        setDebouncedCountError("Sanoqli vazifalar uchun minimal miqdor 2 ta. Bir martalik ishlar uchun «Bir martalik» turini tanlang.");
+        setDebouncedCountError(t.err_count_min);
       } else if (val > 99999 || countTarget.length > 5) {
-        setDebouncedCountError("Maksimal belgilanishi mumkin bo‘lgan sanoq 99,999 tani tashkil etadi.");
+        setDebouncedCountError(t.err_count_max);
       } else {
         setDebouncedCountError("");
       }
     }, createTaskKind !== "count" || !countTarget ? 0 : 2000);
     return () => clearTimeout(timer);
-  }, [countTarget, createTaskKind]);
+  }, [countTarget, createTaskKind, t.err_count_min, t.err_count_max]);
 
   // Debounce custom duration in modal (2 seconds)
   useEffect(() => {
@@ -811,12 +812,12 @@ export default function Home() {
         return;
       }
       if (!customDurationValue.trim()) {
-        setDebouncedDurationError("Iltimos, muddat miqdorini kiriting.");
+        setDebouncedDurationError(t.err_duration_empty);
         return;
       }
       const val = parseInt(customDurationValue, 10);
       if (isNaN(val)) {
-        setDebouncedDurationError("Iltimos, haqiqiy raqam kiriting.");
+        setDebouncedDurationError(t.err_duration_nan);
         return;
       }
       if (customDurationUnit === "kun") {
@@ -857,6 +858,8 @@ export default function Home() {
     t.duration_error_weeks,
     t.duration_error_months,
     t.duration_error_years,
+    t.err_duration_empty,
+    t.err_duration_nan,
   ]);
 
   // Catalog Filters (Tab 2)
@@ -1077,10 +1080,10 @@ export default function Home() {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     if (hours > 0) {
-      return `${hours} soat ${minutes} minut`;
+      return t.time_h_m.replace("{h}", String(hours)).replace("{m}", String(minutes));
     }
-    return `${Math.max(1, minutes)} minut`;
-  }, []);
+    return t.time_m.replace("{m}", String(Math.max(1, minutes)));
+  }, [t]);
 
   const formatDeviceTime = useCallback((isoString: string): string => {
     try {
@@ -1088,14 +1091,14 @@ export default function Home() {
       const minutes = Math.floor(ms / (1000 * 60));
       const hours = Math.floor(minutes / 60);
       const days = Math.floor(hours / 24);
-      if (minutes < 2) return "Hozirgina faol";
-      if (minutes < 60) return `${minutes} minut oldin`;
-      if (hours < 24) return `${hours} soat oldin`;
-      return `${days} kun oldin`;
+      if (minutes < 2) return t.dev_time_now;
+      if (minutes < 60) return t.dev_time_min.replace("{n}", String(minutes));
+      if (hours < 24) return t.dev_time_h.replace("{n}", String(hours));
+      return t.dev_time_d.replace("{n}", String(days));
     } catch {
-      return "Yaqinda faol";
+      return t.dev_time_recent;
     }
-  }, [currentTime]);
+  }, [currentTime, t]);
 
   // Security Cooldown Calculations based on user login timestamp
   const loginTime = useMemo(() => {
@@ -1200,20 +1203,20 @@ export default function Home() {
     setProfileActionMsg("");
     if (!canChangeNameAge) {
       setProfileActionMsg(
-        `Ism va yoshni o‘zgartirish uchun yangi sessiyadan so‘ng kamida 3 soat o‘tishi shart (Qolgan: ${formatRemainingTime(remainingNameAgeMs)}).`
+        `${t.profile_cooldown_3h} (${formatRemainingTime(remainingNameAgeMs)})`
       );
       return;
     }
     const trimmedName = editFullName.trim();
     if (!trimmedName) {
-      setProfileActionMsg("Iltimos, ism va familiyangizni kiriting.");
+      setProfileActionMsg(t.err_name_required);
       return;
     }
     let parsedAge: number | null = null;
     if (editAge !== "" && editAge !== null && editAge !== undefined) {
       const num = Number(editAge);
       if (isNaN(num) || num < 6 || num > 122) {
-        setProfileActionMsg("Yosh 6 dan 122 oralig‘ida bo‘lishi lozim.");
+        setProfileActionMsg(t.err_age_range);
         return;
       }
       parsedAge = Math.floor(num);
@@ -2900,7 +2903,7 @@ export default function Home() {
 
   const handleAddAccount = () => {
     if (savedAccounts.length >= 5) {
-      alert("Maksimal 5 ta hisob chegarasiga yetildi.");
+      alert(t.alert_max_accounts);
       return;
     }
     if (typeof window !== "undefined") {
@@ -3149,7 +3152,7 @@ export default function Home() {
     if (!file) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      setMessage("Rasm hajmi 2MB dan oshmasligi lozim.");
+      setMessage(t.err_image_size);
       return;
     }
 
@@ -3187,21 +3190,21 @@ export default function Home() {
   const handleAddCounterStep = () => {
     setNewStepError("");
     if (counterSteps.length >= 10) {
-      setNewStepError("Maksimal 10 ta hisoblash qadami kiritish mumkin (limitga yetildi).");
+      setNewStepError(t.err_step_max);
       return;
     }
     const trimmed = newStepInput.trim();
     if (!trimmed) {
-      setNewStepError("Iltimos, qadam miqdorini kiriting.");
+      setNewStepError(t.err_step_empty);
       return;
     }
     const val = parseInt(trimmed, 10);
     if (isNaN(val) || val < 1 || val > 99) {
-      setNewStepError("Qadam miqdori 1 dan 99 gacha bo‘lishi lozim.");
+      setNewStepError(t.err_step_range);
       return;
     }
     if (counterSteps.includes(val)) {
-      setNewStepError(`Ushbu qadam (+${val}) allaqachon mavjud! Boshqa qiymat kiriting.`);
+      setNewStepError(t.err_step_exists.replace("{n}", String(val)));
       return;
     }
     const updated = [...counterSteps, val].sort((a, b) => b - a);
@@ -3294,11 +3297,11 @@ export default function Home() {
     if (createTaskKind === "count") {
       const parsed = parseInt(countTarget, 10);
       if (isNaN(parsed) || parsed === 0 || parsed === 1) {
-        setMessage("Sanoqli vazifalar uchun minimal miqdor 2 ta. Bir martalik ishlar uchun «Bir martalik» turini tanlang.");
+        setMessage(t.err_count_min);
         return;
       }
       if (parsed > 99999) {
-        setMessage("Maksimal belgilanishi mumkin bo‘lgan sanoq 99,999 tani tashkil etadi.");
+        setMessage(t.err_count_max);
         return;
       }
       targetValue = parsed;
@@ -4281,24 +4284,24 @@ export default function Home() {
                       }}
                       ariaLabel={t.label_target_count}
                       options={[
-                        { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: "Mashq, odat va kundalik takrorlar", icon: <IconRepeat className="life-select-svg-icon" /> },
-                        { value: "set", label: t.unit_set, group: t.group_fitness_health, detail: "Kuch mashqlari va trening setlari", icon: <IconDumbbell className="life-select-svg-icon" /> },
-                        { value: "qadam", label: t.unit_qadam, group: t.group_fitness_health, detail: "Yurish va kunlik faollik", icon: <IconFootprints className="life-select-svg-icon" /> },
-                        { value: "km", label: t.unit_km, group: t.group_fitness_health, detail: "Yugurish, yurish va masofa", icon: <IconMapPin className="life-select-svg-icon" /> },
-                        { value: "stakan", label: t.unit_stakan, group: t.group_fitness_health, detail: "Suv ichish odati", icon: <IconGlassWater className="life-select-svg-icon" /> },
-                        { value: "litr", label: t.unit_litr, group: t.group_fitness_health, detail: "Suyuqlik miqdori", icon: <IconDroplet className="life-select-svg-icon" /> },
-                        { value: "kkal", label: t.unit_kkal, group: t.group_fitness_health, detail: "Energiya va ovqatlanish", icon: <IconFlame className="life-select-svg-icon" /> },
-                        { value: "bet", label: t.unit_bet, group: t.group_study_mind, detail: "Kitob o'qish va mutolaa", icon: <IconBookOpen className="life-select-svg-icon" /> },
-                        { value: "bob", label: t.unit_bob, group: t.group_study_mind, detail: "Kitob yoki kurs bo'limlari", icon: <IconLibrary className="life-select-svg-icon" /> },
-                        { value: "dars", label: t.unit_dars, group: t.group_study_mind, detail: "Dars va o'quv mashg'ulotlari", icon: <IconGraduationCap className="life-select-svg-icon" /> },
-                        { value: "soz", label: t.unit_soz, group: t.group_study_mind, detail: "Til o'rganish va lug'at", icon: <IconMessageCircle className="life-select-svg-icon" /> },
-                        { value: "daqiqa", label: t.unit_daqiqa, group: t.group_time_focus, detail: "Diqqat va odat uchun vaqt", icon: <IconTimer className="life-select-svg-icon" /> },
-                        { value: "soat", label: t.unit_soat, group: t.group_time_focus, detail: "Uzoq mashg'ulotlar", icon: <IconClock className="life-select-svg-icon" /> },
-                        { value: "pomodoro", label: t.unit_pomodoro, group: t.group_time_focus, detail: "Fokus sessiyalari", icon: <IconTimer className="life-select-svg-icon" /> },
-                        { value: "ta", label: t.unit_ta, group: t.group_time_focus, detail: "Vazifa va yakunlangan ishlar", icon: <IconCheckCircle className="life-select-svg-icon" /> },
-                        { value: "rakat", label: t.unit_rakat, group: t.group_spiritual, detail: "Ibodat va namoz", icon: <IconMoon className="life-select-svg-icon" /> },
-                        { value: "oyat", label: t.unit_oyat, group: t.group_spiritual, detail: "Qur'on mutolaasi", icon: <IconBookOpen className="life-select-svg-icon" /> },
-                        { value: "tasbeh", label: t.unit_tasbeh, group: t.group_spiritual, detail: "Zikr va tasbeh", icon: <IconCircleDot className="life-select-svg-icon" /> },
+                        { value: "marta", label: t.unit_marta, group: t.group_fitness_health, detail: t.ud_marta, icon: <IconRepeat className="life-select-svg-icon" /> },
+                        { value: "set", label: t.unit_set, group: t.group_fitness_health, detail: t.ud_set, icon: <IconDumbbell className="life-select-svg-icon" /> },
+                        { value: "qadam", label: t.unit_qadam, group: t.group_fitness_health, detail: t.ud_qadam, icon: <IconFootprints className="life-select-svg-icon" /> },
+                        { value: "km", label: t.unit_km, group: t.group_fitness_health, detail: t.ud_km, icon: <IconMapPin className="life-select-svg-icon" /> },
+                        { value: "stakan", label: t.unit_stakan, group: t.group_fitness_health, detail: t.ud_stakan, icon: <IconGlassWater className="life-select-svg-icon" /> },
+                        { value: "litr", label: t.unit_litr, group: t.group_fitness_health, detail: t.ud_litr, icon: <IconDroplet className="life-select-svg-icon" /> },
+                        { value: "kkal", label: t.unit_kkal, group: t.group_fitness_health, detail: t.ud_kkal, icon: <IconFlame className="life-select-svg-icon" /> },
+                        { value: "bet", label: t.unit_bet, group: t.group_study_mind, detail: t.ud_bet, icon: <IconBookOpen className="life-select-svg-icon" /> },
+                        { value: "bob", label: t.unit_bob, group: t.group_study_mind, detail: t.ud_bob, icon: <IconLibrary className="life-select-svg-icon" /> },
+                        { value: "dars", label: t.unit_dars, group: t.group_study_mind, detail: t.ud_dars, icon: <IconGraduationCap className="life-select-svg-icon" /> },
+                        { value: "soz", label: t.unit_soz, group: t.group_study_mind, detail: t.ud_soz, icon: <IconMessageCircle className="life-select-svg-icon" /> },
+                        { value: "daqiqa", label: t.unit_daqiqa, group: t.group_time_focus, detail: t.ud_daqiqa, icon: <IconTimer className="life-select-svg-icon" /> },
+                        { value: "soat", label: t.unit_soat, group: t.group_time_focus, detail: t.ud_soat, icon: <IconClock className="life-select-svg-icon" /> },
+                        { value: "pomodoro", label: t.unit_pomodoro, group: t.group_time_focus, detail: t.ud_pomodoro, icon: <IconTimer className="life-select-svg-icon" /> },
+                        { value: "ta", label: t.unit_ta, group: t.group_time_focus, detail: t.ud_ta, icon: <IconCheckCircle className="life-select-svg-icon" /> },
+                        { value: "rakat", label: t.unit_rakat, group: t.group_spiritual, detail: t.ud_rakat, icon: <IconMoon className="life-select-svg-icon" /> },
+                        { value: "oyat", label: t.unit_oyat, group: t.group_spiritual, detail: t.ud_oyat, icon: <IconBookOpen className="life-select-svg-icon" /> },
+                        { value: "tasbeh", label: t.unit_tasbeh, group: t.group_spiritual, detail: t.ud_tasbeh, icon: <IconCircleDot className="life-select-svg-icon" /> },
                       ] satisfies LifeSelectOption[]}
                     />
                   </div>
@@ -4524,10 +4527,10 @@ export default function Home() {
                         }}
                         ariaLabel={t.label_duration}
                         options={[
-                          { value: "kun", label: t.unit_day, detail: "Qisqa muddatli reja", icon: <IconSun className="life-select-svg-icon" /> },
-                          { value: "hafta", label: t.unit_week, detail: "Bir necha haftalik maqsad", icon: <IconCalendar className="life-select-svg-icon" /> },
-                          { value: "oy", label: t.unit_month, detail: "Oylik odat va marafon", icon: <IconCalendarDays className="life-select-svg-icon" /> },
-                          { value: "yil", label: t.unit_year, detail: "Uzoq muddatli maqsad", icon: <IconFlag className="life-select-svg-icon" /> },
+                          { value: "kun", label: t.unit_day, detail: t.dd_day, icon: <IconSun className="life-select-svg-icon" /> },
+                          { value: "hafta", label: t.unit_week, detail: t.dd_week, icon: <IconCalendar className="life-select-svg-icon" /> },
+                          { value: "oy", label: t.unit_month, detail: t.dd_month, icon: <IconCalendarDays className="life-select-svg-icon" /> },
+                          { value: "yil", label: t.unit_year, detail: t.dd_year, icon: <IconFlag className="life-select-svg-icon" /> },
                         ] satisfies LifeSelectOption[]}
                       />
                     </div>
@@ -4619,8 +4622,8 @@ export default function Home() {
                   onChange={(value) => setNewSchedule(value as "daily" | "once")}
                   ariaLabel={t.label_recurrence}
                   options={[
-                    { value: "daily", label: t.opt_repeat_daily, detail: "Har kuni bajariladigan odat", icon: <IconRepeat className="life-select-svg-icon" /> },
-                    { value: "once", label: t.opt_one_time, detail: "Bir marta bajariladigan vazifa", icon: <IconPin className="life-select-svg-icon" /> },
+                    { value: "daily", label: t.opt_repeat_daily, detail: t.dd_daily, icon: <IconRepeat className="life-select-svg-icon" /> },
+                    { value: "once", label: t.opt_one_time, detail: t.dd_once, icon: <IconPin className="life-select-svg-icon" /> },
                   ]}
                 />
               </div>
@@ -5021,8 +5024,8 @@ export default function Home() {
             setSidebarOpen(true);
           }
         }}
-        title={!sidebarOpen ? "Sidebarni ochish uchun bosing" : undefined}
-        aria-label="Asosiy navigatsiya"
+        title={!sidebarOpen ? t.sidebar_expand : undefined}
+        aria-label={t.aria_main_nav}
       >
         {/* Sidebar Header: Logo & Toggle */}
         <div className="sidebar-header">
@@ -5036,7 +5039,7 @@ export default function Home() {
                   setActiveTab("today");
                   setMobileMenuOpen(false);
                 }}
-                aria-label="Bosh sahifa"
+                aria-label={t.aria_home}
               >
                 <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={34} height={34} priority />
                 <span className="brand-title">
@@ -5050,8 +5053,8 @@ export default function Home() {
                   e.stopPropagation();
                   setSidebarOpen(false);
                 }}
-                aria-label="Sidebarni ixchamlash"
-                title="Sidebarni ixchamlash"
+                aria-label={t.sidebar_collapse}
+                title={t.sidebar_collapse}
               >
                 <IconChevronLeft className="icon-sm" />
               </button>
@@ -5064,8 +5067,8 @@ export default function Home() {
                 e.stopPropagation();
                 setSidebarOpen(true);
               }}
-              aria-label="Sidebarni ochish"
-              title="Sidebarni ochish"
+              aria-label={t.sidebar_expand}
+              title={t.sidebar_expand}
             >
               <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={36} height={36} priority />
               <span className="collapsed-open-hint" aria-hidden="true">
@@ -5082,7 +5085,7 @@ export default function Home() {
               e.stopPropagation();
               setMobileMenuOpen(false);
             }}
-            aria-label="Menyuni yopish"
+            aria-label={t.menu_close}
           >
             <IconClose className="icon-sm" />
           </button>
@@ -5239,12 +5242,12 @@ export default function Home() {
               setActiveTab("profile");
               setMobileMenuOpen(false);
             }}
-            title="Profilni ko‘rish"
+            title={t.profile_view}
           >
             <div className="user-avatar">
               {avatarUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={avatarUrl} alt="Avatar" className="avatar-img" />
+                <img src={avatarUrl} alt={t.avatar_alt} className="avatar-img" />
               ) : (
                 (accountName || "M").slice(0, 1).toUpperCase()
               )}
@@ -5270,7 +5273,7 @@ export default function Home() {
             type="button"
             className="mobile-brand-btn"
             onClick={() => setActiveTab("today")}
-            aria-label="Bosh sahifa"
+            aria-label={t.aria_home}
           >
             <Image className="brand-logo" src="/myplan-logo-192.png" unoptimized alt="MyLife" width={32} height={32} priority />
             <span className="brand-title">
@@ -5430,7 +5433,7 @@ export default function Home() {
                 type="button"
                 className="toast-close"
                 onClick={() => setMessage("")}
-                aria-label="Yopish"
+                aria-label={t.focus_close}
               >
                 <IconClose className="icon-xs" />
               </button>
@@ -5441,7 +5444,7 @@ export default function Home() {
           {activeTab === "today" && (
             <div key="tab-today" className="tab-pane-container">
               {/* POCKET STREAK & MOMENTUM ENGINE BANNER */}
-              <section className="pocket-streak-banner" aria-label="Ketma-ketlik seriyasi">
+              <section className="pocket-streak-banner" aria-label={t.streak_label}>
                 <div className="streak-left">
                   <div className={`streak-flame-icon-wrap ${streakCount > 0 ? "active-fire" : ""}`}>
                     <IconFlame className="icon-fire" />
@@ -5450,7 +5453,7 @@ export default function Home() {
                     <div className="streak-title-row">
                       <span className="streak-label">{t.streak_label}</span>
                       {bestStreak > 0 && (
-                        <span className="best-streak-tag">{t.best_record}: {bestStreak} kun</span>
+                        <span className="best-streak-tag">{t.best_record}: {bestStreak} {t.days_word}</span>
                       )}
                     </div>
                     <div className="streak-number-row">
@@ -5480,7 +5483,7 @@ export default function Home() {
                 </button>
               </section>
 
-              <section className="stats-grid" aria-label="Bugungi ko‘rsatkichlar">
+              <section className="stats-grid" aria-label={t.aria_today_stats}>
                 <article className="stat-card progress-card">
                   <div className="stat-header">
                     <span className="stat-tag">{t.stat_result}</span>
@@ -5522,7 +5525,7 @@ export default function Home() {
 
               {/* SMART NEXT PRIORITY FOCUS SPOTLIGHT BANNER */}
               {recommendedFocusActivity && (
-                <section className="focus-spotlight-card" aria-label="Navbatdagi tavsiya">
+                <section className="focus-spotlight-card" aria-label={t.focus_next_spotlight}>
                   <div className="focus-spotlight-left">
                     <div className="focus-spotlight-badge">
                       <IconZap className="icon-xs" />
@@ -5560,7 +5563,7 @@ export default function Home() {
                 </div>
 
                 {/* Time of Day Filter Bar (Pocket Zone Navigation) */}
-                <div className="time-of-day-filter-bar" role="tablist" aria-label="Kun qismlari bo‘yicha saralash">
+                <div className="time-of-day-filter-bar" role="tablist" aria-label={t.aria_time_filter}>
                   <button
                     type="button"
                     className={`time-filter-chip ${activeTimeFilter === "all" ? "active" : ""}`}
@@ -6145,15 +6148,15 @@ export default function Home() {
                     <div className="profile-large-avatar-wrap">
                       {avatarUrl ? (
                         /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={avatarUrl} alt="Profil rasmi" className="profile-large-avatar" />
+                        <img src={avatarUrl} alt={t.profile_photo_alt} className="profile-large-avatar" />
                       ) : (
                         <div className="profile-avatar-placeholder">
                           {(accountName || "M").slice(0, 1).toUpperCase()}
                         </div>
                       )}
-                      <label htmlFor="avatar-file-input" className="avatar-upload-overlay" title="Rasm yuklash / almashtirish">
+                      <label htmlFor="avatar-file-input" className="avatar-upload-overlay" title={t.photo_upload_title}>
                         <IconCamera className="icon-sm" />
-                        <span>Rasm</span>
+                        <span>{t.photo_word}</span>
                         <input
                           id="avatar-file-input"
                           type="file"
@@ -6165,33 +6168,33 @@ export default function Home() {
                     </div>
 
                     <div className="profile-header-meta">
-                      <h3>{accountName || "Foydalanuvchi"}</h3>
+                      <h3>{accountName || t.profile_default_name}</h3>
                       <p className="profile-username">@{accountUsername || "username"}</p>
                       <span className="profile-status-pill">
-                        <IconShield className="icon-xs" /> Shaxsiy hisob faol
+                        <IconShield className="icon-xs" /> {t.profile_status_active}
                       </span>
                     </div>
                   </div>
 
                   <div className="profile-details-grid">
                     <div className="profile-info-item">
-                      <span className="info-label">Ism va familiya</span>
-                      <p className="info-value">{accountName || "Kiritilmagan"}</p>
+                      <span className="info-label">{t.profile_field_fullname}</span>
+                      <p className="info-value">{accountName || t.not_entered}</p>
                     </div>
 
                     <div className="profile-info-item">
-                      <span className="info-label">Foydalanuvchi nomi</span>
-                      <p className="info-value">@{accountUsername || "kiritilmagan"}</p>
+                      <span className="info-label">{t.profile_field_username}</span>
+                      <p className="info-value">@{accountUsername || t.not_entered}</p>
                     </div>
 
                     <div className="profile-info-item">
-                      <span className="info-label">Yoshingiz</span>
-                      <p className="info-value">{userAge ? `${userAge} yosh` : "Ko‘rsatilmagan"}</p>
+                      <span className="info-label">{t.profile_field_age}</span>
+                      <p className="info-value">{userAge ? `${userAge} ${t.profile_age_unit}` : t.not_specified}</p>
                     </div>
 
                     <div className="profile-info-item">
-                      <span className="info-label">Jami faoliyatlar</span>
-                      <p className="info-value text-lime">{activities.length} ta</p>
+                      <span className="info-label">{t.profile_field_total_habits}</span>
+                      <p className="info-value text-lime">{activities.length} {t.habits_unit_suffix}</p>
                     </div>
                   </div>
 
@@ -6200,25 +6203,25 @@ export default function Home() {
                     <div className="profile-section-title-row">
                       <h4>
                         <IconEdit className="icon-xs text-lime" />
-                        <span>Ism va yoshni tahrirlash</span>
+                        <span>{t.profile_edit_name_age_title}</span>
                       </h4>
                       {!canChangeNameAge ? (
-                        <span className="security-badge locked" title="Yangi sessiyadan so‘ng 3 soat o‘tishi shart">
+                        <span className="security-badge locked" title={t.profile_cooldown_3h}>
                           <IconLock className="icon-xs" />
-                          <span>3 soatlik himoya: {formatRemainingTime(remainingNameAgeMs)} qoldi</span>
+                          <span>{t.security_3h_label}: {formatRemainingTime(remainingNameAgeMs)} {t.step_left}</span>
                         </span>
                       ) : (
                         <span className="security-badge unlocked">
                           <IconCheck className="icon-xs" />
-                          <span>Tahrirlash mumkin</span>
+                          <span>{t.security_unlocked}</span>
                         </span>
                       )}
                     </div>
 
                     <p className="security-hint-text">
                       {!canChangeNameAge
-                        ? "Xavfsizlik qoidasi: hisobga yangi kirilganda ism va yoshni o‘zgartirish uchun kamida 3 soat o‘tishi shart. Ushbu vaqt tugagach tahrirlash avtomatik ochiladi."
-                        : "Profil ma’lumotlaringizni yangilang va saqlash tugmasini bosing."}
+                        ? t.security_name_age_rule
+                        : t.security_name_age_unlocked_rule}
                     </p>
 
                     <div className="profile-form-grid">
@@ -6233,7 +6236,7 @@ export default function Home() {
                             profileFormDirtyRef.current = true;
                             setEditFullName(e.target.value);
                           }}
-                          placeholder="To‘liq ismingiz"
+                          placeholder={t.profile_fullname_placeholder}
                           disabled={!canChangeNameAge || isSavingProfile}
                           maxLength={60}
                         />
@@ -6250,7 +6253,7 @@ export default function Home() {
                             profileFormDirtyRef.current = true;
                             setEditAge(e.target.value);
                           }}
-                          placeholder="Yoshingiz (masalan: 22)"
+                          placeholder={t.profile_age_placeholder}
                           disabled={!canChangeNameAge || isSavingProfile}
                           min={6}
                           max={122}
@@ -6512,7 +6515,7 @@ export default function Home() {
                         type="button"
                         className={`toggle-switch-btn ${soundEnabled ? "on" : "off"}`}
                         onClick={() => handleSoundToggle(!soundEnabled)}
-                        aria-label="Tovushni yoqish yoki o‘chirish"
+                        aria-label={t.aria_sound_toggle}
                       >
                         <span className="toggle-slider" />
                       </button>
@@ -6556,13 +6559,13 @@ export default function Home() {
                         type="button"
                         className={`toggle-switch-btn ${notificationsEnabled ? "on" : "off"}`}
                         onClick={() => handleNotificationsToggle(!notificationsEnabled)}
-                        aria-label="Bildirishnomalarni yoqish yoki o‘chirish"
+                        aria-label={t.aria_notif_toggle}
                       >
                         <span className="toggle-slider" />
                       </button>
                     </div>
                     <div className="settings-toggle-row">
-                      <span>Brauzer bildirishnomalari</span>
+                      <span>{t.setting_browser_push}</span>
                       <button
                         type="button"
                         className={`setting-choice-btn ${pushSubscribed ? "active" : ""}`}
@@ -6570,7 +6573,7 @@ export default function Home() {
                         disabled={pushBusy}
                         style={{ width: "auto", padding: "8px 16px" }}
                       >
-                        {pushBusy ? "Kutilmoqda…" : pushSubscribed ? "O‘chirish" : pushPermission === "granted" ? "Yoqish" : "Ruxsat berish"}
+                        {pushBusy ? t.push_wait : pushSubscribed ? t.push_off : pushPermission === "granted" ? t.push_on : t.push_allow}
                       </button>
                     </div>
                   </div>
@@ -6584,7 +6587,7 @@ export default function Home() {
                           <div className="step-title-row">
                             <h3>{t.devices_title}</h3>
                             <span className="step-count-badge">
-                              {activeDevices.length} ta faol qurilma
+                              {t.devices_count_badge.replace("{n}", String(activeDevices.length))}
                             </span>
                           </div>
                           <p>{t.devices_sub}</p>
@@ -6611,7 +6614,7 @@ export default function Home() {
                                 </div>
                                 <div className="device-info-col">
                                   <div className="device-name-row">
-                                    <strong className="device-title">{dev.device_name}</strong>
+                                    <strong className="device-title">{localizeDeviceLabel(dev.device_name, t)}</strong>
                                     {isCurrent ? (
                                       <span className="device-current-badge">
                                         <span className="status-dot green" /> {t.devices_current}
@@ -6623,9 +6626,9 @@ export default function Home() {
                                     )}
                                   </div>
                                   <div className="device-meta-row">
-                                    <span className="device-meta-tag">{dev.os_name}</span>
+                                    <span className="device-meta-tag">{localizeDeviceLabel(dev.os_name, t)}</span>
                                     <span className="device-meta-divider">•</span>
-                                    <span className="device-meta-tag">{dev.browser_name}</span>
+                                    <span className="device-meta-tag">{localizeDeviceLabel(dev.browser_name, t)}</span>
                                     <span className="device-meta-divider">•</span>
                                     <span className="device-meta-time">
                                       {formatDeviceTime(dev.last_active_at)}
@@ -6640,14 +6643,14 @@ export default function Home() {
                                     type="button"
                                     className="btn-revoke-device"
                                     onClick={() => handleRevokeDevice(dev.id)}
-                                    title="Sessiyani yakunlash (chiqarib yuborish)"
-                                    aria-label="Sessiyani yakunlash"
+                                    title={t.devices_revoke_title}
+                                    aria-label={t.devices_revoke}
                                   >
                                     <IconLogOut className="icon-xs" />
                                     <span className="btn-revoke-text">{t.devices_revoke}</span>
                                   </button>
                                 ) : (
-                                  <span className="this-device-indicator">Ushbu brauzer</span>
+                                  <span className="this-device-indicator">{t.this_browser}</span>
                                 )}
                               </div>
                             </div>
@@ -6664,7 +6667,7 @@ export default function Home() {
                       <div className="step-header-text">
                         <div className="step-title-row">
                           <h3>{t.setting_counter}</h3>
-                          <span className="step-count-badge">{counterSteps.length} / 10 ta</span>
+                          <span className="step-count-badge">{counterSteps.length} / 10</span>
                         </div>
                         <p>{t.setting_counter_sub}</p>
                       </div>
@@ -6681,8 +6684,8 @@ export default function Home() {
                               type="button"
                               className="btn-delete-step"
                               onClick={() => handleRemoveCounterStep(step)}
-                              title={`+${step} qadamini o‘chirish`}
-                              aria-label={`+${step} qadamini o‘chirish`}
+                              title={t.step_remove.replace("{n}", String(step))}
+                              aria-label={t.step_remove.replace("{n}", String(step))}
                             >
                               <IconClose className="icon-xs" />
                             </button>
@@ -6729,7 +6732,7 @@ export default function Home() {
                           type="button"
                           className="btn-reset-steps"
                           onClick={handleResetCounterSteps}
-                          title="Standart (+10, +5, +1) qadamlarni tiklash"
+                          title={t.step_reset_title}
                         >
                           {t.btn_reset}
                         </button>
@@ -6742,7 +6745,7 @@ export default function Home() {
                       )}
                       {counterSteps.length >= 10 ? (
                         <p className="step-limit-notice">
-                          <IconCheck className="icon-xs inline-icon" /> Maksimal 10 ta hisoblash qadami kiritildi. Yangi qo‘shish uchun mavjudlaridan birini o‘chiring.
+                          <IconCheck className="icon-xs inline-icon" /> {t.step_limit_notice}
                         </p>
                       ) : (
                         <p className="step-hint">
@@ -6757,8 +6760,8 @@ export default function Home() {
                     <div className="settings-card-header">
                       <IconArchive className="icon-sm text-lime" />
                       <div>
-                        <h3>Arxivlash tartibi</h3>
-                        <p>Tugallangan rejalarni avtomatik arxivlash ({autoArchiveDelay} kun)</p>
+                        <h3>{t.archive_rule_title}</h3>
+                        <p>{t.archive_rule_desc.replace("{n}", String(autoArchiveDelay))}</p>
                       </div>
                     </div>
                   </div>
@@ -6805,7 +6808,7 @@ export default function Home() {
         </main>
 
         {/* Mobile & Tablet Bottom Navigation Bar */}
-        <nav className="mobile-bottom-nav" aria-label="Mobil navigatsiya">
+        <nav className="mobile-bottom-nav" aria-label={t.aria_mobile_nav}>
           <button
             type="button"
             className={`bottom-nav-item ${activeTab === "today" ? "active" : ""}`}
@@ -6826,8 +6829,8 @@ export default function Home() {
             type="button"
             className="bottom-nav-create"
             onClick={openCreateModal}
-            aria-label="Vazifa qo‘shish"
-            title="Vazifa qo‘shish"
+            aria-label={t.aria_add_task}
+            title={t.aria_add_task}
           >
             <IconPlus className="icon-md" />
           </button>

@@ -20,6 +20,7 @@ import {
   IconDownload,
 } from "@/components/icons";
 import { syncCurrentDeviceSession } from "@/lib/device-session";
+import { authText } from "@/lib/auth-translations";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -28,6 +29,19 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function AuthView({ initialMode = "login" }: { initialMode?: "login" | "signup" }) {
   const router = useRouter();
+  // Before sign-in there is no account yet: the page follows the language chosen on this device.
+  const [language, setLanguage] = useState("uz");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        setLanguage(localStorage.getItem("myplan_lang") || "uz");
+      } catch {
+        // Storage can be blocked: stay on the default.
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+  const a = authText(language);
   const [mode, setMode] = useState<"login" | "signup">(initialMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -134,17 +148,17 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       }
       const parsed = parseInt(age, 10);
       if (age.length > 3 || parsed > 999) {
-        setDebouncedAgeError("Iltimos, haqiqiy yosh qiymatini kiriting (maksimal 3 xonali son).");
+        setDebouncedAgeError(a.e_age_len);
       } else if (parsed > 122) {
-        setDebouncedAgeError("Kiritilgan yosh qiymati haqiqatga mos kelmaydi. Iltimos, amaldagi yoshingizni kiriting.");
+        setDebouncedAgeError(a.e_age_big);
       } else if (parsed < 6 && age !== "") {
-        setDebouncedAgeError("MyLife tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
+        setDebouncedAgeError(a.e_age_min);
       } else {
         setDebouncedAgeError("");
       }
     }, mode !== "signup" || !age ? 0 : 2000);
     return () => clearTimeout(timer);
-  }, [age, mode]);
+  }, [age, mode, a]);
 
   // Debounced password validation (2 seconds)
   useEffect(() => {
@@ -154,15 +168,15 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
         return;
       }
       if (password.length > 0 && password.length < 8) {
-        setDebouncedPasswordError("Xavfsizlik talablariga muvofiq parol kamida 8 ta belgidan iborat bo‘lishi shart.");
+        setDebouncedPasswordError(a.e_pw_short);
       } else if (mode === "signup" && confirmPassword && password !== confirmPassword) {
-        setDebouncedPasswordError("Kiritilgan tasdiqlash paroli asosiy parolga mos kelmadi. Iltimos, tekshirib qayta kiriting.");
+        setDebouncedPasswordError(a.e_pw_match);
       } else {
         setDebouncedPasswordError("");
       }
     }, !password ? 0 : 2000);
     return () => clearTimeout(timer);
-  }, [password, confirmPassword, mode]);
+  }, [password, confirmPassword, mode, a]);
 
   const switchMode = (newMode: "login" | "signup") => {
     setMode(newMode);
@@ -174,7 +188,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
   const handleInstallApp = async () => {
     if (!deferredPrompt) {
-      alert("Bu brauzer MyLife’ni bevosita o‘rnatish oynasini qo‘llab-quvvatlamaydi. Chrome yoki Edge’ning so‘nggi versiyasida ochib, manzil panelidagi o‘rnatish belgisidan foydalan.");
+      alert(a.install_unsupported);
       return;
     }
     try {
@@ -193,32 +207,32 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
     const normalizedUsername = username.trim().toLowerCase();
     if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
-      setMessage("Foydalanuvchi nomi 3 dan 24 tagacha belgidan iborat bo‘lishi lozim (lotin harflari, raqam va pastki chiziq).");
+      setMessage(a.e_username);
       return;
     }
 
     if (mode === "signup") {
       const parsedAge = parseInt(age, 10);
       if (age.length > 3 || parsedAge > 999) {
-        setMessage("Iltimos, haqiqiy yosh qiymatini kiriting (maksimal 3 xonali son).");
+        setMessage(a.e_age_len);
         return;
       }
       if (isNaN(parsedAge) || parsedAge < 6) {
-        setMessage("MyLife tizimidan mustaqil foydalanish uchun foydalanuvchi kamida 6 yosh bo‘lishi lozim.");
+        setMessage(a.e_age_min);
         return;
       }
       if (parsedAge > 122) {
-        setMessage("Kiritilgan yosh qiymati haqiqatga mos kelmaydi. Iltimos, amaldagi yoshingizni kiriting.");
+        setMessage(a.e_age_big);
         return;
       }
       if (password !== confirmPassword) {
-        setMessage("Kiritilgan tasdiqlash paroli asosiy parolga mos kelmadi. Iltimos, tekshirib qayta kiriting.");
+        setMessage(a.e_pw_match);
         return;
       }
     }
 
     if (password.length < 8) {
-      setMessage("Xavfsizlik talablariga muvofiq parol kamida 8 ta belgidan iborat bo‘lishi shart.");
+      setMessage(a.e_pw_short);
       return;
     }
 
@@ -268,7 +282,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           }
           router.replace("/");
         } else {
-          setMessage("Hisob yaratildi. Tizimga kirishingiz mumkin.");
+          setMessage(a.ok_created);
           switchMode("login");
         }
       } else {
@@ -282,14 +296,14 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           const expectedAccountId = localStorage.getItem("myplan_switch_account_id");
           if (expectedAccountId && signInData.user.id !== expectedAccountId) {
             await supabase.auth.signOut({ scope: "local" });
-            setMessage("Tanlangan hisobga kirish uchun aynan shu hisobning foydalanuvchi nomi va parolini kirit.");
+            setMessage(a.e_switch);
             return;
           }
           const { data: persistedSession, error: sessionError } = await supabase.auth.getSession();
           if (sessionError) throw sessionError;
           if (persistedSession.session?.user.id !== signInData.user.id) {
             await supabase.auth.signOut({ scope: "local" });
-            throw new Error("Kiritilgan hisob sessiyasi saqlanmadi. Iltimos, qayta urinib ko'r.");
+            throw new Error(a.e_session);
           }
           saveAccountSession(persistedSession.session);
           localStorage.removeItem("myplan_switch_account_id");
@@ -328,14 +342,14 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           rawMsg.toLowerCase().includes("credentials") ||
           rawMsg.toLowerCase().includes("not found"))
       ) {
-        setMessage("Foydalanuvchi nomi yoki parol noto‘g‘ri kiritildi. Iltimos, ma’lumotlarni tekshirib qayta urinib ko‘ring.");
+        setMessage(a.e_bad_cred);
       } else if (
         rawMsg.toLowerCase().includes("already registered") ||
         rawMsg.toLowerCase().includes("exists")
       ) {
-        setMessage("Ushbu foydalanuvchi nomi allaqachon ro‘yxatdan o‘tgan. Iltimos, boshqa nom tanlang.");
+        setMessage(a.e_taken);
       } else {
-        setMessage("Tizimga kirishda xatolik yuz berdi. Iltimos, ma’lumotlarni tekshirib qayta urinib ko‘ring.");
+        setMessage(a.e_generic);
       }
     } finally {
       setBusy(false);
@@ -366,7 +380,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
       {/* Top Navigation Bar: Minimal & Corporate */}
       <header className="landing-navbar">
         <div className="navbar-container">
-          <Link href="/" className="brand-link" aria-label="MyLife bosh sahifasi">
+          <Link href="/" className="brand-link" aria-label={a.brand_aria}>
             <Image
               className="brand-logo"
               src="/myplan-logo-192.png" unoptimized
@@ -386,10 +400,10 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 type="button"
                 className="btn-pwa-install-nav"
                 onClick={handleInstallApp}
-                title="Ilovani qurilmaga o‘rnatish"
+                title={a.install_title}
               >
                 <IconDownload className="icon-xs" />
-                <span>Ilovani o‘rnatish</span>
+                <span>{a.install_btn}</span>
               </button>
             )}
 
@@ -408,15 +422,15 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
               <div className="auth-card-top-bar">
                 <span className="auth-badge">MYLIFE SHAXSIY HISOB</span>
                 <span className="auth-security">
-                  <IconShield className="icon-xs" /> XAVFSIZ VA MAXFIY
+                  <IconShield className="icon-xs" /> {a.secure_badge}
                 </span>
               </div>
 
               {isAddingAccount && (
                 <div className="add-account-intent-banner">
                   <div className="banner-text">
-                    <strong>Yangi hisob qo‘shish rejimi (Maksimal 5 ta)</strong>
-                    <p>Mavjud hisoblaringizga yangi profil ulanadi.</p>
+                    <strong>{a.add_banner_title}</strong>
+                    <p>{a.add_banner_desc}</p>
                   </div>
                   <button
                     type="button"
@@ -428,17 +442,17 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                       router.replace("/");
                     }}
                   >
-                    Bekor qilish
+                    {a.cancel}
                   </button>
                 </div>
               )}
 
               <div className="auth-title-block">
-                <h2>{mode === "login" ? "Tizimga kirish" : "Yangi hisob yaratish"}</h2>
+                <h2>{mode === "login" ? a.title_login : a.title_signup}</h2>
                 <p>
                   {mode === "login"
-                    ? "Shaxsiy rejalaringizni davom ettirish uchun tizimga kiring."
-                    : "Kuningizni samarali rejalashtirish uchun bepul ro‘yxatdan o‘ting."}
+                    ? a.sub_login
+                    : a.sub_signup}
                 </p>
               </div>
 
@@ -451,7 +465,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                   className={`mode-btn ${mode === "login" ? "active" : ""}`}
                   onClick={() => switchMode("login")}
                 >
-                  Kirish
+                  {a.tab_login}
                 </button>
                 <button
                   type="button"
@@ -460,7 +474,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                   className={`mode-btn ${mode === "signup" ? "active" : ""}`}
                   onClick={() => switchMode("signup")}
                 >
-                  Ro‘yxatdan o‘tish
+                  {a.tab_signup}
                 </button>
               </div>
 
@@ -468,13 +482,13 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
               <form className="auth-form-body" onSubmit={handleSubmit}>
                 {mode === "signup" && (
                   <div className="input-group">
-                    <label htmlFor="auth-name">Ism va familiya *</label>
+                    <label htmlFor="auth-name">{a.label_name}</label>
                     <input
                       id="auth-name"
                       autoComplete="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="Masalan: Sardor Aliyev"
+                      placeholder={a.ph_name}
                       maxLength={80}
                       required
                     />
@@ -482,14 +496,14 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 )}
 
                 <div className="input-group">
-                  <label htmlFor="auth-username">Foydalanuvchi nomi (Username) *</label>
+                  <label htmlFor="auth-username">{a.label_username}</label>
                   <input
                     id="auth-username"
                     type="text"
                     autoComplete="username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Masalan: sardor_a"
+                    placeholder={a.ph_username}
                     minLength={3}
                     maxLength={24}
                     pattern="[A-Za-z0-9_]{3,24}"
@@ -501,7 +515,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
                 {mode === "signup" && (
                   <div className="input-group">
-                    <label htmlFor="auth-age">Yoshingiz *</label>
+                    <label htmlFor="auth-age">{a.label_age}</label>
                     <input
                       id="auth-age"
                       type="text"
@@ -511,7 +525,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                         const val = e.target.value.replace(/\D/g, "").slice(0, 3);
                         setAge(val);
                       }}
-                      placeholder="Masalan: 24"
+                      placeholder={a.ph_age}
                       maxLength={3}
                       required
                     />
@@ -525,7 +539,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
                 {/* Password input with toggle */}
                 <div className="input-group">
-                  <label htmlFor="auth-password">Parol *</label>
+                  <label htmlFor="auth-password">{a.label_password}</label>
                   <div className="password-input-wrap">
                     <input
                       id="auth-password"
@@ -533,7 +547,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                       autoComplete={mode === "login" ? "current-password" : "new-password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Kamida 8 ta belgi"
+                      placeholder={a.ph_password}
                       minLength={8}
                       required
                     />
@@ -541,7 +555,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                       type="button"
                       className="eye-toggle-btn"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      aria-label={showPassword ? "Parolni yashirish" : "Parolni ko‘rsatish"}
+                      aria-label={showPassword ? a.pw_hide : a.pw_show}
                       tabIndex={-1}
                     >
                       {showPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
@@ -557,7 +571,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 {/* Confirm Password (signup only) */}
                 {mode === "signup" && (
                   <div className="input-group">
-                    <label htmlFor="auth-confirm-password">Parolni tasdiqlash *</label>
+                    <label htmlFor="auth-confirm-password">{a.label_confirm}</label>
                     <div className="password-input-wrap">
                       <input
                         id="auth-confirm-password"
@@ -565,7 +579,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                         autoComplete="new-password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Parolni qayta kiriting"
+                        placeholder={a.ph_confirm}
                         minLength={8}
                         required
                       />
@@ -573,7 +587,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                         type="button"
                         className="eye-toggle-btn"
                         onClick={() => setShowConfirmPassword((prev) => !prev)}
-                        aria-label={showConfirmPassword ? "Parolni yashirish" : "Parolni ko‘rsatish"}
+                        aria-label={showConfirmPassword ? a.pw_hide : a.pw_show}
                         tabIndex={-1}
                       >
                         {showConfirmPassword ? <IconEyeOff className="icon-sm" /> : <IconEye className="icon-sm" />}
@@ -595,13 +609,13 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
                 {!configured && (
                   <div className="auth-alert-message warning">
-                    <span>Supabase sozlanmagan. Tizim sozlamalarini tekshiring.</span>
+                    <span>{a.no_supabase}</span>
                   </div>
                 )}
 
                 {mode === "signup" && (
                   <p className="auth-field-hint">
-                    Foydalanuvchi nomi tizimga kirish uchun asosiy identifikator hisoblanadi.
+                    {a.username_hint}
                   </p>
                 )}
 
@@ -612,10 +626,10 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 >
                   <span>
                     {busy
-                      ? "Iltimos, kuting…"
+                      ? a.wait
                       : mode === "login"
-                        ? "Hisobga kirish"
-                        : "Ro‘yxatdan o‘tishni yakunlash"}
+                        ? a.submit_login
+                        : a.submit_signup}
                   </span>
                   <IconArrowRight className="icon-sm" />
                 </button>
@@ -623,7 +637,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
 
               <div className="auth-terms-notice">
                 <span>
-                  Davom etish orqali siz MyLife xizmatidan foydalanish qoidalariga rozilik bildirasiz.
+                  {a.terms}
                 </span>
               </div>
             </div>
@@ -635,12 +649,11 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           <div className="onboarding-container">
             <div className="onboarding-header-center">
               <span className="onboarding-badge">
-                <IconSparkles className="icon-xs" /> MYLIFE METODOLOGIYASI
+                <IconSparkles className="icon-xs" /> {a.method_badge}
               </span>
               <h2 className="onboarding-title">Plan your day. Own your time.</h2>
               <p className="onboarding-subtitle">
-                O‘z maqsadlaringizni aniq belgilang, har kungi qadamlaringizni kuzatib boring va
-                kichik yutuqlaringizni barqaror buyuk natijalarga aylantiring.
+                {a.method_sub}
               </p>
             </div>
 
@@ -650,10 +663,9 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 <div className="pillar-icon-wrap">
                   <IconCalendar className="icon-md" />
                 </div>
-                <h3>Kunlik tartib intizomi</h3>
+                <h3>{a.pillar1_t}</h3>
                 <p>
-                  Har tong rejalaringizni aniq ko‘ring. Kun davomida bajarilgan ishlarni qayd etib,
-                  chalg‘imasdan diqqatni eng muhim vazifalarga qarating.
+                  {a.pillar1_d}
                 </p>
               </div>
 
@@ -661,10 +673,9 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 <div className="pillar-icon-wrap">
                   <IconHash className="icon-md" />
                 </div>
-                <h3>Sanoqli va odatli maqsadlar</h3>
+                <h3>{a.pillar2_t}</h3>
                 <p>
-                  Faqat bir martalik ishlar emas, balki takrorlanuvchi amallarni (masalan, 100 ta
-                  mashq, 50 bet kitob) interaktiv +1, +5, +10 tugmalari orqali hisoblang.
+                  {a.pillar2_d}
                 </p>
               </div>
 
@@ -672,32 +683,31 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
                 <div className="pillar-icon-wrap">
                   <IconBarChart className="icon-md" />
                 </div>
-                <h3>Ko‘rsatkichlar tahlili</h3>
+                <h3>{a.pillar3_t}</h3>
                 <p>
-                  O‘sishingizni raqamlarda ko‘ring. Haftalik va oylik ko‘rsatkichlar orqali shaxsiy
-                  unumdorligingiz darajasini tahlil qiling.
+                  {a.pillar3_d}
                 </p>
               </div>
             </div>
 
             {/* Step-by-Step Guide */}
             <div className="onboarding-steps-block">
-              <h3 className="steps-title">Qanday ishlaydi? 3 ta oddiy qadam</h3>
+              <h3 className="steps-title">{a.steps_title}</h3>
               <div className="steps-row">
                 <div className="step-item">
                   <div className="step-number">01</div>
-                  <h4>Hisobingizni oching</h4>
-                  <p>Bir necha soniyada shaxsiy parolingiz bilan xavfsiz hisob yarating.</p>
+                  <h4>{a.step1_t}</h4>
+                  <p>{a.step1_d}</p>
                 </div>
                 <div className="step-item">
                   <div className="step-number">02</div>
-                  <h4>Rejalaringizni kiriting</h4>
-                  <p>Kunlik yoki bir martalik, oddiy yoki sanoqli maqsadlarni belgilang.</p>
+                  <h4>{a.step2_t}</h4>
+                  <p>{a.step2_d}</p>
                 </div>
                 <div className="step-item">
                   <div className="step-number">03</div>
-                  <h4>Natijani qayd eting</h4>
-                  <p>Har kuni belgilab boring va unumdorligingiz ortishiga guvoh bo‘ling.</p>
+                  <h4>{a.step3_t}</h4>
+                  <p>{a.step3_d}</p>
                 </div>
               </div>
             </div>
@@ -714,7 +724,7 @@ export default function AuthView({ initialMode = "login" }: { initialMode?: "log
           </Link>
           <span className="footer-center-tag">PLAN YOUR DAY. OWN YOUR TIME.</span>
           <span className="footer-copyright">
-            © 2026 MyLife Inc. Barcha huquqlar himoyalangan.
+            {a.copyright}
           </span>
         </div>
       </footer>

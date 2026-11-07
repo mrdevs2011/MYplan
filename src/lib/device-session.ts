@@ -226,3 +226,20 @@ export async function revokeDeviceSession(
     return false;
   }
 }
+
+/** Device, system and browser names are saved once (in Uzbek for generic words); they are shown in the reader's language. */
+const DEVICE_LABEL_KEYS: Record<string, string> = {
+  "Linux Qurilma": "device_linux",
+  "Android Planshet": "device_android_tablet",
+  "Android Smartfon": "device_android_phone",
+  "Noma’lum qurilma": "device_unknown",
+  "Desktop Kompyuter": "device_desktop",
+  "Brauzer": "browser_generic",
+  "Noma’lum OS": "os_unknown",
+  "Boshqa": "os_other",
+};
+
+export function localizeDeviceLabel(label: string, t: Record<string, string>): string {
+  const key = DEVICE_LABEL_KEYS[label];
+  return key && t[key] ? t[key] : label;
+}

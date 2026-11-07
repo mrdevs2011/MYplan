@@ -15,13 +15,13 @@ test("every counting unit works with the counter, time units do not", () => {
   for (const unit of ["daqiqa", "min", "soat", "минут"]) assert.equal(isCountingUnit(unit), false);
 });
 
-test("the round length makes the plan end on a finished round", () => {
-  assert.equal(suggestTarget(33, 99), 33);
-  assert.equal(suggestTarget(100, 33), 100);
-  assert.equal(suggestTarget(300, 33), 100);
-  assert.equal(suggestTarget(66, 100), 33);
-  assert.equal(suggestTarget(40, 99), 99); // nothing fits: keep the current one
-  assert.equal(suggestTarget(0, 33), 33);
+test("a round length only when the plan is exactly 33, 66 or 99; otherwise endless", () => {
+  assert.equal(suggestTarget(33), 33);
+  assert.equal(suggestTarget(66), 66);
+  assert.equal(suggestTarget(99), 99);
+  assert.equal(suggestTarget(100), 0);
+  assert.equal(suggestTarget(8), 0);
+  assert.equal(suggestTarget(300), 0);
 });
 
 test("open plans rank first and a plan usually done now is picked without asking", () => {

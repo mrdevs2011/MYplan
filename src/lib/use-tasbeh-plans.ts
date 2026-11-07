@@ -114,10 +114,10 @@ export function useTasbehPlans(
     (activityId: string | null, plan: TasbehPlan | null) => {
       setActivity(activityId);
       sinceLink.current = 0;
-      // A round that ends exactly when the plan does; never disturb a round in progress.
-      if (plan && countRef.current === 0) setTarget(suggestTarget(plan.remaining, tasbeh.state.target));
+      // A round only when the plan is exactly 33, 66 or 99 taps; otherwise endless. Never disturb a round in progress.
+      if (countRef.current === 0) setTarget(suggestTarget(plan?.remaining ?? 0));
     },
-    [setActivity, setTarget, tasbeh.state.target],
+    [setActivity, setTarget],
   );
 
   const setPlan = useCallback(
@@ -149,9 +149,10 @@ export function useTasbehPlans(
       flush();
       setActivity(null);
       setAutoChosen(false);
+      if (countRef.current === 0) setTarget(0);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [linked?.done, flush, setActivity]);
+  }, [linked?.done, flush, setActivity, setTarget]);
 
   const remaining = linked && !linked.done ? Math.max(0, linked.remaining - pending) : null;
 

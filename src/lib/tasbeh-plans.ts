@@ -3,7 +3,6 @@
  * chosen from what the person already does (same scoring as the timer), and the round length follows what is left.
  */
 import { confidentPick, rankTasksForTimer, type RankSignals, type TimeTask } from "./time-tasks.ts";
-import { TASBEH_TARGETS } from "./tasbeh.ts";
 import { isMinuteUnit } from "./counter-steps.ts";
 
 export interface TasbehPlan {
@@ -30,11 +29,9 @@ export function isTasbehUnit(unit: string | null | undefined): boolean {
   return TASBEH_UNITS.has((unit ?? "").trim().toLowerCase());
 }
 
-/** The round length that makes the plan end exactly on a finished round; the current one when nothing fits. */
-export function suggestTarget(remaining: number, current: number): number {
-  if (!Number.isInteger(remaining) || remaining <= 0) return current;
-  if (remaining <= 100 && (TASBEH_TARGETS as readonly number[]).includes(remaining)) return remaining;
-  return [100, 33, 99].find((round) => remaining % round === 0) ?? current;
+/** A round length only when the plan is exactly one of the classic counts (33, 66, 99); otherwise endless (0). */
+export function suggestTarget(remaining: number): number {
+  return [33, 66, 99].includes(remaining) ? remaining : 0;
 }
 
 const asTimeTask = (plan: TasbehPlan): TimeTask => ({
