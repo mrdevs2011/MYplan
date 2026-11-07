@@ -19,9 +19,10 @@ interface LifeSelectProps {
   className?: string;
   placeholder?: string;
   id?: string;
+  disabled?: boolean;
 }
 
-export function LifeSelect({ value, options, onChange, ariaLabel, className = "", placeholder, id }: LifeSelectProps) {
+export function LifeSelect({ value, options, onChange, ariaLabel, className = "", placeholder, id, disabled = false }: LifeSelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -85,6 +86,7 @@ export function LifeSelect({ value, options, onChange, ariaLabel, className = ""
         role="combobox"
         className={`life-select-trigger ${open ? "is-open" : ""}`}
         aria-label={ariaLabel}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}

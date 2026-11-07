@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlay, IconPause, IconRepeat, IconPlus, IconClock, IconBell } from "@/components/icons";
+import { LifeSelect } from "@/components/life-select";
 import { playMelody, type MelodyHandle } from "@/lib/timer-melody";
 import { useSyncedState } from "@/lib/use-synced-state";
 import { formatTimeLeft } from "@/lib/counter-steps";
@@ -55,21 +56,18 @@ function TaskLink({ t, tasks, suggestedTaskId, value, disabled, autoChosen, onCh
       : task.title;
   return (
     <div className="time-task-link">
-      <select
-        className="time-task-select"
+      <LifeSelect
+        className="life-select-compact"
         value={value ?? ""}
         disabled={disabled}
-        aria-label={t.clk_task_label}
-        onChange={(event) => onChange(event.target.value || null)}
-      >
-        <option value="">{t.clk_task_none}</option>
-        {tasks.map((task) => (
-          <option key={task.id} value={task.id}>
-            {describe(task)}
-          </option>
-        ))}
-        {value && !current ? <option value={value}>…</option> : null}
-      </select>
+        ariaLabel={t.clk_task_label}
+        onChange={(next) => onChange(next || null)}
+        options={[
+          { value: "", label: t.clk_task_none },
+          ...tasks.map((task) => ({ value: task.id, label: describe(task) })),
+          ...(value && !current ? [{ value, label: "…" }] : []),
+        ]}
+      />
       {suggested && !disabled ? (
         <button type="button" className="time-task-suggest" onClick={() => onChange(suggested.id)}>
           {t.clk_task_suggest}: {suggested.title}

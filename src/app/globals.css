@@ -8327,6 +8327,11 @@ select optgroup {
 [data-theme="light"] .life-select-popover { background: #fff; box-shadow: 0 22px 55px rgba(15, 23, 42, .16); }
 [data-theme="light"] .life-select-option-icon { background: #f1f5f9; }
 .count-unit-select { min-width: 0; }
+.life-select-trigger:disabled { opacity: .6; cursor: default; }
+.life-select-compact .life-select-trigger { min-height: 44px; padding: 6px 14px; border-radius: 9999px; box-shadow: none; }
+.life-select-compact .life-select-current-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.life-select-compact .life-select-current { min-width: 0; }
+.life-select-compact .life-select-current-copy { min-width: 0; }
 .custom-duration-unit-select, .schedule-select { min-width: 0; }
 
 /* ==========================================================================
