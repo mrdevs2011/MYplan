@@ -674,6 +674,7 @@ export default function Home() {
   const [newMinStepInput, setNewMinStepInput] = useState("");
   const [newMinStepUnit, setNewMinStepUnit] = useState<"min" | "sec">("min");
   const [newMinStepError, setNewMinStepError] = useState("");
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [newStepInput, setNewStepInput] = useState("");
   const [newStepError, setNewStepError] = useState("");
 
@@ -2398,6 +2399,7 @@ export default function Home() {
 
   const openCreateModal = useCallback(() => {
     setEditingActivity(null);
+    setShowMoreOptions(false);
     const draft = readPlanDraft(null);
     if (draft) {
       applyPlanForm(draft);
@@ -2436,6 +2438,7 @@ export default function Home() {
       ...(readPlanDraft(act.id) ?? {}),
     });
     setEditingActivity(act);
+    setShowMoreOptions(true);
     setShowCreateModal(true);
   }, [applyPlanForm, readPlanDraft]);
 
@@ -4357,17 +4360,6 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="form-group">
-                <label htmlFor="modal-task-desc">{t.label_notes}</label>
-                <input
-                  id="modal-task-desc"
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder={t.placeholder_notes}
-                  maxLength={250}
-                />
-              </div>
-
               {/* Kunning vaqt zonasi (Time of Day) */}
               <div className="form-group time-of-day-picker-group">
                 <div className="field-label-row">
@@ -4465,6 +4457,30 @@ export default function Home() {
                     <span>{t.time_opt_custom}</span>
                   </button>
                 </div>
+              </div>
+
+              <button
+                type="button"
+                className="modal-more-toggle"
+                aria-expanded={showMoreOptions || isCustomDurationInvalid}
+                onClick={() => setShowMoreOptions((open) => !open)}
+              >
+                <span className="modal-more-title">{showMoreOptions || isCustomDurationInvalid ? t.fewer_options : t.more_options}</span>
+                {!(showMoreOptions || isCustomDurationInvalid) && <span className="modal-more-hint">{t.more_options_hint}</span>}
+                <IconChevronRight className={`icon-xs modal-more-chevron ${showMoreOptions || isCustomDurationInvalid ? "is-open" : ""}`} />
+              </button>
+
+              {(showMoreOptions || isCustomDurationInvalid) && (
+              <div className="modal-more-section">
+              <div className="form-group">
+                <label htmlFor="modal-task-desc">{t.label_notes}</label>
+                <input
+                  id="modal-task-desc"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder={t.placeholder_notes}
+                  maxLength={250}
+                />
               </div>
 
               {/* Eslatma vaqti (Reminder time) */}
@@ -4670,6 +4686,8 @@ export default function Home() {
                   ]}
                 />
               </div>
+              </div>
+              )}
             </div>
 
             {message && (
@@ -5503,12 +5521,14 @@ export default function Home() {
                       <span className="streak-number">{streakCount}</span>
                       <span className="streak-days-text">{t.streak_days}</span>
                     </div>
+                    {(streakCount > 0 || bestStreak > 0) && (
                     <div className="streak-shield-badge">
                       <IconAward className="icon-xs" />
                       <span>{t.streak_shield_label}: <strong>{t.streak_shield_active}</strong></span>
                       <span className="dot-separator">•</span>
                       <span>{t.momentum_index_label}: <strong>{momentumScore}%</strong></span>
                     </div>
+                    )}
                   </div>
                 </div>
 
@@ -5682,12 +5702,25 @@ export default function Home() {
                     <p>{t.loading_workspace || "Ma’lumotlar yuklanmoqda…"}</p>
                   </div>
                 ) : activeActivities.length === 0 ? (
-                  <div className="empty-state-box">
+                  <div className="empty-state-box welcome-card">
                     <div className="empty-icon-wrap">
-                      <IconCalendar className="icon-lg" />
+                      <IconSparkles className="icon-lg" />
                     </div>
-                    <h3>{t.no_tasks_today}</h3>
-                    <p>{t.no_tasks_sub}</p>
+                    <h3>{t.welcome_title}</h3>
+                    <p>{t.welcome_sub}</p>
+                    <ol className="welcome-steps">
+                      <li><span className="welcome-step-num">1</span><span>{t.welcome_step1}</span></li>
+                      <li><span className="welcome-step-num">2</span><span>{t.welcome_step2}</span></li>
+                      <li><span className="welcome-step-num">3</span><span>{t.welcome_step3}</span></li>
+                    </ol>
+                    <div className="welcome-actions">
+                      <button type="button" className="btn-modal-submit" onClick={openCreateModal}>
+                        <IconPlus className="icon-sm" /> {t.btn_new_plan}
+                      </button>
+                      <button type="button" className="btn-modal-cancel" onClick={() => setShowPresetModal(true)}>
+                        {t.welcome_presets}
+                      </button>
+                    </div>
                   </div>
                 ) : displayedActivities.length === 0 ? (
                   hideDone && hiddenDoneIds.size > 0 && activeTimeFilter === "all" ? (
