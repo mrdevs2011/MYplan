@@ -2526,7 +2526,7 @@ export default function Home() {
   useEffect(() => {
     if (activeTab !== "notifications") return;
     const toTop = () => {
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" }); // the page scrolls smoothly by default: jump, don't glide
       for (let el = document.querySelector<HTMLElement>(".notifications-view")?.parentElement ?? null; el; el = el.parentElement) {
         if (el.scrollTop > 0) el.scrollTop = 0;
       }
