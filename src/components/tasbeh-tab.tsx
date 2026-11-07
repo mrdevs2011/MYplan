@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { IconBeads, IconRepeat, IconClose, IconUndo } from "@/components/icons";
 import { TASBEH_TARGETS } from "@/lib/tasbeh";
 import { LifeSelect } from "@/components/life-select";
@@ -112,6 +112,28 @@ export function TasbehFloat({ t, tasbeh, open, onOpenChange }: TasbehProps & { o
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
+
+  // The panel opens upward from the button: wherever the button was dragged, the open panel is kept fully on screen
+  // (also when its content grows, e.g. a plan appears, or the window shrinks).
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel) return;
+    const MARGIN = 8;
+    const fit = () => {
+      const rect = panel.getBoundingClientRect();
+      const dx = rect.left < MARGIN ? MARGIN - rect.left : rect.right > window.innerWidth - MARGIN ? window.innerWidth - MARGIN - rect.right : 0;
+      const dy = rect.top < MARGIN ? MARGIN - rect.top : rect.bottom > window.innerHeight - MARGIN ? window.innerHeight - MARGIN - rect.bottom : 0;
+      if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) setOffset((o) => ({ x: o.x + dx, y: o.y + dy }));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(panel);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [open]);
 
   // A smaller window must not strand the button off-screen.
   useEffect(() => {
